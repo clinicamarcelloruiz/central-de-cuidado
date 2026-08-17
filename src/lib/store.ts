@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Db, FollowupKey, FollowupStatus, Patient } from '@/types/patient'
+import type {
+  ConsultationDraft,
+  Db,
+  FollowupKey,
+  FollowupStatus,
+  Patient,
+} from '@/types/patient'
 import {
   archiveAllPatients,
   archivePatient,
   changeFollowup,
+  createConsultation,
   createPatient,
   editPatient,
   ensureClinic,
   fetchDb,
   importPatients,
+  listConsultations,
   saveTemplates,
 } from '@/lib/repository'
 
@@ -107,6 +115,20 @@ export function useDb() {
     }))
   }
 
+  async function getConsultations(patientId: string) {
+    return run(() => listConsultations(requireClinic(), patientId))
+  }
+
+  async function addConsultation(patientId: string, draft: ConsultationDraft) {
+    const result = await run(() => createConsultation(requireClinic(), patientId, draft))
+    setDb((current) => ({
+      ...current,
+      patients: current.patients.map((patient) =>
+        patient.id === patientId ? result.patient : patient,
+      ),
+    }))
+  }
+
   async function setFollowup(id: string, key: FollowupKey, status: FollowupStatus) {
     const followup = await run(() => changeFollowup(requireClinic(), id, key, status))
     setDb((current) => ({
@@ -149,9 +171,12 @@ export function useDb() {
     addPatient,
     updatePatient,
     removePatient,
+    getConsultations,
+    addConsultation,
     setFollowup,
     setTemplates,
     importDb,
     clearAll,
   }
 }
+
