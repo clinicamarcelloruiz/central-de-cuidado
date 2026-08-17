@@ -111,11 +111,107 @@ export type Database = {
         }
         Relationships: []
       }
+      consultations: {
+        Row: {
+          allergies: string
+          archived_at: string | null
+          assessment: string
+          chief_complaint: string
+          cid: string
+          clinic_id: string
+          clinical_history: string
+          consultation_date: string
+          created_at: string
+          created_by: string | null
+          current_medications: string
+          encounter_type: string
+          family_history: string
+          height_cm: number | null
+          id: string
+          notes: string
+          patient_id: string
+          personal_history: string
+          physical_exam: string
+          plan: string
+          prescription: string
+          return_plan: string
+          unit: string
+          updated_at: string
+          updated_by: string | null
+          weight_kg: number | null
+        }
+        Insert: {
+          allergies?: string
+          archived_at?: string | null
+          assessment?: string
+          chief_complaint?: string
+          cid?: string
+          clinic_id: string
+          clinical_history?: string
+          consultation_date: string
+          created_at?: string
+          created_by?: string | null
+          current_medications?: string
+          encounter_type?: string
+          family_history?: string
+          height_cm?: number | null
+          id?: string
+          notes?: string
+          patient_id: string
+          personal_history?: string
+          physical_exam?: string
+          plan?: string
+          prescription?: string
+          return_plan?: string
+          unit?: string
+          updated_at?: string
+          updated_by?: string | null
+          weight_kg?: number | null
+        }
+        Update: {
+          allergies?: string
+          archived_at?: string | null
+          assessment?: string
+          chief_complaint?: string
+          cid?: string
+          clinic_id?: string
+          clinical_history?: string
+          consultation_date?: string
+          created_at?: string
+          created_by?: string | null
+          current_medications?: string
+          encounter_type?: string
+          family_history?: string
+          height_cm?: number | null
+          id?: string
+          notes?: string
+          patient_id?: string
+          personal_history?: string
+          physical_exam?: string
+          plan?: string
+          prescription?: string
+          return_plan?: string
+          unit?: string
+          updated_at?: string
+          updated_by?: string | null
+          weight_kg?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consultations_patient_clinic_fk"
+            columns: ["patient_id", "clinic_id"]
+            isOneToOne: false
+            referencedRelation: "patients"
+            referencedColumns: ["id", "clinic_id"]
+          },
+        ]
+      }
       followups: {
         Row: {
           archived_at: string | null
           clinic_id: string
           completed_at: string | null
+          consultation_id: string
           created_at: string
           created_by: string | null
           due_date: string
@@ -131,6 +227,7 @@ export type Database = {
           archived_at?: string | null
           clinic_id: string
           completed_at?: string | null
+          consultation_id: string
           created_at?: string
           created_by?: string | null
           due_date: string
@@ -146,6 +243,7 @@ export type Database = {
           archived_at?: string | null
           clinic_id?: string
           completed_at?: string | null
+          consultation_id?: string
           created_at?: string
           created_by?: string | null
           due_date?: string
@@ -158,6 +256,13 @@ export type Database = {
           updated_by?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "followups_consultation_patient_clinic_fk"
+            columns: ["consultation_id", "patient_id", "clinic_id"]
+            isOneToOne: false
+            referencedRelation: "consultations"
+            referencedColumns: ["id", "patient_id", "clinic_id"]
+          },
           {
             foreignKeyName: "followups_patient_clinic_fk"
             columns: ["patient_id", "clinic_id"]
@@ -416,4 +521,5 @@ export const Constants = {
     },
   },
 } as const
+
 
