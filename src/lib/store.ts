@@ -15,9 +15,11 @@ import {
   editPatient,
   ensureClinic,
   fetchDb,
+  getCurrentMembership,
   importPatients,
   listConsultations,
   saveTemplates,
+  type ClinicRole,
 } from '@/lib/repository'
 
 export const DEFAULT_TEMPLATES: Record<FollowupKey, string> = {
@@ -46,6 +48,7 @@ function validImport(data: unknown): data is Db {
 export function useDb() {
   const [db, setDb] = useState<Db>(EMPTY_DB)
   const [clinicId, setClinicId] = useState<string | null>(null)
+  const [role, setRole] = useState<ClinicRole | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -56,10 +59,12 @@ export function useDb() {
     setLoading(true)
     setError('')
     try {
-      const id = clinicId ?? (await ensureClinic())
+      const membership = clinicId ? null : await getCurrentMembership()
+      const id = clinicId ?? membership?.clinicId ?? (await ensureClinic())
       const next = await fetchDb(id, DEFAULT_TEMPLATES)
       if (loadSequence.current !== sequence) return
       setClinicId(id)
+      if (membership) setRole(membership.role)
       setDb(next)
     } catch (cause) {
       if (loadSequence.current === sequence) setError(errorMessage(cause))
@@ -165,6 +170,7 @@ export function useDb() {
 
   return {
     db,
+    role,
     loading,
     busy,
     error,
