@@ -1,10 +1,19 @@
 import { supabase } from '@/lib/supabase'
-import type { Db, FollowupKey, FollowupState, FollowupStatus, Patient } from '@/types/patient'
+import type {
+  Consultation,
+  ConsultationDraft,
+  Db,
+  FollowupKey,
+  FollowupState,
+  FollowupStatus,
+  Patient,
+} from '@/types/patient'
 import type { PatientDraft } from '@/lib/store'
 import type { Database } from '@/types/database'
 
 type PatientInsert = Database['public']['Tables']['patients']['Insert']
 type PatientUpdate = Database['public']['Tables']['patients']['Update']
+type ConsultationInsert = Database['public']['Tables']['consultations']['Insert']
 
 type PatientRow = {
   id: string
@@ -34,6 +43,31 @@ type FollowupRow = {
 type SettingsRow = {
   template_d30: string
   template_m90: string
+}
+
+type ConsultationRow = {
+  id: string
+  clinic_id: string
+  patient_id: string
+  consultation_date: string
+  encounter_type: 'initial' | 'return' | 'telemedicine' | 'other'
+  unit: string
+  weight_kg: number | null
+  height_cm: number | null
+  chief_complaint: string
+  clinical_history: string
+  personal_history: string
+  family_history: string
+  allergies: string
+  current_medications: string
+  physical_exam: string
+  assessment: string
+  cid: string
+  plan: string
+  prescription: string
+  return_plan: string
+  notes: string
+  created_at: string
 }
 
 const FOLLOWUP_KEYS: FollowupKey[] = ['d30', 'm90']
@@ -95,6 +129,68 @@ function mapPatient(row: PatientRow, followupRows: FollowupRow[]): Patient {
   }
 }
 
+function mapConsultation(row: ConsultationRow): Consultation {
+  return {
+    id: row.id,
+    patientId: row.patient_id,
+    data: row.consultation_date,
+    tipo: row.encounter_type,
+    unidade: row.unit,
+    peso: row.weight_kg === null ? '' : String(row.weight_kg),
+    altura: row.height_cm === null ? '' : String(row.height_cm),
+    queixa: row.chief_complaint,
+    historiaEvolucao: row.clinical_history,
+    antecedentesPessoais: row.personal_history,
+    antecedentesFamiliares: row.family_history,
+    alergias: row.allergies,
+    medicamentos: row.current_medications,
+    exameFisico: row.physical_exam,
+    avaliacao: row.assessment,
+    cid: row.cid,
+    conduta: row.plan,
+    prescricao: row.prescription,
+    retorno: row.return_plan,
+    observacoes: row.notes,
+    criadoEm: row.created_at,
+  }
+}
+
+function decimalOrNull(value: string) {
+  const normalized = value.trim().replace(',', '.')
+  if (!normalized) return null
+  const parsed = Number.parseFloat(normalized)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function consultationPayload(
+  clinicId: string,
+  patientId: string,
+  draft: ConsultationDraft,
+): ConsultationInsert {
+  return {
+    clinic_id: clinicId,
+    patient_id: patientId,
+    consultation_date: draft.data,
+    encounter_type: draft.tipo,
+    unit: draft.unidade.trim(),
+    weight_kg: decimalOrNull(draft.peso),
+    height_cm: decimalOrNull(draft.altura),
+    chief_complaint: draft.queixa.trim(),
+    clinical_history: draft.historiaEvolucao.trim(),
+    personal_history: draft.antecedentesPessoais.trim(),
+    family_history: draft.antecedentesFamiliares.trim(),
+    allergies: draft.alergias.trim(),
+    current_medications: draft.medicamentos.trim(),
+    physical_exam: draft.exameFisico.trim(),
+    assessment: draft.avaliacao.trim(),
+    cid: draft.cid.trim(),
+    plan: draft.conduta.trim(),
+    prescription: draft.prescricao.trim(),
+    return_plan: draft.retorno.trim(),
+    notes: draft.observacoes.trim(),
+  }
+}
+
 function patientCreatePayload(draft: PatientDraft): Omit<PatientInsert, 'clinic_id'> {
   return {
     name: draft.nome.trim(),
@@ -135,9 +231,24 @@ async function followupsForPatient(clinicId: string, patientId: string) {
     .select('patient_id,followup_key,status,opened_at')
     .eq('clinic_id', clinicId)
     .eq('patient_id', patientId)
+    .is('archived_at', null)
 
   if (error) fail(error)
   return (data ?? []) as FollowupRow[]
+}
+
+async function patientById(clinicId: string, patientId: string) {
+  const { data, error } = await supabase
+    .from('patients')
+    .select('*')
+    .eq('clinic_id', clinicId)
+    .eq('id', patientId)
+    .is('archived_at', null)
+    .single()
+
+  if (error) fail(error)
+  const followups = await followupsForPatient(clinicId, patientId)
+  return mapPatient(data as PatientRow, followups)
 }
 
 export async function ensureClinic() {
@@ -175,7 +286,8 @@ export async function fetchDb(
     supabase
       .from('followups')
       .select('patient_id,followup_key,status,opened_at')
-      .eq('clinic_id', clinicId),
+      .eq('clinic_id', clinicId)
+      .is('archived_at', null),
     supabase
       .from('clinic_settings')
       .select('template_d30,template_m90')
@@ -217,6 +329,38 @@ export async function createPatient(clinicId: string, draft: PatientDraft) {
   if (error) fail(error)
   const followups = await followupsForPatient(clinicId, data.id)
   return mapPatient(data as PatientRow, followups)
+}
+
+export async function listConsultations(clinicId: string, patientId: string) {
+  const { data, error } = await supabase
+    .from('consultations')
+    .select('*')
+    .eq('clinic_id', clinicId)
+    .eq('patient_id', patientId)
+    .is('archived_at', null)
+    .order('consultation_date', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (error) fail(error)
+  return ((data ?? []) as ConsultationRow[]).map(mapConsultation)
+}
+
+export async function createConsultation(
+  clinicId: string,
+  patientId: string,
+  draft: ConsultationDraft,
+) {
+  const { data, error } = await supabase
+    .from('consultations')
+    .insert(consultationPayload(clinicId, patientId, draft))
+    .select('*')
+    .single()
+
+  if (error) fail(error)
+  return {
+    consultation: mapConsultation(data as ConsultationRow),
+    patient: await patientById(clinicId, patientId),
+  }
 }
 
 export async function editPatient(clinicId: string, id: string, patch: Partial<Patient>) {
@@ -316,3 +460,4 @@ export async function importPatients(clinicId: string, data: Db) {
     }
   }
 }
+
