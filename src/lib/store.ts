@@ -12,6 +12,7 @@ import {
   changeFollowup,
   createConsultation,
   createPatient,
+  editConsultation,
   editPatient,
   ensureClinic,
   fetchDb,
@@ -135,6 +136,16 @@ export function useDb() {
     }))
   }
 
+  async function updateConsultation(patientId: string, consultationId: string, draft: ConsultationDraft) {
+    const result = await run(() => editConsultation(requireClinic(), patientId, consultationId, draft))
+    setDb((current) => ({
+      ...current,
+      patients: current.patients.map((patient) =>
+        patient.id === patientId ? result.patient : patient,
+      ),
+    }))
+  }
+
   async function setFollowup(id: string, key: FollowupKey, status: FollowupStatus) {
     const followup = await run(() => changeFollowup(requireClinic(), id, key, status))
     setDb((current) => ({
@@ -180,6 +191,7 @@ export function useDb() {
     removePatient,
     getConsultations,
     addConsultation,
+    updateConsultation,
     setFollowup,
     setTemplates,
     importDb,
