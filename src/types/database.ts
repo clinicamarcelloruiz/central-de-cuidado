@@ -14,6 +14,50 @@ export type Database = {
   }
   public: {
     Tables: {
+      access_requests: {
+        Row: {
+          clinic_id: string
+          id: string
+          requested_at: string
+          requested_email: string
+          requested_name: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          clinic_id: string
+          id?: string
+          requested_at?: string
+          requested_email?: string
+          requested_name?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          clinic_id?: string
+          id?: string
+          requested_at?: string
+          requested_email?: string
+          requested_name?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "access_requests_clinic_id_fkey"
+            columns: ["clinic_id"]
+            isOneToOne: false
+            referencedRelation: "clinics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clinic_memberships: {
         Row: {
           clinic_id: string
@@ -375,9 +419,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      approve_access_request: {
+        Args: {
+          assigned_role?: Database["public"]["Enums"]["clinic_role"]
+          request_id: string
+        }
+        Returns: undefined
+      }
       bootstrap_current_user_clinic: {
         Args: { clinic_name: string }
         Returns: string
+      }
+      reject_access_request: {
+        Args: { request_id: string }
+        Returns: undefined
       }
     }
     Enums: {
@@ -521,5 +576,4 @@ export const Constants = {
     },
   },
 } as const
-
 
