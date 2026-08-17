@@ -16,15 +16,17 @@ import {
   UsersRound,
 } from 'lucide-react'
 import { useDb } from '@/lib/store'
+import { PENDING_ACCESS_MESSAGE } from '@/lib/repository'
 import { dueCount } from '@/lib/followup'
 import Dashboard from '@/sections/Dashboard'
 import Patients from '@/sections/Patients'
 import Followups from '@/sections/Followups'
 import Settings from '@/sections/Settings'
+import AccessAdmin from '@/sections/AccessAdmin'
 import logo from '@/assets/logo.webp'
 import { useAuth } from '@/auth/AuthProvider'
 
-type Tab = 'dashboard' | 'followups' | 'pacientes' | 'config'
+type Tab = 'dashboard' | 'followups' | 'pacientes' | 'config' | 'admin'
 type Icon = ComponentType<{ className?: string; strokeWidth?: number }>
 
 const TABS: { key: Tab; label: string; shortLabel: string; icon: Icon }[] = [
@@ -32,6 +34,7 @@ const TABS: { key: Tab; label: string; shortLabel: string; icon: Icon }[] = [
   { key: 'followups', label: 'Acompanhamentos', shortLabel: 'Follow-ups', icon: MessageCircleHeart },
   { key: 'pacientes', label: 'Pacientes', shortLabel: 'Pacientes', icon: UsersRound },
   { key: 'config', label: 'Preferências', shortLabel: 'Ajustes', icon: Settings2 },
+  { key: 'admin', label: 'Acessos da equipe', shortLabel: 'Acessos', icon: ShieldCheck },
 ]
 
 const PAGE_META: Record<Tab, { eyebrow: string; title: string; subtitle: string }> = {
@@ -55,6 +58,11 @@ const PAGE_META: Record<Tab, { eyebrow: string; title: string; subtitle: string 
     title: 'Preferências',
     subtitle: 'Mensagens, segurança dos dados e rotina da equipe.',
   },
+  admin: {
+    eyebrow: 'Administração segura',
+    title: 'Acessos da equipe',
+    subtitle: 'Aprove novos cadastros antes de liberar os dados da clínica.',
+  },
 }
 
 function formatToday() {
@@ -70,6 +78,7 @@ export default function Home() {
   const { user, signOut } = useAuth()
   const {
     db,
+    role,
     loading,
     error,
     retry,
@@ -87,6 +96,7 @@ export default function Home() {
   const [newPatientSignal, setNewPatientSignal] = useState(0)
   const pendentes = dueCount(db.patients)
   const meta = PAGE_META[tab]
+  const tabs = role === 'owner' ? TABS : TABS.filter((item) => item.key !== 'admin')
 
   function createPatient() {
     setTab('pacientes')
@@ -109,21 +119,28 @@ export default function Home() {
   }
 
   if (error) {
+    const pendingApproval = error === PENDING_ACCESS_MESSAGE
     return (
       <main className="flex min-h-dvh items-center justify-center bg-[#f7f5f1] px-4 text-[#081b2c]">
         <section className="surface-card w-full max-w-md rounded-[28px] p-7 text-center">
           <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-500">
             <ShieldCheck className="h-5 w-5" />
           </span>
-          <h1 className="mt-4 text-lg font-extrabold">Não foi possível carregar os dados</h1>
-          <p className="mt-2 text-xs leading-relaxed text-slate-500">{error}</p>
+          <h1 className="mt-4 text-lg font-extrabold">
+            {pendingApproval ? 'Aguardando aprovação' : 'Não foi possível carregar os dados'}
+          </h1>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            {pendingApproval
+              ? 'Seu pedido foi registrado. Assim que o administrador aprovar, entre novamente para acessar a Central de Cuidado.'
+              : error}
+          </p>
           <button
             type="button"
-            onClick={() => void retry()}
+            onClick={() => (pendingApproval ? void signOut() : void retry())}
             className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-[#081b2c] px-5 py-3 text-xs font-extrabold text-white"
           >
-            <RefreshCw className="h-4 w-4" />
-            Tentar novamente
+            {pendingApproval ? <LogOut className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
+            {pendingApproval ? 'Voltar para entrar' : 'Tentar novamente'}
           </button>
         </section>
       </main>
@@ -148,7 +165,7 @@ export default function Home() {
 
           <nav className="mt-6 flex-1 space-y-1.5 px-4" aria-label="Navegação principal">
             <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">Menu</p>
-            {TABS.map((item) => {
+            {tabs.map((item) => {
               const active = tab === item.key
               const Icon = item.icon
               return (
@@ -292,6 +309,7 @@ export default function Home() {
             {tab === 'config' && (
               <Settings db={db} setTemplates={setTemplates} importDb={importDb} clearAll={clearAll} />
             )}
+            {tab === 'admin' && role === 'owner' && <AccessAdmin />}
           </div>
         </div>
       </main>
@@ -301,7 +319,7 @@ export default function Home() {
         style={{ paddingBottom: 'max(.375rem, env(safe-area-inset-bottom))' }}
         aria-label="Navegação móvel"
       >
-        {TABS.map((item) => {
+        {tabs.map((item) => {
           const active = tab === item.key
           const Icon = item.icon
           return (
