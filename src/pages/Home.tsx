@@ -87,6 +87,7 @@ export default function Home() {
     removePatient,
     getConsultations,
     addConsultation,
+    updateConsultation,
     setFollowup,
     setTemplates,
     importDb,
@@ -303,6 +304,7 @@ export default function Home() {
                 removePatient={removePatient}
                 listConsultations={getConsultations}
                 addConsultation={addConsultation}
+                updateConsultation={updateConsultation}
                 openCreateSignal={newPatientSignal}
               />
             )}
