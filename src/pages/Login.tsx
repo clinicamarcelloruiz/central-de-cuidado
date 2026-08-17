@@ -9,6 +9,7 @@ import {
   Mail,
   ShieldCheck,
   Sparkles,
+  UserRoundPlus,
 } from 'lucide-react'
 import { useAuth } from '@/auth/AuthProvider'
 import logo from '@/assets/logo.webp'
@@ -17,27 +18,50 @@ const inputClass =
   'w-full rounded-2xl border border-[#081b2c]/10 bg-[#fafaf8] py-3.5 pl-11 pr-4 text-sm font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#dc8e5f] focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10 disabled:cursor-not-allowed disabled:opacity-60'
 
 export default function Login() {
-  const { signIn, authError, configurationError, clearAuthError } = useAuth()
+  const { signIn, requestAccess, authError, configurationError, clearAuthError } = useAuth()
+  const [mode, setMode] = useState<'login' | 'request'>('login')
+  const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [requestSent, setRequestSent] = useState(false)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     clearAuthError()
 
-    if (!email.trim() || !password) {
-      setValidationError('Preencha seu e-mail e sua senha.')
+    if (!email.trim() || !password || (mode === 'request' && !fullName.trim())) {
+      setValidationError('Preencha todos os campos obrigatórios.')
+      return
+    }
+
+    if (mode === 'request' && password.length < 8) {
+      setValidationError('Crie uma senha com pelo menos 8 caracteres.')
+      return
+    }
+
+    if (mode === 'request' && password !== confirmPassword) {
+      setValidationError('As senhas não conferem.')
       return
     }
 
     setValidationError(null)
     setSubmitting(true)
     try {
-      const result = await signIn(email, password)
-      if (!result.error) setPassword('')
+      if (mode === 'request') {
+        const result = await requestAccess(fullName, email, password)
+        if (!result.error) {
+          setRequestSent(true)
+          setPassword('')
+          setConfirmPassword('')
+        }
+      } else {
+        const result = await signIn(email, password)
+        if (!result.error) setPassword('')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -45,6 +69,15 @@ export default function Login() {
 
   const visibleError = configurationError ?? validationError ?? authError
   const disabled = submitting || Boolean(configurationError)
+
+  function switchMode(nextMode: 'login' | 'request') {
+    setMode(nextMode)
+    setValidationError(null)
+    clearAuthError()
+    setRequestSent(false)
+    setPassword('')
+    setConfirmPassword('')
+  }
 
   return (
     <main className="relative min-h-dvh overflow-hidden bg-[#f7f5f1] text-[#081b2c]">
@@ -114,22 +147,56 @@ export default function Login() {
             <div className="surface-card rounded-[30px] p-6 shadow-[0_24px_70px_rgba(8,27,44,.11)] sm:p-8">
               <div className="flex items-start gap-3">
                 <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] bg-[#f5e7dd] text-[#c87543]">
-                  <LockKeyhole className="h-5 w-5" />
+                  {mode === 'login' ? <LockKeyhole className="h-5 w-5" /> : <UserRoundPlus className="h-5 w-5" />}
                 </span>
                 <div>
                   <p className="text-[9px] font-extrabold uppercase tracking-[0.17em] text-[#c87543]">
-                    Área restrita
+                    {mode === 'login' ? 'Área restrita' : 'Solicitação de acesso'}
                   </p>
                   <h2 className="mt-1.5 text-2xl font-extrabold tracking-[-0.04em] text-[#081b2c]">
-                    Acesse sua conta
+                    {mode === 'login' ? 'Acesse sua conta' : 'Peça seu acesso'}
                   </h2>
                   <p className="mt-2 text-xs leading-relaxed text-slate-400">
-                    Entre com as credenciais fornecidas pelo administrador da clínica.
+                    {mode === 'login'
+                      ? 'Entre com suas credenciais para acessar os dados da clínica.'
+                      : 'Seu cadastro só terá acesso depois da aprovação do administrador.'}
                   </p>
                 </div>
               </div>
 
+              {requestSent ? (
+                <div className="mt-7 rounded-2xl border border-[#9fc2b8]/40 bg-[#edf7f3] p-5 text-center">
+                  <ShieldCheck className="mx-auto h-7 w-7 text-[#4d8d7c]" />
+                  <h3 className="mt-3 text-sm font-extrabold text-[#173b35]">Solicitação enviada</h3>
+                  <p className="mt-2 text-xs leading-relaxed text-[#4d6e67]">
+                    O administrador da clínica vai revisar o pedido. Confirme seu e-mail, caso receba uma mensagem, e entre somente após a aprovação.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => switchMode('login')}
+                    className="mt-4 text-xs font-extrabold text-[#1a5f50] underline underline-offset-4"
+                  >
+                    Voltar para entrar
+                  </button>
+                </div>
+              ) : (
               <form className="mt-7 space-y-4" onSubmit={handleSubmit} noValidate>
+                {mode === 'request' && (
+                  <label className="block">
+                    <span className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-slate-500">Seu nome</span>
+                    <div className="relative mt-2">
+                      <UserRoundPlus className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input
+                        autoComplete="name"
+                        className={inputClass}
+                        placeholder="Nome completo"
+                        value={fullName}
+                        disabled={disabled}
+                        onChange={(event) => setFullName(event.target.value)}
+                      />
+                    </div>
+                  </label>
+                )}
                 <label className="block">
                   <span className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-slate-500">
                     E-mail
@@ -161,7 +228,7 @@ export default function Login() {
                     <LockKeyhole className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <input
                       type={showPassword ? 'text' : 'password'}
-                      autoComplete="current-password"
+                      autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                       className={`${inputClass} pr-12`}
                       placeholder="Sua senha"
                       value={password}
@@ -184,6 +251,24 @@ export default function Login() {
                   </div>
                 </label>
 
+                {mode === 'request' && (
+                  <label className="block">
+                    <span className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-slate-500">Confirmar senha</span>
+                    <div className="relative mt-2">
+                      <LockKeyhole className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        className={inputClass}
+                        placeholder="Repita sua senha"
+                        value={confirmPassword}
+                        disabled={disabled}
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                      />
+                    </div>
+                  </label>
+                )}
+
                 {visibleError && (
                   <div
                     role="alert"
@@ -202,21 +287,30 @@ export default function Login() {
                   {submitting ? (
                     <>
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/25 border-t-white" />
-                      Entrando...
+                      {mode === 'login' ? 'Entrando...' : 'Enviando pedido...'}
                     </>
                   ) : (
                     <>
-                      Entrar com segurança
+                      {mode === 'login' ? 'Entrar com segurança' : 'Solicitar aprovação'}
                       <ArrowRight className="h-4 w-4 text-[#e6a47b] transition-transform group-hover:translate-x-0.5" />
                     </>
                   )}
                 </button>
               </form>
+              )}
 
-              <div className="mt-6 flex items-center gap-2 border-t border-[#081b2c]/[0.06] pt-5 text-[10px] leading-relaxed text-slate-400">
+              {!requestSent && <div className="mt-6 flex items-center gap-2 border-t border-[#081b2c]/[0.06] pt-5 text-[10px] leading-relaxed text-slate-400">
                 <ShieldCheck className="h-4 w-4 shrink-0 text-[#6f9d91]" />
-                <span>Não possui acesso? Solicite suas credenciais ao administrador.</span>
-              </div>
+                {mode === 'login' ? (
+                  <button type="button" onClick={() => switchMode('request')} className="text-left font-semibold text-[#416f65] underline underline-offset-4">
+                    Não possui acesso? Solicite uma conta para aprovação.
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => switchMode('login')} className="text-left font-semibold text-[#416f65] underline underline-offset-4">
+                    Já possui acesso aprovado? Entre por aqui.
+                  </button>
+                )}
+              </div>}
             </div>
           </div>
         </section>
@@ -224,3 +318,4 @@ export default function Login() {
     </main>
   )
 }
+
