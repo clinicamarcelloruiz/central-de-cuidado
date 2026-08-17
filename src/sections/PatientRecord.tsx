@@ -54,6 +54,7 @@ interface PatientRecordProps {
   onOpenChange: (open: boolean) => void
   listConsultations: (patientId: string) => Promise<Consultation[]>
   addConsultation: (patientId: string, draft: ConsultationDraft) => Promise<void>
+  updateConsultation: (patientId: string, consultationId: string, draft: ConsultationDraft) => Promise<void>
   onEditRegistration: (patient: Patient) => void
 }
 
@@ -163,6 +164,29 @@ function emptyConsultation(patient: Patient | null): ConsultationDraft {
     prescricao: '',
     retorno: '',
     observacoes: '',
+  }
+}
+
+function consultationToDraft(consultation: Consultation): ConsultationDraft {
+  return {
+    data: consultation.data,
+    tipo: consultation.tipo,
+    unidade: consultation.unidade,
+    peso: consultation.peso,
+    altura: consultation.altura,
+    queixa: consultation.queixa,
+    historiaEvolucao: consultation.historiaEvolucao,
+    antecedentesPessoais: consultation.antecedentesPessoais,
+    antecedentesFamiliares: consultation.antecedentesFamiliares,
+    alergias: consultation.alergias,
+    medicamentos: consultation.medicamentos,
+    exameFisico: consultation.exameFisico,
+    avaliacao: consultation.avaliacao,
+    cid: consultation.cid,
+    conduta: consultation.conduta,
+    prescricao: consultation.prescricao,
+    retorno: consultation.retorno,
+    observacoes: consultation.observacoes,
   }
 }
 
@@ -349,7 +373,13 @@ function ConsultationTypeIcon({ type }: { type: ConsultationType }) {
   return <Stethoscope className="h-4 w-4" />
 }
 
-function ConsultationCard({ consultation }: { consultation: Consultation }) {
+function ConsultationCard({
+  consultation,
+  onEdit,
+}: {
+  consultation: Consultation
+  onEdit: (consultation: Consultation) => void
+}) {
   const summary = consultation.avaliacao || consultation.queixa || consultation.historiaEvolucao || consultation.conduta
 
   return (
@@ -399,6 +429,15 @@ function ConsultationCard({ consultation }: { consultation: Consultation }) {
       </AccordionTrigger>
 
       <AccordionContent className="px-4 pb-4 sm:px-5 sm:pb-5">
+        <div className="flex justify-end border-t border-[#081b2c]/[0.06] pt-3">
+          <button
+            type="button"
+            onClick={() => onEdit(consultation)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-[#c87543]/20 bg-[#fdf4ef] px-3 py-2 text-[10px] font-extrabold text-[#b96535] transition hover:bg-[#f8e6dc]"
+          >
+            <Edit3 className="h-3.5 w-3.5" /> Editar consulta
+          </button>
+        </div>
         <div className="grid gap-2 border-t border-[#081b2c]/[0.06] pt-4 sm:grid-cols-2">
           <Detail label="Queixa principal" value={consultation.queixa} />
           <Detail label="História / evolução" value={consultation.historiaEvolucao} />
@@ -425,11 +464,13 @@ export default function PatientRecord({
   onOpenChange,
   listConsultations,
   addConsultation,
+  updateConsultation,
   onEditRegistration,
 }: PatientRecordProps) {
   const [mode, setMode] = useState<'history' | 'form'>('history')
   const [consultations, setConsultations] = useState<Consultation[]>([])
   const [form, setForm] = useState<ConsultationDraft>(() => emptyConsultation(patient))
+  const [editingConsultationId, setEditingConsultationId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -461,6 +502,7 @@ export default function PatientRecord({
     if (!open || !patient) return
     setMode(startInConsultationForm ? 'form' : 'history')
     setForm(emptyConsultation(patient))
+    setEditingConsultationId(null)
     setFormError('')
     void load(patient.id)
 
@@ -477,12 +519,21 @@ export default function PatientRecord({
 
   function startNewConsultation() {
     setForm(emptyConsultation(patient))
+    setEditingConsultationId(null)
+    setFormError('')
+    setMode('form')
+  }
+
+  function startEditingConsultation(consultation: Consultation) {
+    setForm(consultationToDraft(consultation))
+    setEditingConsultationId(consultation.id)
     setFormError('')
     setMode('form')
   }
 
   function backToHistory() {
     if (saving) return
+    setEditingConsultationId(null)
     setFormError('')
     setMode('history')
   }
@@ -506,8 +557,13 @@ export default function PatientRecord({
       const draft = Object.fromEntries(
         Object.entries(form).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]),
       ) as unknown as ConsultationDraft
-      await addConsultation(patient.id, draft)
+      if (editingConsultationId) {
+        await updateConsultation(patient.id, editingConsultationId, draft)
+      } else {
+        await addConsultation(patient.id, draft)
+      }
       setMode('history')
+      setEditingConsultationId(null)
       setForm(emptyConsultation(patient))
       await load(patient.id)
     } catch (cause) {
@@ -521,6 +577,7 @@ export default function PatientRecord({
     if (!nextOpen) {
       loadSequence.current += 1
       setMode('history')
+      setEditingConsultationId(null)
       setFormError('')
       setLoadError('')
     }
@@ -652,7 +709,11 @@ export default function PatientRecord({
               ) : (
                 <Accordion type="single" collapsible className="space-y-3">
                   {consultations.map((consultation) => (
-                    <ConsultationCard key={consultation.id} consultation={consultation} />
+                    <ConsultationCard
+                      key={consultation.id}
+                      consultation={consultation}
+                      onEdit={startEditingConsultation}
+                    />
                   ))}
                 </Accordion>
               )}
@@ -671,8 +732,14 @@ export default function PatientRecord({
                 <ArrowLeft className="h-4 w-4" />
               </button>
               <div>
-                <h2 className="text-sm font-extrabold tracking-[-0.02em] text-[#081b2c]">Nova consulta</h2>
-                <p className="mt-1 text-[10px] font-medium text-slate-400">Registre a evolução clínica com segurança e clareza.</p>
+                <h2 className="text-sm font-extrabold tracking-[-0.02em] text-[#081b2c]">
+                  {editingConsultationId ? 'Editar consulta' : 'Nova consulta'}
+                </h2>
+                <p className="mt-1 text-[10px] font-medium text-slate-400">
+                  {editingConsultationId
+                    ? 'Atualize o registro clínico e salve as alterações.'
+                    : 'Registre a evolução clínica com segurança e clareza.'}
+                </p>
               </div>
             </div>
 
@@ -830,7 +897,11 @@ export default function PatientRecord({
                 className="flex flex-1 items-center justify-center gap-2 rounded-[14px] bg-[#081b2c] px-5 py-3 text-xs font-extrabold text-white shadow-[0_10px_22px_rgba(8,27,44,.16)] transition hover:bg-[#102d47] disabled:cursor-wait disabled:opacity-70"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-[#e3a078]" strokeWidth={3} />}
-                {saving ? 'Salvando consulta...' : 'Salvar consulta'}
+                {saving
+                  ? 'Salvando consulta...'
+                  : editingConsultationId
+                    ? 'Salvar alterações'
+                    : 'Salvar consulta'}
               </button>
               <button
                 type="button"
