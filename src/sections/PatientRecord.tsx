@@ -1,19 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
+  Bold,
   Building2,
   CalendarDays,
   Check,
   ClipboardList,
   FileHeart,
   HeartPulse,
+  Italic,
+  List,
+  ListOrdered,
   Loader2,
   MessageCircle,
+  Mic,
+  MicOff,
   Plus,
   RefreshCw,
   Ruler,
   Scale,
   Stethoscope,
+  Underline,
   UserRound,
   Video,
 } from 'lucide-react'
@@ -56,6 +63,82 @@ const consultationLabels: Record<ConsultationType, string> = {
 
 const inputClass =
   'mt-1.5 w-full rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-xs font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#dc8e5f] focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10 disabled:cursor-not-allowed disabled:opacity-60'
+
+type SpeechRecognitionResultLike = {
+  isFinal: boolean
+  0: { transcript: string }
+}
+
+type SpeechRecognitionLike = {
+  lang: string
+  interimResults: boolean
+  continuous: boolean
+  onresult: ((event: { resultIndex: number; results: ArrayLike<SpeechRecognitionResultLike> }) => void) | null
+  onerror: ((event: { error: string }) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
+
+const editorColors = [
+  { label: 'Escuro', value: '#081b2c' },
+  { label: 'Azul', value: '#2563eb' },
+  { label: 'Verde', value: '#557f75' },
+  { label: 'Laranja', value: '#c87543' },
+]
+
+const editorTags = new Set(['B', 'BR', 'DIV', 'EM', 'FONT', 'I', 'LI', 'OL', 'P', 'SPAN', 'STRONG', 'U', 'UL'])
+
+function normalizeEditorColor(value: string) {
+  const compact = value.replace(/\s/g, '').toLowerCase()
+  return editorColors.find((option) => {
+    const hex = option.value.toLowerCase()
+    const red = Number.parseInt(hex.slice(1, 3), 16)
+    const green = Number.parseInt(hex.slice(3, 5), 16)
+    const blue = Number.parseInt(hex.slice(5, 7), 16)
+    return compact === hex || compact === `rgb(${red},${green},${blue})`
+  })?.value
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[character] ?? character)
+}
+
+function textToEditorHtml(value: string) {
+  return escapeHtml(value).replace(/\n/g, '<br>')
+}
+
+function sanitizeRichText(value: string) {
+  if (typeof window === 'undefined') return value
+
+  const document = new DOMParser().parseFromString(value, 'text/html')
+  for (const element of Array.from(document.body.querySelectorAll('*'))) {
+    if (!editorTags.has(element.tagName)) {
+      element.replaceWith(...Array.from(element.childNodes))
+      continue
+    }
+
+    const color = (element instanceof HTMLElement ? element.style.color : '') || element.getAttribute('color') || ''
+    for (const attribute of Array.from(element.attributes)) element.removeAttribute(attribute.name)
+
+    const selectedColor = normalizeEditorColor(color)
+    if (selectedColor && element.tagName === 'SPAN') {
+      element.setAttribute('style', `color: ${selectedColor}`)
+    }
+    if (selectedColor && element.tagName === 'FONT') {
+      element.setAttribute('color', selectedColor)
+    }
+  }
+
+  return document.body.innerHTML
+}
+
+function editorValue(value: string) {
+  const sanitized = sanitizeRichText(value)
+  return sanitized === value && !/[<>]/.test(value) ? textToEditorHtml(value) : sanitized
+}
 
 function emptyConsultation(patient: Patient | null): ConsultationDraft {
   return {
@@ -102,7 +185,7 @@ function Field({
   )
 }
 
-function TextAreaField({
+function RichTextField({
   label,
   value,
   onChange,
@@ -117,14 +200,105 @@ function TextAreaField({
   required?: boolean
   className?: string
 }) {
+  const editorRef = useRef<HTMLDivElement>(null)
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const [listening, setListening] = useState(false)
+  const [speechError, setSpeechError] = useState('')
+
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    const nextValue = editorValue(value)
+    if (editor.innerHTML !== nextValue) editor.innerHTML = nextValue
+  }, [value])
+
+  useEffect(() => () => recognitionRef.current?.stop(), [])
+
+  function syncEditor() {
+    onChange(sanitizeRichText(editorRef.current?.innerHTML || ''))
+  }
+
+  function command(commandName: string, commandValue?: string) {
+    editorRef.current?.focus()
+    document.execCommand('styleWithCSS', false, 'true')
+    document.execCommand(commandName, false, commandValue)
+    window.setTimeout(syncEditor, 0)
+  }
+
+  function pasteAsText(event: React.ClipboardEvent<HTMLDivElement>) {
+    event.preventDefault()
+    const text = event.clipboardData.getData('text/plain')
+    document.execCommand('insertText', false, text)
+    window.setTimeout(syncEditor, 0)
+  }
+
+  function toggleDictation() {
+    if (listening) {
+      recognitionRef.current?.stop()
+      return
+    }
+
+    const speechWindow = window as Window & {
+      SpeechRecognition?: SpeechRecognitionConstructor
+      webkitSpeechRecognition?: SpeechRecognitionConstructor
+    }
+    const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition
+
+    if (!Recognition) {
+      setSpeechError('O ditado não é compatível com este navegador. Use o Google Chrome para falar e converter em texto.')
+      return
+    }
+
+    setSpeechError('')
+    const recognition = new Recognition()
+    recognition.lang = 'pt-BR'
+    recognition.interimResults = false
+    recognition.continuous = false
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .slice(event.resultIndex)
+        .filter((result) => result.isFinal)
+        .map((result) => result[0].transcript.trim())
+        .filter(Boolean)
+        .join(' ')
+
+      if (!transcript) return
+      const current = sanitizeRichText(editorRef.current?.innerHTML || '')
+      const next = `${current}${current ? '<br>' : ''}${textToEditorHtml(transcript)}`
+      if (editorRef.current) editorRef.current.innerHTML = next
+      onChange(sanitizeRichText(next))
+    }
+    recognition.onerror = (event) => {
+      if (event.error !== 'aborted') setSpeechError('Não foi possível concluir o ditado. Verifique a permissão do microfone e tente novamente.')
+    }
+    recognition.onend = () => {
+      recognitionRef.current = null
+      setListening(false)
+    }
+
+    recognitionRef.current = recognition
+    setListening(true)
+    recognition.start()
+  }
+
   return (
     <Field label={label} required={required} className={className}>
-      <textarea
-        className={`${inputClass} min-h-[92px] resize-y leading-relaxed`}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-      />
+      <div className="mt-1.5 overflow-hidden rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] transition focus-within:border-[#dc8e5f] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#dc8e5f]/10">
+        <div className="flex flex-wrap items-center gap-1 border-b border-[#081b2c]/[0.07] bg-white px-2 py-1.5">
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('bold')} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#081b2c]" aria-label="Negrito" title="Negrito"><Bold className="h-3.5 w-3.5" /></button>
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('italic')} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#081b2c]" aria-label="Itálico" title="Itálico"><Italic className="h-3.5 w-3.5" /></button>
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('underline')} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#081b2c]" aria-label="Sublinhado" title="Sublinhado"><Underline className="h-3.5 w-3.5" /></button>
+          <span className="mx-0.5 h-4 w-px bg-[#081b2c]/10" />
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('insertUnorderedList')} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#081b2c]" aria-label="Lista" title="Lista"><List className="h-3.5 w-3.5" /></button>
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('insertOrderedList')} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#081b2c]" aria-label="Lista numerada" title="Lista numerada"><ListOrdered className="h-3.5 w-3.5" /></button>
+          <span className="mx-0.5 h-4 w-px bg-[#081b2c]/10" />
+          {editorColors.map((color) => <button key={color.value} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('foreColor', color.value)} className="h-5 w-5 rounded-full border-2 border-white shadow-sm ring-1 ring-[#081b2c]/10" style={{ backgroundColor: color.value }} aria-label={`Cor ${color.label}`} title={`Cor ${color.label}`} />)}
+          <span className="flex-1" />
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={toggleDictation} className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[9px] font-extrabold transition ${listening ? 'bg-red-50 text-red-600' : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'}`} aria-label={listening ? 'Parar ditado' : 'Ditar por microfone'} title={listening ? 'Parar ditado' : 'Ditar por microfone'}>{listening ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}{listening ? 'Ouvindo...' : 'Ditar'}</button>
+        </div>
+        <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder={placeholder} onInput={syncEditor} onPaste={pasteAsText} className="min-h-[92px] px-3.5 py-2.5 text-xs font-medium leading-relaxed text-[#081b2c] outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)]" />
+      </div>
+      {speechError && <p className="mt-1.5 text-[9px] font-semibold leading-relaxed text-red-500">{speechError}</p>}
     </Field>
   )
 }
@@ -146,9 +320,10 @@ function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[14px] border border-[#081b2c]/[0.06] bg-[#faf9f7] px-3.5 py-3">
       <p className="text-[9px] font-extrabold uppercase tracking-[0.1em] text-slate-400">{label}</p>
-      <p className="mt-1.5 whitespace-pre-wrap text-[11px] font-medium leading-relaxed text-[#294054]">
-        {value}
-      </p>
+      <div
+        className="mt-1.5 whitespace-pre-wrap text-[11px] font-medium leading-relaxed text-[#294054] [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-4"
+        dangerouslySetInnerHTML={{ __html: editorValue(value) }}
+      />
     </div>
   )
 }
@@ -523,13 +698,13 @@ export default function PatientRecord({
                 </Field>
 
                 <SectionTitle>Motivo e evolução</SectionTitle>
-                <TextAreaField
+                <RichTextField
                   label="Queixa principal"
                   value={form.queixa}
                   onChange={(value) => set('queixa', value)}
                   placeholder="Motivo principal desta consulta..."
                 />
-                <TextAreaField
+                <RichTextField
                   label="História / evolução"
                   value={form.historiaEvolucao}
                   onChange={(value) => set('historiaEvolucao', value)}
@@ -537,25 +712,25 @@ export default function PatientRecord({
                 />
 
                 <SectionTitle>Antecedentes</SectionTitle>
-                <TextAreaField
+                <RichTextField
                   label="Antecedentes pessoais"
                   value={form.antecedentesPessoais}
                   onChange={(value) => set('antecedentesPessoais', value)}
                   placeholder="Condições, cirurgias e internações..."
                 />
-                <TextAreaField
+                <RichTextField
                   label="Antecedentes familiares"
                   value={form.antecedentesFamiliares}
                   onChange={(value) => set('antecedentesFamiliares', value)}
                   placeholder="Histórico familiar relevante..."
                 />
-                <TextAreaField
+                <RichTextField
                   label="Alergias"
                   value={form.alergias}
                   onChange={(value) => set('alergias', value)}
                   placeholder="Medicamentos, alimentos ou outras alergias..."
                 />
-                <TextAreaField
+                <RichTextField
                   label="Medicamentos em uso"
                   value={form.medicamentos}
                   onChange={(value) => set('medicamentos', value)}
@@ -563,13 +738,13 @@ export default function PatientRecord({
                 />
 
                 <SectionTitle>Exame e avaliação</SectionTitle>
-                <TextAreaField
+                <RichTextField
                   label="Exame físico"
                   value={form.exameFisico}
                   onChange={(value) => set('exameFisico', value)}
                   placeholder="Achados do exame físico..."
                 />
-                <TextAreaField
+                <RichTextField
                   label="Avaliação / hipótese diagnóstica"
                   value={form.avaliacao}
                   onChange={(value) => set('avaliacao', value)}
@@ -585,25 +760,25 @@ export default function PatientRecord({
                 </Field>
 
                 <SectionTitle>Plano de cuidado</SectionTitle>
-                <TextAreaField
+                <RichTextField
                   label="Conduta"
                   value={form.conduta}
                   onChange={(value) => set('conduta', value)}
                   placeholder="Orientações, exames e encaminhamentos..."
                 />
-                <TextAreaField
+                <RichTextField
                   label="Prescrição"
                   value={form.prescricao}
                   onChange={(value) => set('prescricao', value)}
                   placeholder="Medicamento, dose, via e duração..."
                 />
-                <TextAreaField
+                <RichTextField
                   label="Retorno"
                   value={form.retorno}
                   onChange={(value) => set('retorno', value)}
                   placeholder="Prazo e condições para retorno..."
                 />
-                <TextAreaField
+                <RichTextField
                   label="Observações"
                   value={form.observacoes}
                   onChange={(value) => set('observacoes', value)}
