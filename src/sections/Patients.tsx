@@ -96,7 +96,7 @@ function initials(name: string) {
 
 interface Props {
   patients: Patient[]
-  addPatient: (draft: PatientDraft) => Promise<void>
+  addPatient: (draft: PatientDraft) => Promise<Patient>
   updatePatient: (id: string, patch: Partial<Patient>) => Promise<void>
   removePatient: (id: string) => Promise<void>
   listConsultations: (patientId: string) => Promise<Consultation[]>
@@ -120,6 +120,7 @@ export default function Patients({
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [recordPatientId, setRecordPatientId] = useState<string | null>(null)
+  const [startConsultationPatientId, setStartConsultationPatientId] = useState<string | null>(null)
 
   useEffect(() => {
     if (openCreateSignal <= 0) return
@@ -192,8 +193,13 @@ export default function Patients({
 
     setSaving(true)
     try {
-      if (editingId) await updatePatient(editingId, form)
-      else await addPatient(form)
+      if (editingId) {
+        await updatePatient(editingId, form)
+      } else {
+        const patient = await addPatient(form)
+        setRecordPatientId(patient.id)
+        setStartConsultationPatientId(patient.id)
+      }
       setFormOpen(false)
       setEditingId(null)
       setForm(emptyDraft())
@@ -392,7 +398,9 @@ export default function Patients({
                   {editingId ? 'Editar paciente' : 'Novo paciente'}
                 </SheetTitle>
                 <SheetDescription className="mt-1 text-left text-[11px]">
-                  Dados clínicos essenciais para organizar o acompanhamento.
+                  {editingId
+                    ? 'Atualize os dados de identificação e contato do paciente.'
+                    : 'Etapa 1 de 2: cadastre os dados básicos. Em seguida, o prontuário abre para registrar a primeira consulta.'}
                 </SheetDescription>
               </div>
             </div>
@@ -429,7 +437,7 @@ export default function Patients({
 
             <div className="my-6 flex items-center gap-2">
               <span className="h-px flex-1 bg-[#081b2c]/[0.07]" />
-              <span className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-slate-400">Consulta e contexto clínico</span>
+              <span className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-slate-400">Agenda e localização</span>
               <span className="h-px flex-1 bg-[#081b2c]/[0.07]" />
             </div>
 
@@ -451,16 +459,14 @@ export default function Patients({
               <Field label="Convênio">
                 <input className={inputClass} value={form.convenio} onChange={(event) => set('convenio', event.target.value)} placeholder="Particular, Unimed..." />
               </Field>
-              <Field label="CID-10">
-                <input className={inputClass} value={form.cid} onChange={(event) => set('cid', event.target.value)} placeholder="K59.0" />
-              </Field>
-              <Field label="Observações" className="sm:col-span-2">
+              <Field label="Nota administrativa" className="sm:col-span-2">
                 <textarea
-                  className={`${inputClass} min-h-[100px] resize-y`}
+                  className={`${inputClass} min-h-[84px] resize-y`}
                   value={form.observacoes}
                   onChange={(event) => set('observacoes', event.target.value)}
-                  placeholder="Queixa principal, orientações, retornos marcados..."
+                  placeholder="Ex.: preferência de contato, informação de recepção ou observação não clínica."
                 />
+                <p className="mt-1.5 text-[9px] font-semibold text-slate-400">Queixa, CID, evolução e prescrição serão registrados no prontuário, na próxima etapa.</p>
               </Field>
             </div>
 
@@ -477,7 +483,7 @@ export default function Patients({
               className="flex flex-1 items-center justify-center gap-2 rounded-[14px] bg-[#081b2c] px-5 py-3 text-xs font-extrabold text-white shadow-[0_10px_22px_rgba(8,27,44,.16)] transition hover:bg-[#102d47]"
             >
               <Check className="h-4 w-4 text-[#e3a078]" strokeWidth={3} />
-              {saving ? 'Salvando...' : editingId ? 'Salvar alterações' : 'Cadastrar paciente'}
+              {saving ? 'Salvando...' : editingId ? 'Salvar alterações' : 'Cadastrar e abrir prontuário'}
             </button>
             <button
               type="button"
@@ -493,8 +499,12 @@ export default function Patients({
       <PatientRecord
         patient={recordPatient}
         open={recordPatient !== null}
+        startInConsultationForm={recordPatient?.id === startConsultationPatientId}
         onOpenChange={(open) => {
-          if (!open) setRecordPatientId(null)
+          if (!open) {
+            setRecordPatientId(null)
+            setStartConsultationPatientId(null)
+          }
         }}
         listConsultations={listConsultations}
         addConsultation={addConsultation}
