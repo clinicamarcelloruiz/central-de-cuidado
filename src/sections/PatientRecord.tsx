@@ -265,6 +265,24 @@ function RichTextField({
       return
     }
 
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('microfone indisponível')
+      }
+      const microphone = await navigator.mediaDevices.getUserMedia({ audio: true })
+      microphone.getTracks().forEach((track) => track.stop())
+    } catch (error) {
+      const name = error instanceof DOMException ? error.name : ''
+      if (name === 'NotFoundError') {
+        setSpeechError('Nenhum microfone foi encontrado. Conecte um microfone e clique em Ditar novamente.')
+      } else if (name === 'NotAllowedError' || name === 'SecurityError') {
+        setSpeechError('O microfone está bloqueado no navegador. Clique no ícone de controles ou cadeado ao lado do endereço do site, permita Microfone e recarregue a página.')
+      } else {
+        setSpeechError('Não foi possível acessar o microfone. Verifique se ele está conectado e tente novamente.')
+      }
+      return
+    }
+
     const speechWindow = window as Window & {
       SpeechRecognition?: SpeechRecognitionConstructor
       webkitSpeechRecognition?: SpeechRecognitionConstructor
@@ -272,18 +290,7 @@ function RichTextField({
     const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition
 
     if (!Recognition) {
-      setSpeechError('O ditado não é compatível com este navegador. Use o Google Chrome para falar e converter em texto.')
-      return
-    }
-
-    try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('microfone indisponível')
-      }
-      const microphone = await navigator.mediaDevices.getUserMedia({ audio: true })
-      microphone.getTracks().forEach((track) => track.stop())
-    } catch {
-      setSpeechError('Permita o uso do microfone quando o navegador solicitar. Se já bloqueou, clique no cadeado ao lado do endereço do site e habilite Microfone.')
+      setSpeechError('O microfone foi autorizado, mas o ditado não é compatível com este navegador. Use o Google Chrome para converter a fala em texto.')
       return
     }
 
