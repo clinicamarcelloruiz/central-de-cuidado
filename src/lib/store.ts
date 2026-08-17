@@ -97,6 +97,7 @@ export function useDb() {
   async function addPatient(draft: PatientDraft) {
     const patient = await run(() => createPatient(requireClinic(), draft))
     setDb((current) => ({ ...current, patients: [patient, ...current.patients] }))
+    return patient
   }
 
   async function updatePatient(id: string, patch: Partial<Patient>) {
