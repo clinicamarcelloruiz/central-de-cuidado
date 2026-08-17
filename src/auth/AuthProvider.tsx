@@ -25,6 +25,7 @@ export interface AuthContextValue {
   authError: string | null
   configurationError: string | null
   signIn: (email: string, password: string) => Promise<AuthActionResult>
+  requestAccess: (fullName: string, email: string, password: string) => Promise<AuthActionResult>
   signOut: () => Promise<AuthActionResult>
   clearAuthError: () => void
 }
@@ -91,6 +92,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null }
   }, [])
 
+  const requestAccess = useCallback(
+    async (fullName: string, email: string, password: string): Promise<AuthActionResult> => {
+      if (!isSupabaseConfigured) {
+        const message = supabaseConfigurationError ?? 'O Supabase não está configurado.'
+        setAuthError(message)
+        return { error: message }
+      }
+
+      setAuthError(null)
+      const { error } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password,
+        options: {
+          data: { full_name: fullName.trim() },
+          emailRedirectTo: `${window.location.origin}${window.location.pathname}`,
+        },
+      })
+
+      if (error) {
+        const message = friendlyAuthError(error)
+        setAuthError(message)
+        return { error: message }
+      }
+
+      // A solicitação só será liberada no painel do administrador. Mantemos a
+      // tela de login em vez de levar um acesso ainda pendente ao sistema.
+      await supabase.auth.signOut({ scope: 'local' })
+      setSession(null)
+      return { error: null }
+    },
+    [],
+  )
+
   const signOut = useCallback(async (): Promise<AuthActionResult> => {
     if (!isSupabaseConfigured) {
       const message = supabaseConfigurationError ?? 'O Supabase não está configurado.'
@@ -119,10 +153,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authError,
       configurationError: supabaseConfigurationError,
       signIn,
+      requestAccess,
       signOut,
       clearAuthError,
     }),
-    [authError, clearAuthError, loading, session, signIn, signOut],
+    [authError, clearAuthError, loading, requestAccess, session, signIn, signOut],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
@@ -135,3 +170,4 @@ export function useAuth(): AuthContextValue {
   if (!context) throw new Error('useAuth precisa ser usado dentro de <AuthProvider>.')
   return context
 }
+
