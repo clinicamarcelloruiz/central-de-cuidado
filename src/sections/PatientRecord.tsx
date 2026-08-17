@@ -6,6 +6,7 @@ import {
   CalendarDays,
   Check,
   ClipboardList,
+  Edit3,
   FileHeart,
   HeartPulse,
   Italic,
@@ -53,6 +54,7 @@ interface PatientRecordProps {
   onOpenChange: (open: boolean) => void
   listConsultations: (patientId: string) => Promise<Consultation[]>
   addConsultation: (patientId: string, draft: ConsultationDraft) => Promise<void>
+  onEditRegistration: (patient: Patient) => void
 }
 
 const consultationLabels: Record<ConsultationType, string> = {
@@ -423,6 +425,7 @@ export default function PatientRecord({
   onOpenChange,
   listConsultations,
   addConsultation,
+  onEditRegistration,
 }: PatientRecordProps) {
   const [mode, setMode] = useState<'history' | 'form'>('history')
   const [consultations, setConsultations] = useState<Consultation[]>([])
@@ -564,6 +567,15 @@ export default function PatientRecord({
                     </span>
                   )}
                 </div>
+              )}
+              {patient && (
+                <button
+                  type="button"
+                  onClick={() => onEditRegistration(patient)}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-[#fbfaf8] px-3 py-2 text-[10px] font-extrabold text-slate-500 transition hover:border-[#c87543]/30 hover:text-[#c87543]"
+                >
+                  <Edit3 className="h-3.5 w-3.5" /> Editar dados cadastrais
+                </button>
               )}
             </div>
           </div>
