@@ -233,7 +233,7 @@ function RichTextField({
     window.setTimeout(syncEditor, 0)
   }
 
-  function toggleDictation() {
+  async function toggleDictation() {
     if (listening) {
       recognitionRef.current?.stop()
       return
@@ -247,6 +247,17 @@ function RichTextField({
 
     if (!Recognition) {
       setSpeechError('O ditado não é compatível com este navegador. Use o Google Chrome para falar e converter em texto.')
+      return
+    }
+
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('microfone indisponível')
+      }
+      const microphone = await navigator.mediaDevices.getUserMedia({ audio: true })
+      microphone.getTracks().forEach((track) => track.stop())
+    } catch {
+      setSpeechError('Permita o uso do microfone quando o navegador solicitar. Se já bloqueou, clique no cadeado ao lado do endereço do site e habilite Microfone.')
       return
     }
 
@@ -295,7 +306,7 @@ function RichTextField({
           <span className="mx-0.5 h-4 w-px bg-[#081b2c]/10" />
           {editorColors.map((color) => <button key={color.value} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('foreColor', color.value)} className="h-5 w-5 rounded-full border-2 border-white shadow-sm ring-1 ring-[#081b2c]/10" style={{ backgroundColor: color.value }} aria-label={`Cor ${color.label}`} title={`Cor ${color.label}`} />)}
           <span className="flex-1" />
-          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={toggleDictation} className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[9px] font-extrabold transition ${listening ? 'bg-red-50 text-red-600' : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'}`} aria-label={listening ? 'Parar ditado' : 'Ditar por microfone'} title={listening ? 'Parar ditado' : 'Ditar por microfone'}>{listening ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}{listening ? 'Ouvindo...' : 'Ditar'}</button>
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void toggleDictation()} className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[9px] font-extrabold transition ${listening ? 'bg-red-50 text-red-600' : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'}`} aria-label={listening ? 'Parar ditado' : 'Ditar por microfone'} title={listening ? 'Parar ditado' : 'Ditar por microfone'}>{listening ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}{listening ? 'Ouvindo...' : 'Ditar'}</button>
         </div>
         <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder={placeholder} onInput={syncEditor} onPaste={pasteAsText} className="min-h-[92px] px-3.5 py-2.5 text-xs font-medium leading-relaxed text-[#081b2c] outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)]" />
       </div>
