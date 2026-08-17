@@ -296,8 +296,10 @@ function RichTextField({
 
     setSpeechError('')
     const recognition = new Recognition()
+    let receivedTranscript = false
+    let receivedRecognitionError = false
     recognition.lang = 'pt-BR'
-    recognition.interimResults = false
+    recognition.interimResults = true
     recognition.continuous = false
     recognition.onresult = (event) => {
       const transcript = Array.from(event.results)
@@ -308,17 +310,30 @@ function RichTextField({
         .join(' ')
 
       if (!transcript) return
+      receivedTranscript = true
       const current = sanitizeRichText(editorRef.current?.innerHTML || '')
       const next = `${current}${current ? '<br>' : ''}${textToEditorHtml(transcript)}`
       if (editorRef.current) editorRef.current.innerHTML = next
       onChange(sanitizeRichText(next))
     }
     recognition.onerror = (event) => {
-      if (event.error !== 'aborted') setSpeechError('Não foi possível concluir o ditado. Verifique a permissão do microfone e tente novamente.')
+      if (event.error === 'aborted') return
+      receivedRecognitionError = true
+      const messageByError: Record<string, string> = {
+        'no-speech': 'Nenhuma fala foi detectada. Verifique se o microfone selecionado no computador está recebendo som e tente novamente.',
+        'audio-capture': 'O navegador não conseguiu captar o áudio. Verifique se o microfone está conectado e se o Chrome tem acesso ao microfone nas configurações do Windows.',
+        'not-allowed': 'O microfone foi bloqueado. Clique no ícone de controles ou cadeado ao lado do endereço do site, permita Microfone e recarregue a página.',
+        'service-not-allowed': 'O serviço de ditado foi bloqueado pelo navegador. Use o Google Chrome atualizado e tente novamente.',
+        network: 'O microfone foi autorizado, mas a transcrição não conseguiu se conectar. Verifique a internet e tente novamente.',
+      }
+      setSpeechError(messageByError[event.error] || 'Não foi possível concluir o ditado. Verifique o microfone e tente novamente.')
     }
     recognition.onend = () => {
       recognitionRef.current = null
       setListening(false)
+      if (!receivedTranscript && !receivedRecognitionError) {
+        setSpeechError('Nenhuma fala foi detectada. Fale próximo ao microfone, aguarde um instante ao terminar e tente novamente.')
+      }
     }
 
     recognitionRef.current = recognition
