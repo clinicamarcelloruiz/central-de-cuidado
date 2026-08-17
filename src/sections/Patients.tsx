@@ -157,7 +157,7 @@ export default function Patients({
     setFormOpen(true)
   }
 
-  function edit(patient: Patient) {
+  function editRegistration(patient: Patient) {
     setEditingId(patient.id)
     setForm({
       nome: patient.nome,
@@ -305,8 +305,8 @@ export default function Patients({
                     <div className="flex shrink-0 gap-1">
                       <button
                         type="button"
-                        onClick={() => edit(patient)}
-                        title="Editar paciente"
+                        onClick={() => setRecordPatientId(patient.id)}
+                        title="Abrir prontuário completo"
                         className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 transition hover:bg-[#f3eee9] hover:text-[#c87543]"
                       >
                         <Edit3 className="h-3.5 w-3.5" />
@@ -508,6 +508,10 @@ export default function Patients({
         }}
         listConsultations={listConsultations}
         addConsultation={addConsultation}
+        onEditRegistration={(patient) => {
+          setRecordPatientId(null)
+          editRegistration(patient)
+        }}
       />
     </div>
   )
