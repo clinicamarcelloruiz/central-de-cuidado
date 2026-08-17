@@ -1,0 +1,322 @@
+import {
+  AlertCircle,
+  ArrowUpRight,
+  CalendarClock,
+  Check,
+  CheckCircle2,
+  Clock3,
+  HeartHandshake,
+  MessageCircle,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Stethoscope,
+} from 'lucide-react'
+import type { FollowupKey, FollowupStatus, Patient } from '@/types/patient'
+import {
+  buildMessage,
+  fmtBR,
+  pendingFollowups,
+  waLink,
+  type FollowupItem,
+} from '@/lib/followup'
+
+const NAVY = '#081b2c'
+const PEACH = '#dc8e5f'
+
+interface Props {
+  patients: Patient[]
+  templates: Record<FollowupKey, string>
+  setFollowup: (id: string, key: FollowupKey, status: FollowupStatus) => Promise<void>
+}
+
+type Accent = 'danger' | 'today' | 'upcoming' | 'scheduled'
+
+const GROUP_STYLE: Record<Accent, { text: string; bg: string; icon: typeof AlertCircle }> = {
+  danger: { text: 'text-[#c64d4a]', bg: 'bg-[#c64d4a]', icon: AlertCircle },
+  today: { text: 'text-[#c87543]', bg: 'bg-[#dc8e5f]', icon: Sparkles },
+  upcoming: { text: 'text-[#557f75]', bg: 'bg-[#6f9d91]', icon: CalendarClock },
+  scheduled: { text: 'text-slate-500', bg: 'bg-slate-400', icon: Clock3 },
+}
+
+function initials(name: string) {
+  return name
+    .replace(/\(.*?\)/g, '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase()
+}
+
+function Group({
+  title,
+  hint,
+  items,
+  accent,
+  children,
+}: {
+  title: string
+  hint: string
+  items: FollowupItem[]
+  accent: Accent
+  children: (item: FollowupItem) => React.ReactNode
+}) {
+  if (items.length === 0) return null
+  const style = GROUP_STYLE[accent]
+  const Icon = style.icon
+
+  return (
+    <section>
+      <div className="mb-3 flex items-center gap-3">
+        <span className={`flex h-8 w-8 items-center justify-center rounded-xl ${style.bg} text-white shadow-sm`}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h2 className={`text-xs font-extrabold uppercase tracking-[0.12em] ${style.text}`}>{title}</h2>
+            <span className="rounded-full bg-[#081b2c]/[0.055] px-2 py-0.5 text-[9px] font-extrabold text-slate-500">
+              {items.length}
+            </span>
+          </div>
+          <p className="mt-0.5 truncate text-[10px] text-slate-400">{hint}</p>
+        </div>
+        <div className="h-px flex-1 bg-[#081b2c]/[0.06]" />
+      </div>
+      <div className="space-y-2.5">{items.map(children)}</div>
+    </section>
+  )
+}
+
+export default function Followups({ patients, templates, setFollowup }: Props) {
+  const items = pendingFollowups(patients)
+  const overdue = items.filter((item) => item.urgencia === 'atrasado')
+  const today = items.filter((item) => item.urgencia === 'hoje')
+  const upcoming = items.filter((item) => item.urgencia === 'proximo')
+  const scheduled = items.filter((item) => item.urgencia === 'futuro')
+  const completed = patients
+    .flatMap((patient) => [patient.followups.d30, patient.followups.m90])
+    .filter((followup) => followup.status === 'concluido').length
+  const sent = items.filter((item) => item.patient.followups[item.key].status === 'enviado').length
+
+  function send(item: FollowupItem) {
+    const message = buildMessage(templates[item.key], item.patient)
+    window.open(waLink(item.patient.telefone, message), '_blank', 'noopener,noreferrer')
+    void setFollowup(item.patient.id, item.key, 'enviado').catch((cause) => {
+      alert(cause instanceof Error ? cause.message : 'Não foi possível atualizar o acompanhamento.')
+    })
+  }
+
+  function dueLabel(item: FollowupItem) {
+    if (item.dias > 1) return `${item.dias} dias em atraso`
+    if (item.dias === 1) return '1 dia em atraso'
+    if (item.dias === 0) return 'Vence hoje'
+    if (item.dias === -1) return 'Amanhã'
+    return `Em ${Math.abs(item.dias)} dias`
+  }
+
+  function card(item: FollowupItem) {
+    const patient = item.patient
+    const wasSent = patient.followups[item.key].status === 'enviado'
+    const isOverdue = item.urgencia === 'atrasado'
+    const isToday = item.urgencia === 'hoje'
+    const accent = isOverdue ? '#c94f4c' : isToday ? PEACH : item.key === 'd30' ? '#6f9d91' : NAVY
+
+    return (
+      <article
+        key={`${patient.id}-${item.key}`}
+        className="surface-card group relative overflow-hidden rounded-[22px] p-4 transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(8,27,44,.08)] sm:p-5"
+      >
+        <span className="absolute inset-y-4 left-0 w-1 rounded-r-full" style={{ background: accent }} />
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <span
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] text-xs font-extrabold"
+              style={{ background: `${accent}14`, color: accent }}
+            >
+              {initials(patient.nome)}
+            </span>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="truncate text-sm font-extrabold tracking-[-0.02em] text-[#081b2c]">{patient.nome}</h3>
+                <span
+                  className="rounded-full px-2 py-1 text-[8px] font-extrabold uppercase tracking-[0.12em]"
+                  style={{ background: `${item.key === 'd30' ? '#6f9d91' : NAVY}12`, color: item.key === 'd30' ? '#557f75' : NAVY }}
+                >
+                  {item.label}
+                </span>
+                {wasSent && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[#e9f4f1] px-2 py-1 text-[8px] font-extrabold uppercase tracking-[0.1em] text-[#47766b]">
+                    <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                    mensagem aberta
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-semibold text-slate-400">
+                <span className="inline-flex items-center gap-1.5" style={{ color: isOverdue || isToday ? accent : undefined }}>
+                  <Clock3 className="h-3.5 w-3.5" />
+                  {dueLabel(item)} · {fmtBR(item.due)}
+                </span>
+                <span className="hidden text-slate-300 sm:inline">•</span>
+                <span>Consulta em {fmtBR(patient.dataConsulta)}</span>
+                {patient.responsavel && (
+                  <>
+                    <span className="hidden text-slate-300 sm:inline">•</span>
+                    <span>Resp. {patient.responsavel}</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 gap-2 pl-14 sm:pl-0">
+            <button
+              type="button"
+              onClick={() => send(item)}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#1fbd69] px-3.5 py-2.5 text-[10px] font-extrabold text-white shadow-[0_8px_18px_rgba(31,189,105,.18)] transition hover:bg-[#18a95c] sm:flex-none"
+              aria-label={`${wasSent ? 'Reabrir' : 'Abrir'} WhatsApp de ${patient.nome}`}
+            >
+              <MessageCircle className="h-4 w-4" fill="currentColor" strokeWidth={1.5} />
+              {wasSent ? 'Reabrir' : 'WhatsApp'}
+              <ArrowUpRight className="h-3 w-3 opacity-70" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void setFollowup(patient.id, item.key, 'concluido').catch((cause) => {
+                  alert(cause instanceof Error ? cause.message : 'Não foi possível concluir o acompanhamento.')
+                })
+              }}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-[#6f9d91]/35 bg-[#f4f8f7] px-3 py-2.5 text-[10px] font-extrabold text-[#4f796f] transition hover:border-[#6f9d91] hover:bg-[#eaf3f0]"
+              aria-label={`Concluir acompanhamento de ${patient.nome}`}
+            >
+              <Check className="h-3.5 w-3.5" strokeWidth={3} />
+              <span className="hidden min-[420px]:inline">Concluir</span>
+            </button>
+          </div>
+        </div>
+      </article>
+    )
+  }
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
+      <div className="space-y-6">
+        <section className="soft-grid relative overflow-hidden rounded-[28px] bg-[#081b2c] p-5 text-white shadow-[0_18px_42px_rgba(8,27,44,.15)] sm:p-7">
+          <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-[#dc8e5f]/20 blur-3xl" />
+          <div className="relative grid gap-6 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <div>
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-[0.14em] text-[#efb28e]">
+                <HeartHandshake className="h-3.5 w-3.5" />
+                Fila inteligente
+              </div>
+              <h2 className="max-w-lg text-balance text-xl font-extrabold leading-tight tracking-[-0.035em] sm:text-2xl">
+                Hoje, o cuidado pede atenção para {overdue.length + today.length} {overdue.length + today.length === 1 ? 'família' : 'famílias'}.
+              </h2>
+              <p className="mt-3 max-w-xl text-[11px] leading-relaxed text-white/50 sm:text-xs">
+                A fila organiza automaticamente os contatos de 30 e 90 dias, priorizando o que não pode esperar.
+              </p>
+            </div>
+
+            <div className="flex gap-2.5">
+              <div className="min-w-[92px] rounded-[18px] border border-white/10 bg-white/[0.065] p-3.5">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-white/35">Abertas</p>
+                <p className="mt-1 text-2xl font-extrabold tracking-[-0.04em]">{items.length}</p>
+              </div>
+              <div className="min-w-[92px] rounded-[18px] bg-[#e39a6d] p-3.5 text-[#081b2c]">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-[#081b2c]/50">Concluídas</p>
+                <p className="mt-1 text-2xl font-extrabold tracking-[-0.04em]">{completed}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {items.length === 0 ? (
+          <section className="surface-card rounded-[26px] px-6 py-14 text-center">
+            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#eaf3f0] text-[#5b887d]">
+              <CheckCircle2 className="h-7 w-7" />
+            </span>
+            <h2 className="mt-4 text-base font-extrabold text-[#081b2c]">
+              {patients.length === 0 ? 'A fila está pronta para começar' : 'Tudo em dia por aqui'}
+            </h2>
+            <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-slate-400">
+              {patients.length === 0
+                ? 'Cadastre o primeiro paciente e as datas de acompanhamento serão calculadas automaticamente.'
+                : 'Nenhum acompanhamento está pendente neste momento. Volte depois para conferir as próximas jornadas.'}
+            </p>
+          </section>
+        ) : (
+          <div className="space-y-7">
+            <Group title="Atrasados" hint="Prioridade máxima para a equipe" items={overdue} accent="danger">{card}</Group>
+            <Group title="Para hoje" hint="Contatos que vencem agora" items={today} accent="today">{card}</Group>
+            <Group title="Próximos 7 dias" hint="Organize a semana com antecedência" items={upcoming} accent="upcoming">{card}</Group>
+            <Group title="Agendados" hint="Jornadas futuras já programadas" items={scheduled} accent="scheduled">{card}</Group>
+          </div>
+        )}
+      </div>
+
+      <aside className="space-y-4">
+        <section className="surface-card rounded-[24px] p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#c87543]">Jornada do paciente</p>
+              <h2 className="mt-1.5 text-sm font-extrabold text-[#081b2c]">Três pontos de cuidado</h2>
+            </div>
+            <Stethoscope className="h-5 w-5 text-[#d98e5f]" />
+          </div>
+
+          <div className="relative mt-6 space-y-5">
+            <div className="absolute bottom-5 left-[17px] top-5 w-px bg-gradient-to-b from-[#d98e5f] via-[#6f9d91] to-[#081b2c]/20" />
+            {[
+              { icon: Stethoscope, label: 'Consulta', detail: 'Cadastro clínico inicial', color: '#dc8e5f' },
+              { icon: Send, label: '30 dias', detail: 'Primeiro contato de evolução', color: '#6f9d91' },
+              { icon: HeartHandshake, label: '90 dias', detail: 'Continuidade e suporte', color: '#081b2c' },
+            ].map((step) => {
+              const Icon = step.icon
+              return (
+                <div key={step.label} className="relative flex items-center gap-3">
+                  <span
+                    className="z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border-4 border-white text-white"
+                    style={{ background: step.color }}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-extrabold text-[#081b2c]">{step.label}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-400">{step.detail}</p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+
+        <section className="rounded-[24px] border border-[#6f9d91]/20 bg-[#eaf3f0] p-5">
+          <div className="flex items-center gap-2 text-[#4f796f]">
+            <ShieldCheck className="h-4 w-4" />
+            <h2 className="text-[10px] font-extrabold uppercase tracking-[0.14em]">Fluxo seguro</h2>
+          </div>
+          <p className="mt-3 text-[11px] leading-relaxed text-[#4f6e67]">
+            O WhatsApp abre com a mensagem pronta. Revise antes de enviar e conclua o item quando a necessidade da família estiver resolvida.
+          </p>
+        </section>
+
+        {sent > 0 && (
+          <section className="rounded-[24px] border border-[#081b2c]/[0.07] bg-white/60 p-5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">Em andamento</p>
+            <div className="mt-3 flex items-end justify-between">
+              <div>
+                <p className="text-2xl font-extrabold tracking-[-0.05em] text-[#081b2c]">{sent}</p>
+                <p className="mt-1 text-[10px] text-slate-400">mensagens abertas</p>
+              </div>
+              <MessageCircle className="h-6 w-6 text-[#6f9d91]" />
+            </div>
+          </section>
+        )}
+      </aside>
+    </div>
+  )
+}

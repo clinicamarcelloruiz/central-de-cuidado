@@ -1,0 +1,335 @@
+import {
+  Activity,
+  ArrowUpRight,
+  CalendarCheck2,
+  CheckCircle2,
+  Clock3,
+  HeartPulse,
+  MapPinned,
+  Stethoscope,
+  UsersRound,
+} from 'lucide-react'
+import type { Patient } from '@/types/patient'
+import { dueCount, idadeAnos, pendingFollowups } from '@/lib/followup'
+
+const NAVY = '#081b2c'
+const PEACH = '#dc8e5f'
+const SAGE = '#6f9d91'
+
+const cardClass = 'surface-card rounded-[24px]'
+
+function Kpi({
+  label,
+  value,
+  detail,
+  icon: Icon,
+  color,
+}: {
+  label: string
+  value: string | number
+  detail: string
+  icon: typeof UsersRound
+  color: string
+}) {
+  return (
+    <article className={`${cardClass} group relative overflow-hidden p-4 sm:p-5`}>
+      <div
+        className="absolute -right-8 -top-8 h-24 w-24 rounded-full opacity-[0.08] blur-xl transition-transform duration-500 group-hover:scale-125"
+        style={{ background: color }}
+      />
+      <div className="relative flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-slate-400">{label}</p>
+          <p className="mt-2 text-3xl font-extrabold tracking-[-0.05em] text-[#081b2c]">{value}</p>
+          <p className="mt-1 text-[11px] font-medium text-slate-400">{detail}</p>
+        </div>
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px]" style={{ background: `${color}16`, color }}>
+          <Icon className="h-[19px] w-[19px]" strokeWidth={2} />
+        </span>
+      </div>
+    </article>
+  )
+}
+
+function Panel({
+  title,
+  subtitle,
+  icon: Icon,
+  children,
+  className = '',
+}: {
+  title: string
+  subtitle?: string
+  icon?: typeof UsersRound
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <section className={`${cardClass} p-5 sm:p-6 ${className}`}>
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-sm font-extrabold tracking-[-0.02em] text-[#081b2c]">{title}</h2>
+          {subtitle && <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{subtitle}</p>}
+        </div>
+        {Icon && (
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f6eee8] text-[#c87543]">
+            <Icon className="h-4 w-4" />
+          </span>
+        )}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function DataBar({
+  label,
+  value,
+  max,
+  color = PEACH,
+}: {
+  label: string
+  value: number
+  max: number
+  color?: string
+}) {
+  const width = max > 0 ? Math.max((value / max) * 100, value > 0 ? 6 : 0) : 0
+  return (
+    <div className="grid grid-cols-[92px_minmax(0,1fr)_28px] items-center gap-3 sm:grid-cols-[112px_minmax(0,1fr)_32px]">
+      <span className="truncate text-[11px] font-semibold text-slate-500">{label}</span>
+      <div className="h-2 overflow-hidden rounded-full bg-[#eef1f2]">
+        <div
+          className="h-full rounded-full transition-[width] duration-700"
+          style={{ width: `${width}%`, background: `linear-gradient(90deg, ${color}, ${color}b8)` }}
+        />
+      </div>
+      <span className="text-right text-[11px] font-extrabold text-[#081b2c]">{value}</span>
+    </div>
+  )
+}
+
+function topN(pairs: [string, number][], n: number): [string, number][] {
+  return pairs.sort((a, b) => b[1] - a[1]).slice(0, n)
+}
+
+function countBy(patients: Patient[], pick: (patient: Patient) => string): [string, number][] {
+  const map = new Map<string, number>()
+  for (const patient of patients) {
+    const key = pick(patient).trim()
+    if (!key) continue
+    map.set(key, (map.get(key) ?? 0) + 1)
+  }
+  return [...map.entries()]
+}
+
+function Donut({ female, male, other }: { female: number; male: number; other: number }) {
+  const total = female + male + other
+  const femaleEnd = total ? (female / total) * 100 : 0
+  const maleEnd = total ? femaleEnd + (male / total) * 100 : 0
+  const background = total
+    ? `conic-gradient(${PEACH} 0 ${femaleEnd}%, ${NAVY} ${femaleEnd}% ${maleEnd}%, #a5b1bb ${maleEnd}% 100%)`
+    : '#edf0f2'
+
+  const items = [
+    { label: 'Feminino', value: female, color: PEACH },
+    { label: 'Masculino', value: male, color: NAVY },
+    { label: 'Outro / NI', value: other, color: '#a5b1bb' },
+  ]
+
+  return (
+    <div className="flex flex-col items-center gap-6 py-1 sm:flex-row sm:justify-center lg:justify-start">
+      <div className="relative h-36 w-36 shrink-0 rounded-full p-[13px]" style={{ background }}>
+        <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-white shadow-[inset_0_0_0_1px_rgba(8,27,44,.04)]">
+          <span className="text-3xl font-extrabold tracking-[-0.05em] text-[#081b2c]">{total}</span>
+          <span className="mt-0.5 text-[9px] font-extrabold uppercase tracking-[0.16em] text-slate-400">pacientes</span>
+        </div>
+      </div>
+      <div className="w-full max-w-[200px] space-y-3">
+        {items.map((item) => (
+          <div key={item.label} className="flex items-center gap-2.5">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
+            <span className="flex-1 text-[11px] font-semibold text-slate-500">{item.label}</span>
+            <span className="text-xs font-extrabold text-[#081b2c]">{item.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function Ranking({
+  title,
+  items,
+  color,
+}: {
+  title: string
+  items: [string, number][]
+  color: string
+}) {
+  const max = Math.max(...items.map((item) => item[1]), 1)
+  return (
+    <div>
+      <p className="mb-3 text-[10px] font-extrabold uppercase tracking-[0.15em] text-slate-400">{title}</p>
+      {items.length ? (
+        <div className="space-y-3">
+          {items.map(([label, value]) => (
+            <DataBar key={label} label={label} value={value} max={max} color={color} />
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-xl bg-[#f8f7f4] px-3 py-4 text-center text-[11px] text-slate-400">Sem dados suficientes</p>
+      )}
+    </div>
+  )
+}
+
+export default function Dashboard({ patients }: { patients: Patient[] }) {
+  const currentMonth = new Date().toISOString().slice(0, 7)
+  const appointmentsThisMonth = patients.filter((patient) => patient.dataConsulta.startsWith(currentMonth)).length
+  const due = dueCount(patients)
+  const completed = patients
+    .flatMap((patient) => [patient.followups.d30, patient.followups.m90])
+    .filter((followup) => followup.status === 'concluido').length
+  const totalJourneys = patients.length * 2
+  const completion = totalJourneys ? Math.round((completed / totalJourneys) * 100) : 0
+
+  const female = patients.filter((patient) => patient.sexo === 'F').length
+  const male = patients.filter((patient) => patient.sexo === 'M').length
+  const other = patients.filter((patient) => patient.sexo === 'O').length
+
+  const ageRanges = [
+    { label: '0 a 2 anos', test: (age: number) => age <= 2 },
+    { label: '3 a 5 anos', test: (age: number) => age >= 3 && age <= 5 },
+    { label: '6 a 9 anos', test: (age: number) => age >= 6 && age <= 9 },
+    { label: '10 a 13 anos', test: (age: number) => age >= 10 && age <= 13 },
+    { label: '14+ anos', test: (age: number) => age >= 14 },
+  ].map((range) => ({
+    label: range.label,
+    value: patients.filter((patient) => range.test(idadeAnos(patient.nascimento))).length,
+  }))
+  const maxAge = Math.max(...ageRanges.map((range) => range.value), 1)
+
+  const cids = topN(countBy(patients, (patient) => patient.cid.toUpperCase()), 5)
+  const cities = topN(countBy(patients, (patient) => patient.cidade), 5)
+  const healthPlans = topN(countBy(patients, (patient) => patient.convenio), 5)
+
+  const months: { label: string; value: number }[] = []
+  const now = new Date()
+  for (let offset = 5; offset >= 0; offset--) {
+    const date = new Date(now.getFullYear(), now.getMonth() - offset, 1)
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+    const label = date.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')
+    months.push({ label, value: patients.filter((patient) => patient.dataConsulta.startsWith(key)).length })
+  }
+  const maxMonth = Math.max(...months.map((month) => month.value), 1)
+  const pending = pendingFollowups(patients)
+  const nextWeek = pending.filter((item) => item.dias >= -7).length
+
+  return (
+    <div className="space-y-5">
+      <section className="soft-grid relative overflow-hidden rounded-[28px] bg-[#081b2c] p-5 text-white shadow-[0_20px_45px_rgba(8,27,44,.16)] sm:p-7">
+        <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full bg-[#dc8e5f]/20 blur-3xl" />
+        <div className="absolute bottom-0 right-[28%] h-28 w-28 rounded-full bg-[#6f9d91]/15 blur-2xl" />
+        <div className="relative grid gap-7 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
+          <div className="max-w-2xl">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-[#efb28e]">
+              <HeartPulse className="h-3.5 w-3.5" />
+              Radar de acompanhamento
+            </div>
+            <h2 className="max-w-xl text-balance text-2xl font-extrabold leading-tight tracking-[-0.04em] sm:text-[30px]">
+              Cuidado que continua depois da consulta.
+            </h2>
+            <p className="mt-3 max-w-xl text-xs leading-relaxed text-white/55 sm:text-sm">
+              Sua base clínica transforma datas em contatos oportunos e mantém cada família próxima da equipe.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-[20px] border border-white/10 bg-white/[0.07] p-4 backdrop-blur">
+              <p className="text-[9px] font-extrabold uppercase tracking-[0.15em] text-white/40">Esta semana</p>
+              <p className="mt-2 text-3xl font-extrabold tracking-[-0.05em]">{nextWeek}</p>
+              <p className="mt-1 text-[10px] text-white/45">contatos no radar</p>
+            </div>
+            <div className="rounded-[20px] bg-[#e39a6d] p-4 text-[#081b2c]">
+              <p className="text-[9px] font-extrabold uppercase tracking-[0.15em] text-[#081b2c]/50">Jornadas concluídas</p>
+              <p className="mt-2 text-3xl font-extrabold tracking-[-0.05em]">{completion}%</p>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#081b2c]/10">
+                <div className="h-full rounded-full bg-[#081b2c]" style={{ width: `${completion}%` }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <Kpi label="Pacientes" value={patients.length} detail="na base clínica" icon={UsersRound} color={NAVY} />
+        <Kpi label="Consultas no mês" value={appointmentsThisMonth} detail="atendimentos registrados" icon={CalendarCheck2} color={PEACH} />
+        <Kpi label="Pendentes" value={due} detail="hoje e atrasados" icon={Clock3} color="#d45b58" />
+        <Kpi label="Concluídos" value={completed} detail="30 e 90 dias" icon={CheckCircle2} color={SAGE} />
+      </div>
+
+      {patients.length === 0 ? (
+        <Panel title="Sua visão clínica começa aqui" subtitle="Cadastre o primeiro atendimento para alimentar os indicadores." icon={Stethoscope}>
+          <div className="rounded-[20px] border border-dashed border-[#081b2c]/15 bg-[#faf9f6] p-8 text-center">
+            <Activity className="mx-auto h-8 w-8 text-[#d98e5f]" />
+            <p className="mx-auto mt-3 max-w-md text-xs leading-relaxed text-slate-500">
+              Os gráficos de perfil, localização, CID e volume de consultas serão atualizados automaticamente.
+            </p>
+          </div>
+        </Panel>
+      ) : (
+        <>
+          <div className="grid gap-5 xl:grid-cols-2">
+            <Panel title="Perfil dos pacientes" subtitle="Distribuição por sexo informado" icon={UsersRound}>
+              <Donut female={female} male={male} other={other} />
+            </Panel>
+
+            <Panel title="Faixa etária" subtitle="Idade atual dos pacientes cadastrados" icon={Activity}>
+              <div className="space-y-4 pt-1">
+                {ageRanges.map((range) => (
+                  <DataBar key={range.label} label={range.label} value={range.value} max={maxAge} color={SAGE} />
+                ))}
+              </div>
+            </Panel>
+          </div>
+
+          <Panel title="Ritmo de atendimentos" subtitle="Consultas registradas nos últimos seis meses" icon={CalendarCheck2}>
+            <div className="flex h-52 items-end gap-2 pt-5 sm:gap-5">
+              {months.map((month) => {
+                const height = Math.max((month.value / maxMonth) * 100, 4)
+                return (
+                  <div key={month.label} className="group flex h-full flex-1 flex-col items-center justify-end gap-2.5">
+                    <span className="text-[10px] font-extrabold text-[#081b2c]">{month.value || '–'}</span>
+                    <div className="relative flex h-[calc(100%-42px)] w-full max-w-16 items-end overflow-hidden rounded-[12px] bg-[#f1f2f1]">
+                      <div
+                        className="w-full rounded-[12px] bg-gradient-to-t from-[#c97848] to-[#eab18f] transition-all duration-700 group-hover:brightness-105"
+                        style={{ height: `${height}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] font-bold uppercase text-slate-400">{month.label}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </Panel>
+
+          <Panel title="Leitura da base clínica" subtitle="Principais recortes para apoiar decisões da rotina" icon={MapPinned}>
+            <div className="grid gap-7 lg:grid-cols-3 lg:divide-x lg:divide-[#081b2c]/[0.07]">
+              <Ranking title="Cidades" items={cities} color={SAGE} />
+              <div className="lg:pl-7">
+                <Ranking title="CID-10 mais frequentes" items={cids} color={PEACH} />
+              </div>
+              <div className="lg:pl-7">
+                <Ranking title="Convênios" items={healthPlans} color={NAVY} />
+              </div>
+            </div>
+            <div className="mt-6 flex items-center gap-2 border-t border-[#081b2c]/[0.06] pt-4 text-[10px] font-semibold text-slate-400">
+              <ArrowUpRight className="h-3.5 w-3.5 text-[#d98e5f]" />
+              Os indicadores refletem os campos preenchidos no cadastro de cada atendimento.
+            </div>
+          </Panel>
+        </>
+      )}
+    </div>
+  )
+}
