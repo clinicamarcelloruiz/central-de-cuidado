@@ -14,6 +14,7 @@ import type { Database } from '@/types/database'
 type PatientInsert = Database['public']['Tables']['patients']['Insert']
 type PatientUpdate = Database['public']['Tables']['patients']['Update']
 type ConsultationInsert = Database['public']['Tables']['consultations']['Insert']
+type ConsultationUpdate = Database['public']['Tables']['consultations']['Update']
 type AccessRequestRow = Database['public']['Tables']['access_requests']['Row']
 
 export type ClinicRole = Database['public']['Enums']['clinic_role']
@@ -404,6 +405,49 @@ export async function createConsultation(
   const { data, error } = await supabase
     .from('consultations')
     .insert(consultationPayload(clinicId, patientId, draft))
+    .select('*')
+    .single()
+
+  if (error) fail(error)
+  return {
+    consultation: mapConsultation(data as ConsultationRow),
+    patient: await patientById(clinicId, patientId),
+  }
+}
+
+export async function editConsultation(
+  clinicId: string,
+  patientId: string,
+  consultationId: string,
+  draft: ConsultationDraft,
+) {
+  const payload: ConsultationUpdate = {
+    consultation_date: draft.data,
+    encounter_type: draft.tipo,
+    unit: draft.unidade.trim(),
+    weight_kg: decimalOrNull(draft.peso),
+    height_cm: decimalOrNull(draft.altura),
+    chief_complaint: draft.queixa.trim(),
+    clinical_history: draft.historiaEvolucao.trim(),
+    personal_history: draft.antecedentesPessoais.trim(),
+    family_history: draft.antecedentesFamiliares.trim(),
+    allergies: draft.alergias.trim(),
+    current_medications: draft.medicamentos.trim(),
+    physical_exam: draft.exameFisico.trim(),
+    assessment: draft.avaliacao.trim(),
+    cid: draft.cid.trim(),
+    plan: draft.conduta.trim(),
+    prescription: draft.prescricao.trim(),
+    return_plan: draft.retorno.trim(),
+    notes: draft.observacoes.trim(),
+  }
+  const { data, error } = await supabase
+    .from('consultations')
+    .update(payload)
+    .eq('clinic_id', clinicId)
+    .eq('patient_id', patientId)
+    .eq('id', consultationId)
+    .is('archived_at', null)
     .select('*')
     .single()
 
