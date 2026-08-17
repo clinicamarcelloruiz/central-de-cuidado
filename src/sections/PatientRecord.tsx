@@ -49,6 +49,7 @@ import { UNIDADES } from '@/types/patient'
 interface PatientRecordProps {
   patient: Patient | null
   open: boolean
+  startInConsultationForm?: boolean
   onOpenChange: (open: boolean) => void
   listConsultations: (patientId: string) => Promise<Consultation[]>
   addConsultation: (patientId: string, draft: ConsultationDraft) => Promise<void>
@@ -407,6 +408,7 @@ function ConsultationCard({ consultation }: { consultation: Consultation }) {
 export default function PatientRecord({
   patient,
   open,
+  startInConsultationForm = false,
   onOpenChange,
   listConsultations,
   addConsultation,
@@ -443,7 +445,7 @@ export default function PatientRecord({
 
   useEffect(() => {
     if (!open || !patient) return
-    setMode('history')
+    setMode(startInConsultationForm ? 'form' : 'history')
     setForm(emptyConsultation(patient))
     setFormError('')
     void load(patient.id)
@@ -453,7 +455,7 @@ export default function PatientRecord({
     }
     // A troca do paciente deve reiniciar integralmente o painel.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, patient?.id])
+  }, [open, patient?.id, startInConsultationForm])
 
   function set<K extends keyof ConsultationDraft>(key: K, value: ConsultationDraft[K]) {
     setForm((current) => ({ ...current, [key]: value }))
