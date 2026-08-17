@@ -76,6 +76,8 @@ export default function Home() {
     addPatient,
     updatePatient,
     removePatient,
+    getConsultations,
+    addConsultation,
     setFollowup,
     setTemplates,
     importDb,
@@ -282,6 +284,8 @@ export default function Home() {
                 addPatient={addPatient}
                 updatePatient={updatePatient}
                 removePatient={removePatient}
+                listConsultations={getConsultations}
+                addConsultation={addConsultation}
                 openCreateSignal={newPatientSignal}
               />
             )}
@@ -322,3 +326,4 @@ export default function Home() {
     </div>
   )
 }
+
