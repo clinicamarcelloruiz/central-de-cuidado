@@ -27,6 +27,35 @@ export interface Patient {
   followups: Record<FollowupKey, FollowupState>
 }
 
+export type ConsultationType = 'initial' | 'return' | 'telemedicine' | 'other'
+
+export interface ConsultationDraft {
+  data: string // YYYY-MM-DD
+  tipo: ConsultationType
+  unidade: string
+  peso: string
+  altura: string
+  queixa: string
+  historiaEvolucao: string
+  antecedentesPessoais: string
+  antecedentesFamiliares: string
+  alergias: string
+  medicamentos: string
+  exameFisico: string
+  avaliacao: string
+  cid: string
+  conduta: string
+  prescricao: string
+  retorno: string
+  observacoes: string
+}
+
+export interface Consultation extends ConsultationDraft {
+  id: string
+  patientId: string
+  criadoEm: string
+}
+
 export interface Db {
   patients: Patient[]
   templates: Record<FollowupKey, string>
@@ -43,3 +72,4 @@ export const FOLLOWUP_LABEL: Record<FollowupKey, string> = {
   d30: '30 dias',
   m90: '3 meses',
 }
+
