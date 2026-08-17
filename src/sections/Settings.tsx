@@ -170,9 +170,9 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
                 {db.patients.length} pacientes
               </span>
             </div>
-            <h2 className="mt-5 text-base font-extrabold tracking-[-0.03em]">Backup dos dados</h2>
+            <h2 className="mt-5 text-base font-extrabold tracking-[-0.03em]">Cópia dos cadastros</h2>
             <p className="mt-2 text-[11px] leading-relaxed text-white/45">
-              Exporte uma cópia regularmente para recuperar ou transferir os dados entre dispositivos.
+              Exporta pacientes e preferências. As evoluções do prontuário permanecem protegidas no banco da clínica e não entram neste arquivo JSON.
             </p>
 
             <button
@@ -181,7 +181,7 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
               className="mt-5 flex w-full items-center justify-center gap-2 rounded-[14px] bg-[#e39a6d] px-4 py-3 text-xs font-extrabold text-[#081b2c] transition hover:bg-[#efaa7f]"
             >
               <Download className="h-4 w-4" />
-              Exportar backup
+              Exportar cadastros
             </button>
             <button
               type="button"
@@ -256,3 +256,4 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
     </div>
   )
 }
+
