@@ -13,8 +13,9 @@ import {
   Trash2,
   UsersRound,
 } from 'lucide-react'
-import type { Patient } from '@/types/patient'
+import type { Consultation, ConsultationDraft, Patient } from '@/types/patient'
 import type { PatientDraft } from '@/lib/store'
+import PatientRecord from '@/sections/PatientRecord'
 import { fmtBR, idade } from '@/lib/followup'
 import { FOLLOWUP_LABEL, UNIDADES } from '@/types/patient'
 import {
@@ -98,6 +99,8 @@ interface Props {
   addPatient: (draft: PatientDraft) => Promise<void>
   updatePatient: (id: string, patch: Partial<Patient>) => Promise<void>
   removePatient: (id: string) => Promise<void>
+  listConsultations: (patientId: string) => Promise<Consultation[]>
+  addConsultation: (patientId: string, draft: ConsultationDraft) => Promise<void>
   openCreateSignal?: number
 }
 
@@ -106,6 +109,8 @@ export default function Patients({
   addPatient,
   updatePatient,
   removePatient,
+  listConsultations,
+  addConsultation,
   openCreateSignal = 0,
 }: Props) {
   const [query, setQuery] = useState('')
@@ -114,6 +119,7 @@ export default function Patients({
   const [form, setForm] = useState<PatientDraft>(emptyDraft)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [recordPatientId, setRecordPatientId] = useState<string | null>(null)
 
   useEffect(() => {
     if (openCreateSignal <= 0) return
@@ -133,6 +139,11 @@ export default function Patients({
         .includes(normalized),
     )
   }, [patients, query])
+
+  const recordPatient = useMemo(
+    () => patients.find((patient) => patient.id === recordPatientId) ?? null,
+    [patients, recordPatientId],
+  )
 
   function set<K extends keyof PatientDraft>(key: K, value: PatientDraft[K]) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -341,6 +352,15 @@ export default function Patients({
                 ))}
               </div>
 
+              <button
+                type="button"
+                onClick={() => setRecordPatientId(patient.id)}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-[13px] border border-[#557f75]/15 bg-[#eef3f2] px-4 py-2.5 text-[10px] font-extrabold text-[#557f75] transition hover:-translate-y-0.5 hover:border-[#557f75]/25 hover:bg-[#e5efec]"
+              >
+                <FileHeart className="h-3.5 w-3.5" />
+                Abrir prontuário
+              </button>
+
               {(patient.responsavel || patient.convenio || patient.observacoes) && (
                 <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] font-semibold text-slate-400">
                   {patient.responsavel && (
@@ -358,7 +378,10 @@ export default function Patients({
       )}
 
       <Sheet open={formOpen} onOpenChange={handleOpenChange}>
-        <SheetContent className="w-full gap-0 border-l border-[#081b2c]/10 bg-[#fbfaf8] p-0 sm:max-w-[660px]">
+        <SheetContent
+          side="left"
+          className="w-full gap-0 border-r border-[#081b2c]/10 bg-[#fbfaf8] p-0 sm:max-w-[660px]"
+        >
           <SheetHeader className="border-b border-[#081b2c]/[0.07] bg-white px-5 pb-5 pt-6 sm:px-7">
             <div className="flex items-center gap-3 pr-8">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] bg-[#f5e7dd] text-[#c87543]">
@@ -466,6 +489,17 @@ export default function Patients({
           </div>
         </SheetContent>
       </Sheet>
+
+      <PatientRecord
+        patient={recordPatient}
+        open={recordPatient !== null}
+        onOpenChange={(open) => {
+          if (!open) setRecordPatientId(null)
+        }}
+        listConsultations={listConsultations}
+        addConsultation={addConsultation}
+      />
     </div>
   )
 }
+
