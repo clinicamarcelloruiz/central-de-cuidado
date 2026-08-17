@@ -101,6 +101,7 @@ interface Props {
   removePatient: (id: string) => Promise<void>
   listConsultations: (patientId: string) => Promise<Consultation[]>
   addConsultation: (patientId: string, draft: ConsultationDraft) => Promise<void>
+  updateConsultation: (patientId: string, consultationId: string, draft: ConsultationDraft) => Promise<void>
   openCreateSignal?: number
 }
 
@@ -111,6 +112,7 @@ export default function Patients({
   removePatient,
   listConsultations,
   addConsultation,
+  updateConsultation,
   openCreateSignal = 0,
 }: Props) {
   const [query, setQuery] = useState('')
@@ -508,6 +510,7 @@ export default function Patients({
         }}
         listConsultations={listConsultations}
         addConsultation={addConsultation}
+        updateConsultation={updateConsultation}
         onEditRegistration={(patient) => {
           setRecordPatientId(null)
           editRegistration(patient)
