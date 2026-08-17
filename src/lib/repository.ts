@@ -14,6 +14,24 @@ import type { Database } from '@/types/database'
 type PatientInsert = Database['public']['Tables']['patients']['Insert']
 type PatientUpdate = Database['public']['Tables']['patients']['Update']
 type ConsultationInsert = Database['public']['Tables']['consultations']['Insert']
+type AccessRequestRow = Database['public']['Tables']['access_requests']['Row']
+
+export type ClinicRole = Database['public']['Enums']['clinic_role']
+
+export interface CurrentMembership {
+  clinicId: string
+  role: ClinicRole
+}
+
+export interface AccessRequest {
+  id: string
+  name: string
+  email: string
+  requestedAt: string
+}
+
+export const PENDING_ACCESS_MESSAGE =
+  'Seu cadastro está aguardando aprovação do administrador da clínica.'
 
 type PatientRow = {
   id: string
@@ -251,25 +269,58 @@ async function patientById(clinicId: string, patientId: string) {
   return mapPatient(data as PatientRow, followups)
 }
 
-export async function ensureClinic() {
+export async function getCurrentMembership(): Promise<CurrentMembership | null> {
   const { data: membership, error: membershipError } = await supabase
     .from('clinic_memberships')
-    .select('clinic_id')
+    .select('clinic_id,role')
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle()
 
   if (membershipError) fail(membershipError)
-  if (membership?.clinic_id) return String(membership.clinic_id)
+  if (!membership?.clinic_id) return null
+  return {
+    clinicId: String(membership.clinic_id),
+    role: membership.role as ClinicRole,
+  }
+}
 
-  const { data, error } = await supabase.rpc('bootstrap_current_user_clinic', {
-    clinic_name: 'Clínica Dr. Marcelo',
-  })
+export async function ensureClinic() {
+  const membership = await getCurrentMembership()
+  if (membership) return membership.clinicId
+  throw new Error(PENDING_ACCESS_MESSAGE)
+}
+
+export async function listPendingAccessRequests(clinicId: string): Promise<AccessRequest[]> {
+  const { data, error } = await supabase
+    .from('access_requests')
+    .select('id,requested_name,requested_email,requested_at')
+    .eq('clinic_id', clinicId)
+    .eq('status', 'pending')
+    .order('requested_at', { ascending: true })
 
   if (error) fail(error)
-  const clinicId = data
-  if (!clinicId) throw new Error('Não foi possível criar o espaço seguro da clínica.')
-  return String(clinicId)
+  return ((data ?? []) as Pick<AccessRequestRow, 'id' | 'requested_name' | 'requested_email' | 'requested_at'>[]).map(
+    (request) => ({
+      id: request.id,
+      name: request.requested_name || 'Usuário sem nome',
+      email: request.requested_email,
+      requestedAt: request.requested_at,
+    }),
+  )
+}
+
+export async function approveAccessRequest(requestId: string, role: Exclude<ClinicRole, 'owner'>) {
+  const { error } = await supabase.rpc('approve_access_request', {
+    request_id: requestId,
+    assigned_role: role,
+  })
+  if (error) fail(error)
+}
+
+export async function rejectAccessRequest(requestId: string) {
+  const { error } = await supabase.rpc('reject_access_request', { request_id: requestId })
+  if (error) fail(error)
 }
 
 export async function fetchDb(
