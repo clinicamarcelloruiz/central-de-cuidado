@@ -299,7 +299,7 @@ export default function Dashboard({ patients }: { patients: Patient[] }) {
                 const height = Math.max((month.value / maxMonth) * 100, 4)
                 return (
                   <div key={month.label} className="group flex h-full flex-1 flex-col items-center justify-end gap-2.5">
-                    <span className="text-[10px] font-extrabold text-[#081b2c]">{month.value || '–'}</span>
+                    <span className="text-[10px] font-extrabold text-[#081b2c]">{month.value || '-'}</span>
                     <div className="relative flex h-[calc(100%-42px)] w-full max-w-16 items-end overflow-hidden rounded-[12px] bg-[#f1f2f1]">
                       <div
                         className="w-full rounded-[12px] bg-gradient-to-t from-[#c97848] to-[#eab18f] transition-all duration-700 group-hover:brightness-105"
