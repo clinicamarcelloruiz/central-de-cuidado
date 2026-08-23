@@ -5,6 +5,7 @@ export type FollowupKey = 'd30' | 'm90'
 export type FollowupStatus = 'pendente' | 'enviado' | 'concluido'
 
 export interface FollowupState {
+  id?: string
   status: FollowupStatus
   enviadoEm?: string
 }
@@ -72,4 +73,3 @@ export const FOLLOWUP_LABEL: Record<FollowupKey, string> = {
   d30: '30 dias',
   m90: '3 meses',
 }
-

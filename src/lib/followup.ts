@@ -25,11 +25,11 @@ export function dueDate(p: Patient, key: FollowupKey): string {
   return addDays(p.dataConsulta, FOLLOWUP_DAYS[key])
 }
 
-/** diferença em dias de `iso` até hoje (negativo = futuro) */
+/** diferença entre hoje e `iso` (positivo = atrasado, negativo = futuro) */
 export function daysFromToday(iso: string): number {
-  const a = new Date(iso + 'T12:00:00').getTime()
-  const b = new Date(todayISO() + 'T12:00:00').getTime()
-  return Math.round((a - b) / 86400000)
+  const dueDate = new Date(iso + 'T12:00:00').getTime()
+  const today = new Date(todayISO() + 'T12:00:00').getTime()
+  return Math.round((today - dueDate) / 86400000)
 }
 
 export function fmtBR(iso: string | undefined): string {

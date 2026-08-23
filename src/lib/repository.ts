@@ -53,6 +53,7 @@ type PatientRow = {
 }
 
 type FollowupRow = {
+  id: string
   patient_id: string
   followup_key: FollowupKey
   status: 'pending' | 'opened' | 'completed' | 'pendente' | 'enviado' | 'concluido'
@@ -124,6 +125,7 @@ function mapPatient(row: PatientRow, followupRows: FollowupRow[]): Patient {
   const followups = emptyFollowups()
   for (const item of followupRows) {
     followups[item.followup_key] = {
+      id: item.id,
       status: toUiStatus(item.status),
       enviadoEm: item.opened_at ?? undefined,
     }
@@ -247,7 +249,7 @@ function patientUpdatePayload(patch: Partial<Patient>): PatientUpdate {
 async function followupsForPatient(clinicId: string, patientId: string) {
   const { data, error } = await supabase
     .from('followups')
-    .select('patient_id,followup_key,status,opened_at')
+    .select('id,patient_id,followup_key,status,opened_at')
     .eq('clinic_id', clinicId)
     .eq('patient_id', patientId)
     .is('archived_at', null)
@@ -337,7 +339,7 @@ export async function fetchDb(
       .order('created_at', { ascending: false }),
     supabase
       .from('followups')
-      .select('patient_id,followup_key,status,opened_at')
+      .select('id,patient_id,followup_key,status,opened_at')
       .eq('clinic_id', clinicId)
       .is('archived_at', null),
     supabase
@@ -495,12 +497,13 @@ export async function changeFollowup(
     .eq('clinic_id', clinicId)
     .eq('patient_id', patientId)
     .eq('followup_key', key)
-    .select('patient_id,followup_key,status,opened_at')
+    .select('id,patient_id,followup_key,status,opened_at')
     .single()
 
   if (error) fail(error)
   const row = data as FollowupRow
   return {
+    id: row.id,
     status: toUiStatus(row.status),
     enviadoEm: row.opened_at ?? undefined,
   } satisfies FollowupState
@@ -555,4 +558,3 @@ export async function importPatients(clinicId: string, data: Db) {
     }
   }
 }
-

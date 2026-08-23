@@ -1,6 +1,5 @@
 import {
   AlertCircle,
-  ArrowUpRight,
   CalendarClock,
   Check,
   CheckCircle2,
@@ -12,14 +11,14 @@ import {
   Sparkles,
   Stethoscope,
 } from 'lucide-react'
+import { useState } from 'react'
 import type { FollowupKey, FollowupStatus, Patient } from '@/types/patient'
 import {
-  buildMessage,
   fmtBR,
   pendingFollowups,
-  waLink,
   type FollowupItem,
 } from '@/lib/followup'
+import { supabase } from '@/lib/supabase'
 
 const NAVY = '#081b2c'
 const PEACH = '#dc8e5f'
@@ -48,6 +47,23 @@ function initials(name: string) {
     .map((part) => part[0])
     .join('')
     .toUpperCase()
+}
+
+type FunctionPayload = {
+  code?: string
+  error?: string
+  alreadySent?: boolean
+}
+
+async function readFunctionError(error: unknown): Promise<FunctionPayload | null> {
+  const context = (error as { context?: Response } | null)?.context
+  if (!context || typeof context.clone !== 'function') return null
+
+  try {
+    return (await context.clone().json()) as FunctionPayload
+  } catch {
+    return null
+  }
 }
 
 function Group({
@@ -89,7 +105,8 @@ function Group({
   )
 }
 
-export default function Followups({ patients, templates, setFollowup }: Props) {
+export default function Followups({ patients, setFollowup }: Props) {
+  const [sending, setSending] = useState<string | null>(null)
   const items = pendingFollowups(patients)
   const overdue = items.filter((item) => item.urgencia === 'atrasado')
   const today = items.filter((item) => item.urgencia === 'hoje')
@@ -100,12 +117,44 @@ export default function Followups({ patients, templates, setFollowup }: Props) {
     .filter((followup) => followup.status === 'concluido').length
   const sent = items.filter((item) => item.patient.followups[item.key].status === 'enviado').length
 
-  function send(item: FollowupItem) {
-    const message = buildMessage(templates[item.key], item.patient)
-    window.open(waLink(item.patient.telefone, message), '_blank', 'noopener,noreferrer')
-    void setFollowup(item.patient.id, item.key, 'enviado').catch((cause) => {
-      alert(cause instanceof Error ? cause.message : 'Não foi possível atualizar o acompanhamento.')
-    })
+  async function send(item: FollowupItem, consentConfirmed = false) {
+    const followupId = item.patient.followups[item.key].id
+    if (!followupId) {
+      alert('Este acompanhamento ainda não terminou de carregar. Atualize a página e tente novamente.')
+      return
+    }
+
+    const sendingKey = `${item.patient.id}-${item.key}`
+    setSending(sendingKey)
+    try {
+      const { data, error } = await supabase.functions.invoke('whatsapp-send', {
+        body: { followupId, consentConfirmed },
+      })
+
+      const errorPayload = error ? await readFunctionError(error) : null
+      const responsePayload = (data ?? errorPayload) as FunctionPayload | null
+
+      if (responsePayload?.code === 'CONSENT_REQUIRED' && !consentConfirmed) {
+        const confirmed = window.confirm(
+          `Confirma que ${item.patient.responsavel || item.patient.nome} autorizou receber o acompanhamento pelo WhatsApp?`,
+        )
+        if (confirmed) await send(item, true)
+        return
+      }
+      if (error) throw new Error(responsePayload?.error || error.message)
+      if (responsePayload?.error) throw new Error(responsePayload.error)
+
+      await setFollowup(item.patient.id, item.key, 'enviado')
+      alert(
+        responsePayload?.alreadySent
+          ? 'Esta mensagem já havia sido enviada.'
+          : 'Mensagem enviada pelo WhatsApp com sucesso.',
+      )
+    } catch (cause) {
+      alert(cause instanceof Error ? cause.message : 'Não foi possível enviar a mensagem.')
+    } finally {
+      setSending((current) => (current === sendingKey ? null : current))
+    }
   }
 
   function dueLabel(item: FollowupItem) {
@@ -119,6 +168,8 @@ export default function Followups({ patients, templates, setFollowup }: Props) {
   function card(item: FollowupItem) {
     const patient = item.patient
     const wasSent = patient.followups[item.key].status === 'enviado'
+    const sendingKey = `${patient.id}-${item.key}`
+    const isSending = sending === sendingKey
     const isOverdue = item.urgencia === 'atrasado'
     const isToday = item.urgencia === 'hoje'
     const accent = isOverdue ? '#c94f4c' : isToday ? PEACH : item.key === 'd30' ? '#6f9d91' : NAVY
@@ -175,13 +226,13 @@ export default function Followups({ patients, templates, setFollowup }: Props) {
           <div className="flex shrink-0 gap-2 pl-14 sm:pl-0">
             <button
               type="button"
-              onClick={() => send(item)}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#1fbd69] px-3.5 py-2.5 text-[10px] font-extrabold text-white shadow-[0_8px_18px_rgba(31,189,105,.18)] transition hover:bg-[#18a95c] sm:flex-none"
-              aria-label={`${wasSent ? 'Reabrir' : 'Abrir'} WhatsApp de ${patient.nome}`}
+              onClick={() => void send(item)}
+              disabled={isSending || wasSent}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#1fbd69] px-3.5 py-2.5 text-[10px] font-extrabold text-white shadow-[0_8px_18px_rgba(31,189,105,.18)] transition hover:bg-[#18a95c] disabled:cursor-not-allowed disabled:opacity-55 sm:flex-none"
+              aria-label={`Enviar WhatsApp para ${patient.nome}`}
             >
-              <MessageCircle className="h-4 w-4" fill="currentColor" strokeWidth={1.5} />
-              {wasSent ? 'Reabrir' : 'WhatsApp'}
-              <ArrowUpRight className="h-3 w-3 opacity-70" />
+              <Send className="h-4 w-4" strokeWidth={2} />
+              {isSending ? 'Enviando...' : wasSent ? 'Enviado' : 'Enviar agora'}
             </button>
             <button
               type="button"
@@ -300,7 +351,7 @@ export default function Followups({ patients, templates, setFollowup }: Props) {
             <h2 className="text-[10px] font-extrabold uppercase tracking-[0.14em]">Fluxo seguro</h2>
           </div>
           <p className="mt-3 text-[11px] leading-relaxed text-[#4f6e67]">
-            O WhatsApp abre com a mensagem pronta. Revise antes de enviar e conclua o item quando a necessidade da família estiver resolvida.
+              O envio é feito automaticamente pelo número oficial da clínica. As respostas do paciente ficam registradas no sistema.
           </p>
         </section>
 
