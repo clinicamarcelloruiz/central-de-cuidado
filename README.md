@@ -1,4 +1,4 @@
-# Central de Cuidado — Dr. Marcello Ruiz
+# Central de Cuidado - Dr. Marcello Ruiz
 
 Sistema web responsivo para cadastro de pacientes e organização de acompanhamentos de 30 e 90 dias após a consulta.
 
@@ -43,5 +43,5 @@ npm audit --omit=dev
 
 ## Primeiro acesso
 
-Crie manualmente o primeiro usuário em **Supabase → Authentication → Users → Add user** e mantenha cadastro público desativado. Ao entrar pela primeira vez, o sistema cria o espaço da clínica e começa com a base vazia — nenhum paciente fictício é enviado para a nuvem.
+Crie manualmente o primeiro usuário em **Supabase → Authentication → Users → Add user** e mantenha cadastro público desativado. Ao entrar pela primeira vez, o sistema cria o espaço da clínica e começa com a base vazia - nenhum paciente fictício é enviado para a nuvem.
 
