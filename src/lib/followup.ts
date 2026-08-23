@@ -33,13 +33,13 @@ export function daysFromToday(iso: string): number {
 }
 
 export function fmtBR(iso: string | undefined): string {
-  if (!iso) return '—'
+  if (!iso) return '-'
   const [y, m, d] = iso.split('-')
   return `${d}/${m}/${y}`
 }
 
 export function idade(nascimento: string): string {
-  if (!nascimento) return '—'
+  if (!nascimento) return '-'
   const n = new Date(nascimento + 'T12:00:00')
   const h = new Date()
   let anos = h.getFullYear() - n.getFullYear()
