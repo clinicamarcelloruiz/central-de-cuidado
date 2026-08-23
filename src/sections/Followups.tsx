@@ -52,7 +52,17 @@ function initials(name: string) {
 type FunctionPayload = {
   code?: string
   error?: string
+  details?: string
+  hint?: string | null
   alreadySent?: boolean
+}
+
+/** Junta mensagem, codigo e detalhe tecnico para o erro na tela ser diagnosticavel. */
+function describeFailure(payload: FunctionPayload | null, fallback: string): string {
+  const base = payload?.error || fallback
+  const extras = [payload?.details, payload?.hint].filter(Boolean).join(' - ')
+  const code = payload?.code ? ` [${payload.code}]` : ''
+  return extras ? `${base}${code}\n\nDetalhe tecnico: ${extras}` : `${base}${code}`
 }
 
 async function readFunctionError(error: unknown): Promise<FunctionPayload | null> {
@@ -141,8 +151,8 @@ export default function Followups({ patients, setFollowup }: Props) {
         if (confirmed) await send(item, true)
         return
       }
-      if (error) throw new Error(responsePayload?.error || error.message)
-      if (responsePayload?.error) throw new Error(responsePayload.error)
+      if (error) throw new Error(describeFailure(responsePayload, error.message))
+      if (responsePayload?.error) throw new Error(describeFailure(responsePayload, 'Falha no envio.'))
 
       await setFollowup(item.patient.id, item.key, 'enviado')
       alert(

@@ -32,7 +32,20 @@ Deno.serve(async (req) => {
       .select('id,clinic_id')
       .eq('id', body.followupId)
       .maybeSingle()
-    if (visibleError || !visibleFollowup) return json({ error: 'Acesso não autorizado.' }, 403)
+    if (visibleError) {
+      console.error('RLS lookup failed', visibleError)
+      return json({
+        error: 'Falha ao verificar permissão do acompanhamento.',
+        code: 'RLS_LOOKUP_FAILED',
+        details: visibleError.message,
+      }, 500)
+    }
+    if (!visibleFollowup) {
+      return json({
+        error: 'Este acompanhamento não pertence à sua clínica ou a sessão expirou.',
+        code: 'NOT_VISIBLE',
+      }, 403)
+    }
 
     const admin = adminClient()
     const { data: followup, error: followupError } = await admin
@@ -40,8 +53,29 @@ Deno.serve(async (req) => {
       .select('id,clinic_id,patient_id,consultation_id,followup_key,due_date,archived_at')
       .eq('id', body.followupId)
       .maybeSingle()
-    if (followupError || !followup || followup.archived_at) {
-      return json({ error: 'Acompanhamento não encontrado.' }, 404)
+
+    // Cada causa devolve uma mensagem propria. Antes, os tres casos abaixo viravam
+    // "Acompanhamento nao encontrado", o que escondia erro de schema e de credencial.
+    if (followupError) {
+      console.error('Admin lookup failed', followupError)
+      return json({
+        error: 'Erro ao ler o acompanhamento no banco.',
+        code: 'ADMIN_LOOKUP_FAILED',
+        details: followupError.message,
+        hint: followupError.hint ?? null,
+      }, 500)
+    }
+    if (!followup) {
+      return json({
+        error: 'O acompanhamento existe para o seu usuário mas não foi lido pelo servidor. Verifique a chave de serviço.',
+        code: 'ADMIN_ROW_MISSING',
+      }, 500)
+    }
+    if (followup.archived_at) {
+      return json({
+        error: 'Este acompanhamento foi arquivado. Atualize a página para ver a lista atual.',
+        code: 'ARCHIVED',
+      }, 409)
     }
 
     const { data: previous } = await admin
