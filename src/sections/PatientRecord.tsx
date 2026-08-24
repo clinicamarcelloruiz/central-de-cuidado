@@ -229,6 +229,7 @@ function RichTextField({
   const dispositivoRef = useRef('')
   const chunksCountRef = useRef(0)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const fonteRef = useRef<MediaStreamAudioSourceNode | null>(null)
   const picoRef = useRef(0)
   const [nivel, setNivel] = useState(0)
   const [listening, setListening] = useState(false)
@@ -252,6 +253,8 @@ function RichTextField({
         // gravacao ja encerrada
       }
       streamRef.current?.getTracks().forEach((track) => track.stop())
+      void audioContextRef.current?.close().catch(() => {})
+      audioContextRef.current = null
     },
     [],
   )
@@ -285,12 +288,21 @@ function RichTextField({
    */
   async function toggleDictation() {
     if (listening) {
+      const gravador = recorderRef.current
+      // Se o gravador sumiu ou ja parou mas o estado ficou preso em "gravando",
+      // o botao ficaria morto ate recarregar a pagina. Aqui ele se destrava.
+      if (!gravador || gravador.state === 'inactive') {
+        encerrarMicrofone()
+        setListening(false)
+        return
+      }
       try {
         // Pede o pedaco pendente antes de parar. Sem isto, uma gravacao curta
         // pode terminar antes do primeiro corte automatico e voltar vazia.
-        if (recorderRef.current?.state === 'recording') recorderRef.current.requestData()
-        recorderRef.current?.stop()
+        if (gravador.state === 'recording') gravador.requestData()
+        gravador.stop()
       } catch {
+        encerrarMicrofone()
         setListening(false)
       }
       return
@@ -361,7 +373,17 @@ function RichTextField({
       void enviarParaTranscricao(blob, mime)
     }
 
-    monitorarNivel(stream)
+    // Uma faixa que nao esta "live" nao entrega audio nenhum. Acontece quando o
+    // Chrome segurou o dispositivo de uma gravacao anterior e nao soltou.
+    if (faixa && faixa.readyState !== 'live') {
+      setSpeechError(
+        'O microfone não respondeu. Feche e abra o Chrome novamente — ele costuma ficar segurando o dispositivo.',
+      )
+      stream.getTracks().forEach((t) => t.stop())
+      return
+    }
+
+    void monitorarNivel(stream)
 
     // Cortes curtos: garantem que mesmo uma gravacao de 1 segundo tenha dados.
     recorder.start(250)
@@ -375,11 +397,20 @@ function RichTextField({
    * distinguir "o navegador nao gravou" de "o microfone nao mandou som" - que
    * sao problemas diferentes e levam a solucoes diferentes.
    */
-  function monitorarNivel(stream: MediaStream) {
+  async function monitorarNivel(stream: MediaStream) {
     try {
-      const contexto = new AudioContext()
-      audioContextRef.current = contexto
+      // Um unico AudioContext para toda a vida do componente. Criar um novo a
+      // cada gravacao estourava o limite do Chrome (cerca de seis) e, a partir
+      // dali, o medidor parava de funcionar sem aviso - era o motivo de o
+      // ditado morrer depois de algumas gravacoes.
+      if (!audioContextRef.current) audioContextRef.current = new AudioContext()
+      const contexto = audioContextRef.current
+
+      // Contextos entram em suspensao sozinhos apos um tempo ocioso.
+      if (contexto.state === 'suspended') await contexto.resume()
+
       const fonte = contexto.createMediaStreamSource(stream)
+      fonteRef.current = fonte
       const analisador = contexto.createAnalyser()
       analisador.fftSize = 512
       fonte.connect(analisador)
@@ -388,7 +419,7 @@ function RichTextField({
       picoRef.current = 0
 
       const medir = () => {
-        if (!audioContextRef.current) return
+        if (!fonteRef.current) return
         analisador.getByteTimeDomainData(amostras)
         let soma = 0
         for (const amostra of amostras) {
@@ -407,8 +438,14 @@ function RichTextField({
   }
 
   function pararMonitor() {
-    void audioContextRef.current?.close().catch(() => {})
-    audioContextRef.current = null
+    // Desliga so a ligacao com este microfone. O AudioContext continua vivo e
+    // e reaproveitado na proxima gravacao.
+    try {
+      fonteRef.current?.disconnect()
+    } catch {
+      // ja desconectado
+    }
+    fonteRef.current = null
     setNivel(0)
   }
 
