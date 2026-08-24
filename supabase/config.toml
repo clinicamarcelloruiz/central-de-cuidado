@@ -19,3 +19,7 @@ verify_jwt = false
 [functions.whatsapp-dispatch]
 # Chamada pelo pg_cron via pg_net. A funcao exige o header x-cron-secret.
 verify_jwt = false
+
+[functions.transcrever-audio]
+# Chamada pelo navegador com a sessao do usuario logado. Mantem o JWT.
+verify_jwt = true

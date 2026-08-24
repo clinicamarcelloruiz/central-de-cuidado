@@ -68,23 +68,17 @@ const consultationLabels: Record<ConsultationType, string> = {
 const inputClass =
   'mt-1.5 w-full rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-xs font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#dc8e5f] focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10 disabled:cursor-not-allowed disabled:opacity-60'
 
-type SpeechRecognitionResultLike = {
-  isFinal: boolean
-  0: { transcript: string }
-}
+/**
+ * Formatos que o navegador pode usar para gravar. O Chrome prefere webm/opus,
+ * o Safari so aceita mp4. Testamos em ordem e usamos o primeiro suportado.
+ */
+const FORMATOS_AUDIO = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg']
 
-type SpeechRecognitionLike = {
-  lang: string
-  interimResults: boolean
-  continuous: boolean
-  onresult: ((event: { resultIndex: number; results: ArrayLike<SpeechRecognitionResultLike> }) => void) | null
-  onerror: ((event: { error: string }) => void) | null
-  onend: (() => void) | null
-  start: () => void
-  stop: () => void
+function extensaoDoFormato(mime: string) {
+  if (mime.includes('mp4')) return 'mp4'
+  if (mime.includes('ogg')) return 'ogg'
+  return 'webm'
 }
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 
 const editorColors = [
   { label: 'Escuro', value: '#081b2c' },
@@ -228,8 +222,11 @@ function RichTextField({
   className?: string
 }) {
   const editorRef = useRef<HTMLDivElement>(null)
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<BlobPart[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
   const [listening, setListening] = useState(false)
+  const [transcrevendo, setTranscrevendo] = useState(false)
   const [speechError, setSpeechError] = useState('')
 
   useEffect(() => {
@@ -239,7 +236,19 @@ function RichTextField({
     if (editor.innerHTML !== nextValue) editor.innerHTML = nextValue
   }, [value])
 
-  useEffect(() => () => recognitionRef.current?.stop(), [])
+  // Se a tela for fechada no meio de uma gravacao, o microfone precisa ser
+  // liberado. Sem isto o indicador de gravacao fica aceso no navegador.
+  useEffect(
+    () => () => {
+      try {
+        recorderRef.current?.stop()
+      } catch {
+        // gravacao ja encerrada
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+    },
+    [],
+  )
 
   function syncEditor() {
     onChange(sanitizeRichText(editorRef.current?.innerHTML || ''))

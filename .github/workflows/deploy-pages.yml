@@ -94,6 +94,7 @@ jobs:
           supabase functions deploy whatsapp-send --project-ref "$PROJECT_REF"
           supabase functions deploy meta-webhook --project-ref "$PROJECT_REF"
           supabase functions deploy whatsapp-dispatch --project-ref "$PROJECT_REF"
+          supabase functions deploy transcrever-audio --project-ref "$PROJECT_REF"
 
       # Aplica as migrations pendentes. Sem isto, toda alteracao de banco tem de
       # ser colada na mao no SQL Editor, o que ja causou schema publicado
