@@ -193,6 +193,13 @@ function sanitizeRichText(value: string) {
   return document.body.innerHTML
 }
 
+/** Diz se o HTML tem conteudo de verdade, ignorando <br> e espacos. */
+function temTexto(html: string) {
+  if (typeof window === 'undefined') return html.trim().length > 0
+  const documento = new DOMParser().parseFromString(html, 'text/html')
+  return (documento.body.textContent || '').replace(/\u00a0/g, ' ').trim().length > 0
+}
+
 function editorValue(value: string) {
   const sanitized = sanitizeRichText(value)
   return sanitized === value && !/[<>]/.test(value) ? textToEditorHtml(value) : sanitized
@@ -349,7 +356,11 @@ function RichTextField({
 
   function command(commandName: string, commandValue?: string) {
     editorRef.current?.focus()
-    document.execCommand('styleWithCSS', false, 'true')
+    // Só a cor precisa sair como estilo. Negrito, itálico e sublinhado devem
+    // virar as tags <b>, <i> e <u>: com styleWithCSS ligado o navegador gera
+    // <span style="font-weight:bold">, e a limpeza do HTML remove estilos que
+    // não sejam cor - o negrito era aplicado e desaparecia em seguida.
+    document.execCommand('styleWithCSS', false, commandName === 'foreColor' ? 'true' : 'false')
     document.execCommand(commandName, false, commandValue)
     window.setTimeout(syncEditor, 0)
   }
@@ -670,7 +681,10 @@ function RichTextField({
       }
 
       const atual = sanitizeRichText(editorRef.current?.innerHTML || '')
-      const proximo = `${atual}${atual ? '<br>' : ''}${textToEditorHtml(texto)}`
+      // Campo "vazio" no contenteditable costuma conter <br> ou <div><br></div>.
+      // Sem esta checagem o texto ditado entrava depois desses restos e nascia
+      // com linhas em branco na frente.
+      const proximo = temTexto(atual) ? `${atual}<br>${textToEditorHtml(texto)}` : textToEditorHtml(texto)
       if (editorRef.current) editorRef.current.innerHTML = proximo
       onChange(sanitizeRichText(proximo))
     } catch (causa) {
@@ -1027,7 +1041,11 @@ export default function PatientRecord({
                 Histórico clínico e registro de novas consultas do paciente.
               </SheetDescription>
               {patient && (patient.nascimento || patient.responsavel || patient.telefone || patient.convenio) && (
-                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[9px] font-bold text-slate-400">
+                <div
+                  className={`mt-2 flex-wrap gap-x-3 gap-y-1 text-[9px] font-bold text-slate-400 ${
+                    mode === 'history' ? 'hidden' : 'flex'
+                  }`}
+                >
                   {patient.nascimento && <span>{idade(patient.nascimento)}</span>}
                   {patient.responsavel && (
                     <span className="inline-flex items-center gap-1.5">
@@ -1046,7 +1064,9 @@ export default function PatientRecord({
                   )}
                 </div>
               )}
-              {patient && (
+              {/* No historico esses dados vivem no painel da esquerda; repetir
+                  aqui so ocupava espaco util da tela. */}
+              {patient && mode !== 'history' && (
                 <button
                   type="button"
                   onClick={() => onEditRegistration(patient)}
@@ -1088,6 +1108,52 @@ export default function PatientRecord({
             </div>
 
             <div className="scrollbar-subtle flex-1 overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
+              {/* Duas colunas: o cadastro do paciente fica sempre visivel a
+                  esquerda enquanto o medico percorre as consultas a direita.
+                  Antes era preciso rolar ate o topo para conferir convenio,
+                  idade ou responsavel no meio de uma leitura. */}
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,270px)_minmax(0,1fr)] lg:items-start">
+                <aside className="surface-card rounded-[20px] p-4 lg:sticky lg:top-0">
+                  <p className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-[#c87543]">
+                    Dados do paciente
+                  </p>
+                  <p className="mt-2 text-sm font-extrabold leading-tight text-[#081b2c]">{patient.nome}</p>
+
+                  <dl className="mt-3 space-y-2">
+                    {[
+                      { rotulo: 'Idade', valor: patient.nascimento ? idade(patient.nascimento) : '' },
+                      { rotulo: 'Nascimento', valor: patient.nascimento ? fmtBR(patient.nascimento) : '' },
+                      { rotulo: 'Responsável', valor: patient.responsavel },
+                      { rotulo: 'WhatsApp', valor: patient.telefone },
+                      { rotulo: 'Convênio', valor: patient.convenio },
+                      { rotulo: 'Unidade', valor: patient.unidade },
+                      {
+                        rotulo: 'Cidade',
+                        valor: [patient.cidade, patient.bairro].filter(Boolean).join(' · '),
+                      },
+                      { rotulo: 'CID-10', valor: patient.cid },
+                    ]
+                      .filter((linha) => linha.valor)
+                      .map((linha) => (
+                        <div key={linha.rotulo}>
+                          <dt className="text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
+                            {linha.rotulo}
+                          </dt>
+                          <dd className="text-[11px] font-semibold text-[#081b2c]">{linha.valor}</dd>
+                        </div>
+                      ))}
+                  </dl>
+
+                  <button
+                    type="button"
+                    onClick={() => onEditRegistration(patient)}
+                    className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-[#fbfaf8] px-3 py-2 text-[10px] font-extrabold text-slate-500 transition hover:border-[#c87543]/30 hover:text-[#c87543]"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" /> Editar cadastro
+                  </button>
+                </aside>
+
+                <div className="min-w-0">
               {loading ? (
                 <div className="flex min-h-[280px] items-center justify-center text-center">
                   <div>
@@ -1138,6 +1204,8 @@ export default function PatientRecord({
                   ))}
                 </Accordion>
               )}
+                </div>
+              </div>
             </div>
           </>
         ) : (
