@@ -226,6 +226,8 @@ function RichTextField({
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<BlobPart[]>([])
   const streamRef = useRef<MediaStream | null>(null)
+  const dispositivoRef = useRef('')
+  const chunksCountRef = useRef(0)
   const [listening, setListening] = useState(false)
   const [transcrevendo, setTranscrevendo] = useState(false)
   const [speechError, setSpeechError] = useState('')
@@ -281,6 +283,9 @@ function RichTextField({
   async function toggleDictation() {
     if (listening) {
       try {
+        // Pede o pedaco pendente antes de parar. Sem isto, uma gravacao curta
+        // pode terminar antes do primeiro corte automatico e voltar vazia.
+        if (recorderRef.current?.state === 'recording') recorderRef.current.requestData()
         recorderRef.current?.stop()
       } catch {
         setListening(false)
@@ -316,12 +321,25 @@ function RichTextField({
 
     streamRef.current = stream
     chunksRef.current = []
+    const faixa = stream.getAudioTracks()[0]
+    dispositivoRef.current = faixa?.label || 'microfone sem nome'
+    // Uma faixa "muted" entrega frames vazios: o navegador achou o dispositivo,
+    // mas o sistema operacional nao esta deixando o som passar.
+    if (faixa && faixa.muted) {
+      setSpeechError(
+        `O microfone "${dispositivoRef.current}" está mudo no Windows. Abra Configurações do Windows, Sistema, Som, e verifique o volume e a privacidade do microfone.`,
+      )
+      stream.getTracks().forEach((t) => t.stop())
+      return
+    }
 
     const formato = FORMATOS_AUDIO.find((tipo) => MediaRecorder.isTypeSupported(tipo)) || ''
     const recorder = new MediaRecorder(stream, formato ? { mimeType: formato } : undefined)
     recorderRef.current = recorder
 
+    chunksCountRef.current = 0
     recorder.ondataavailable = (evento) => {
+      chunksCountRef.current += 1
       if (evento.data && evento.data.size > 0) chunksRef.current.push(evento.data)
     }
 
@@ -340,8 +358,8 @@ function RichTextField({
       void enviarParaTranscricao(blob, mime)
     }
 
-    // Pedaco a cada segundo evita perder tudo se algo travar no meio.
-    recorder.start(1000)
+    // Cortes curtos: garantem que mesmo uma gravacao de 1 segundo tenha dados.
+    recorder.start(250)
     setListening(true)
   }
 
@@ -353,7 +371,13 @@ function RichTextField({
 
   async function enviarParaTranscricao(blob: Blob, mime: string) {
     if (blob.size === 0) {
-      setSpeechError('Nada foi gravado. Fale mais perto do microfone.')
+      // Mensagem com diagnostico: sem isto o "nada foi gravado" nao diz se o
+      // problema foi o dispositivo, o formato ou a gravacao curta demais.
+      setSpeechError(
+        `O áudio voltou vazio (${chunksCountRef.current} pedaços, formato ${mime}, ` +
+          `dispositivo "${dispositivoRef.current}"). Verifique se o microfone certo está ` +
+          `selecionado no Windows e se não está mudo, e grave por pelo menos 2 segundos.`,
+      )
       return
     }
 
