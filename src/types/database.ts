@@ -414,6 +414,108 @@ export type Database = {
         }
         Relationships: []
       }
+      whatsapp_conversations: {
+        Row: {
+          clinic_id: string
+          created_at: string
+          display_phone: string
+          id: string
+          last_message_at: string | null
+          needs_attention: boolean
+          patient_id: string | null
+          status: string
+          unread_count: number
+          updated_at: string
+          wa_id: string
+        }
+        Insert: {
+          clinic_id: string
+          created_at?: string
+          display_phone?: string
+          id?: string
+          last_message_at?: string | null
+          needs_attention?: boolean
+          patient_id?: string | null
+          status?: string
+          unread_count?: number
+          updated_at?: string
+          wa_id: string
+        }
+        Update: {
+          clinic_id?: string
+          created_at?: string
+          display_phone?: string
+          id?: string
+          last_message_at?: string | null
+          needs_attention?: boolean
+          patient_id?: string | null
+          status?: string
+          unread_count?: number
+          updated_at?: string
+          wa_id?: string
+        }
+        Relationships: []
+      }
+      whatsapp_messages: {
+        Row: {
+          body: string
+          clinic_id: string
+          conversation_id: string
+          created_at: string
+          delivered_at: string | null
+          direction: Database["public"]["Enums"]["whatsapp_message_direction"]
+          external_message_id: string | null
+          failed_at: string | null
+          failure_reason: string | null
+          followup_id: string | null
+          id: string
+          message_type: string
+          patient_id: string | null
+          read_at: string | null
+          sent_at: string | null
+          status: Database["public"]["Enums"]["whatsapp_message_status"]
+          template_name: string | null
+        }
+        Insert: {
+          body?: string
+          clinic_id: string
+          conversation_id: string
+          created_at?: string
+          delivered_at?: string | null
+          direction: Database["public"]["Enums"]["whatsapp_message_direction"]
+          external_message_id?: string | null
+          failed_at?: string | null
+          failure_reason?: string | null
+          followup_id?: string | null
+          id?: string
+          message_type?: string
+          patient_id?: string | null
+          read_at?: string | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["whatsapp_message_status"]
+          template_name?: string | null
+        }
+        Update: {
+          body?: string
+          clinic_id?: string
+          conversation_id?: string
+          created_at?: string
+          delivered_at?: string | null
+          direction?: Database["public"]["Enums"]["whatsapp_message_direction"]
+          external_message_id?: string | null
+          failed_at?: string | null
+          failure_reason?: string | null
+          followup_id?: string | null
+          id?: string
+          message_type?: string
+          patient_id?: string | null
+          read_at?: string | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["whatsapp_message_status"]
+          template_name?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -441,6 +543,14 @@ export type Database = {
       followup_status: "pending" | "opened" | "completed"
       membership_status: "active" | "suspended"
       patient_sex: "F" | "M" | "O"
+      whatsapp_message_direction: "inbound" | "outbound"
+      whatsapp_message_status:
+        | "queued"
+        | "accepted"
+        | "sent"
+        | "delivered"
+        | "read"
+        | "failed"
     }
     CompositeTypes: {
       [_ in never]: never

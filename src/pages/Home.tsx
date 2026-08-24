@@ -8,6 +8,7 @@ import {
   HeartHandshake,
   LogOut,
   MessageCircleHeart,
+  MessagesSquare,
   Plus,
   RefreshCw,
   Settings2,
@@ -21,17 +22,19 @@ import { dueCount } from '@/lib/followup'
 import Dashboard from '@/sections/Dashboard'
 import Patients from '@/sections/Patients'
 import Followups from '@/sections/Followups'
+import Conversations from '@/sections/Conversations'
 import Settings from '@/sections/Settings'
 import AccessAdmin from '@/sections/AccessAdmin'
 import logo from '@/assets/logo.webp'
 import { useAuth } from '@/auth/AuthProvider'
 
-type Tab = 'dashboard' | 'followups' | 'pacientes' | 'config' | 'admin'
+type Tab = 'dashboard' | 'followups' | 'conversas' | 'pacientes' | 'config' | 'admin'
 type Icon = ComponentType<{ className?: string; strokeWidth?: number }>
 
 const TABS: { key: Tab; label: string; shortLabel: string; icon: Icon }[] = [
   { key: 'dashboard', label: 'Visão geral', shortLabel: 'Visão', icon: ChartNoAxesCombined },
   { key: 'followups', label: 'Acompanhamentos', shortLabel: 'Follow-ups', icon: MessageCircleHeart },
+  { key: 'conversas', label: 'Respostas', shortLabel: 'Respostas', icon: MessagesSquare },
   { key: 'pacientes', label: 'Pacientes', shortLabel: 'Pacientes', icon: UsersRound },
   { key: 'config', label: 'Preferências', shortLabel: 'Ajustes', icon: Settings2 },
   { key: 'admin', label: 'Acessos da equipe', shortLabel: 'Acessos', icon: ShieldCheck },
@@ -47,6 +50,11 @@ const PAGE_META: Record<Tab, { eyebrow: string; title: string; subtitle: string 
     eyebrow: 'Cuidado contínuo',
     title: 'Acompanhamentos',
     subtitle: 'Cada paciente no momento certo da sua jornada.',
+  },
+  conversas: {
+    eyebrow: 'Escuta ativa',
+    title: 'Respostas',
+    subtitle: 'O que os pacientes responderam pelo WhatsApp, em um só lugar.',
   },
   pacientes: {
     eyebrow: 'Base clínica',
@@ -296,6 +304,7 @@ export default function Home() {
             {tab === 'followups' && (
               <Followups patients={db.patients} templates={db.templates} setFollowup={setFollowup} />
             )}
+            {tab === 'conversas' && <Conversations />}
             {tab === 'pacientes' && (
               <Patients
                 patients={db.patients}

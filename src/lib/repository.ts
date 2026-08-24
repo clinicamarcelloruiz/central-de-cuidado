@@ -326,6 +326,121 @@ export async function rejectAccessRequest(requestId: string) {
   if (error) fail(error)
 }
 
+/* ------------------------------------------------------------------ *
+ * Conversas do WhatsApp
+ *
+ * O webhook grava as respostas dos pacientes em whatsapp_conversations e
+ * whatsapp_messages. Estas funcoes existem para que essas respostas apareçam
+ * na tela: sem elas o paciente responde "Preciso de ajuda" e ninguem ve.
+ * ------------------------------------------------------------------ */
+
+export interface Conversation {
+  id: string
+  patientId: string | null
+  patientName: string
+  phone: string
+  status: 'open' | 'resolved' | 'opted_out'
+  needsAttention: boolean
+  unreadCount: number
+  lastMessageAt: string | null
+  lastMessage: string
+}
+
+export interface ConversationMessage {
+  id: string
+  direction: 'inbound' | 'outbound'
+  body: string
+  status: string
+  templateName: string | null
+  createdAt: string
+  failureReason: string | null
+}
+
+export async function listConversations(clinicId: string): Promise<Conversation[]> {
+  const { data, error } = await supabase
+    .from('whatsapp_conversations')
+    .select('id,patient_id,display_phone,wa_id,status,needs_attention,unread_count,last_message_at')
+    .eq('clinic_id', clinicId)
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+
+  if (error) fail(error)
+  const rows = data ?? []
+  if (rows.length === 0) return []
+
+  // Nomes dos pacientes e ultima mensagem de cada conversa, em duas consultas
+  // em vez de uma por conversa.
+  const patientIds = [...new Set(rows.map((row) => row.patient_id).filter(Boolean))] as string[]
+  const [patientsResult, messagesResult] = await Promise.all([
+    patientIds.length
+      ? supabase.from('patients').select('id,name').in('id', patientIds)
+      : Promise.resolve({ data: [], error: null }),
+    supabase
+      .from('whatsapp_messages')
+      .select('conversation_id,body,created_at')
+      .eq('clinic_id', clinicId)
+      .order('created_at', { ascending: false }),
+  ])
+  if (patientsResult.error) fail(patientsResult.error)
+  if (messagesResult.error) fail(messagesResult.error)
+
+  const nameById = new Map((patientsResult.data ?? []).map((p) => [p.id, p.name]))
+  const lastBodyByConversation = new Map<string, string>()
+  for (const message of messagesResult.data ?? []) {
+    if (!lastBodyByConversation.has(message.conversation_id)) {
+      lastBodyByConversation.set(message.conversation_id, message.body)
+    }
+  }
+
+  return rows.map((row) => ({
+    id: row.id,
+    patientId: row.patient_id,
+    patientName: (row.patient_id && nameById.get(row.patient_id)) || 'Contato sem cadastro',
+    phone: row.display_phone || row.wa_id,
+    status: row.status as Conversation['status'],
+    needsAttention: row.needs_attention,
+    unreadCount: row.unread_count,
+    lastMessageAt: row.last_message_at,
+    lastMessage: lastBodyByConversation.get(row.id) ?? '',
+  }))
+}
+
+export async function listConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
+  const { data, error } = await supabase
+    .from('whatsapp_messages')
+    .select('id,direction,body,status,template_name,created_at,failure_reason')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true })
+
+  if (error) fail(error)
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    direction: row.direction,
+    body: row.body,
+    status: row.status,
+    templateName: row.template_name,
+    createdAt: row.created_at,
+    failureReason: row.failure_reason,
+  }))
+}
+
+/** Zera o contador de nao lidas e tira o destaque de atencao. */
+export async function markConversationSeen(conversationId: string) {
+  const { error } = await supabase
+    .from('whatsapp_conversations')
+    .update({ unread_count: 0, needs_attention: false })
+    .eq('id', conversationId)
+  if (error) fail(error)
+}
+
+/** Marca a conversa como resolvida sem apagar o historico. */
+export async function resolveConversation(conversationId: string) {
+  const { error } = await supabase
+    .from('whatsapp_conversations')
+    .update({ status: 'resolved', needs_attention: false, unread_count: 0 })
+    .eq('id', conversationId)
+  if (error) fail(error)
+}
+
 export async function fetchDb(
   clinicId: string,
   defaults: Record<FollowupKey, string>,
