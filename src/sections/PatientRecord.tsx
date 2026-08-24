@@ -261,6 +261,39 @@ function RichTextField({
     [],
   )
 
+  /**
+   * Solta o microfone ao sair da aba.
+   *
+   * Sem isto, a reserva do dispositivo continua enquanto o usuario abre o
+   * WhatsApp Web ou uma chamada, os dois disputam o mesmo microfone, e o
+   * servico de audio do Chrome trava - estado em que nem recarregar a pagina
+   * resolve, so fechar o navegador.
+   */
+  useEffect(() => {
+    function aoTrocarDeAba() {
+      if (document.visibilityState !== 'hidden') return
+      if (recorderRef.current?.state === 'recording') {
+        // Gravacao em andamento: encerra normalmente para nao perder o audio.
+        try {
+          recorderRef.current.requestData()
+          recorderRef.current.stop()
+        } catch {
+          // ja parado
+        }
+        return
+      }
+      if (liberacaoRef.current) {
+        window.clearTimeout(liberacaoRef.current)
+        liberacaoRef.current = null
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+
+    document.addEventListener('visibilitychange', aoTrocarDeAba)
+    return () => document.removeEventListener('visibilitychange', aoTrocarDeAba)
+  }, [])
+
   function syncEditor() {
     onChange(sanitizeRichText(editorRef.current?.innerHTML || ''))
   }
@@ -579,7 +612,7 @@ function RichTextField({
       streamRef.current?.getTracks().forEach((track) => track.stop())
       streamRef.current = null
       liberacaoRef.current = null
-    }, 45000)
+    }, 20000)
   }
 
   async function enviarParaTranscricao(blob: Blob, mime: string) {
@@ -588,10 +621,11 @@ function RichTextField({
       // som algum, e navegador que nao consegue gravar o que recebe.
       if (picoRef.current < 0.01) {
         setSpeechError(
-          `Nenhum som chegou do "${dispositivoRef.current}". O microfone está conectado mas não ` +
-            `capta nada. Verifique: botão de mudo no próprio headset, volume de entrada em ` +
-            `Configurações do Windows > Sistema > Som, e se o Chrome está usando este microfone ` +
-            `(digite chrome://settings/content/microphone na barra de endereço).`,
+          `Nenhum som chegou do "${dispositivoRef.current}". A causa mais comum é outro programa ` +
+            `ou outra aba ter pegado o microfone — WhatsApp Web, Zoom, Teams ou Meet reservam o ` +
+            `dispositivo mesmo em segundo plano. Feche essas abas e programas e, se não resolver, ` +
+            `feche o Chrome por completo e abra de novo: recarregar a página não basta, porque o ` +
+            `travamento é do navegador inteiro.`,
         )
       } else {
         setSpeechError(
