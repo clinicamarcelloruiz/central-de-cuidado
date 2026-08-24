@@ -86,11 +86,13 @@ export default function Conversations() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'whatsapp_messages', filter: `clinic_id=eq.${clinicId}` },
-        (payload) => {
-          const nova = payload.new as { conversation_id?: string } | null
-          // Se a conversa afetada esta aberta, recarrega o historico dela.
-          if (nova?.conversation_id && nova.conversation_id === selectedIdRef.current) {
-            void listConversationMessages(nova.conversation_id).then(setMessages).catch(() => {})
+        () => {
+          // Recarrega o historico da conversa aberta em qualquer evento. Nao da
+          // para olhar so o registro novo: em exclusao o Supabase manda apenas o
+          // registro antigo, e a tela ficaria mostrando algo que ja nao existe.
+          const aberta = selectedIdRef.current
+          if (aberta) {
+            void listConversationMessages(aberta).then(setMessages).catch(() => {})
           }
           // A lista lateral sempre reflete a ultima mensagem e o contador.
           void load(true)

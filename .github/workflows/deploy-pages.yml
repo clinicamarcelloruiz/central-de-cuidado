@@ -94,3 +94,18 @@ jobs:
           supabase functions deploy whatsapp-send --project-ref "$PROJECT_REF"
           supabase functions deploy meta-webhook --project-ref "$PROJECT_REF"
           supabase functions deploy whatsapp-dispatch --project-ref "$PROJECT_REF"
+
+      # Aplica as migrations pendentes. Sem isto, toda alteracao de banco tem de
+      # ser colada na mao no SQL Editor, o que ja causou schema publicado
+      # diferente do repositorio.
+      - name: Aplicar migrations do banco
+        if: steps.token.outputs.presente == 'true'
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          if [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "::warning::SUPABASE_DB_PASSWORD nao configurado. As migrations nao serao aplicadas automaticamente."
+            exit 0
+          fi
+          supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          supabase db push --password "$SUPABASE_DB_PASSWORD"
