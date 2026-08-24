@@ -23,16 +23,18 @@ import Dashboard from '@/sections/Dashboard'
 import Patients from '@/sections/Patients'
 import Followups from '@/sections/Followups'
 import Conversations from '@/sections/Conversations'
+import Agenda from '@/sections/Agenda'
 import Settings from '@/sections/Settings'
 import AccessAdmin from '@/sections/AccessAdmin'
 import logo from '@/assets/logo.webp'
 import { useAuth } from '@/auth/AuthProvider'
 
-type Tab = 'dashboard' | 'followups' | 'conversas' | 'pacientes' | 'config' | 'admin'
+type Tab = 'dashboard' | 'agenda' | 'followups' | 'conversas' | 'pacientes' | 'config' | 'admin'
 type Icon = ComponentType<{ className?: string; strokeWidth?: number }>
 
 const TABS: { key: Tab; label: string; shortLabel: string; icon: Icon }[] = [
   { key: 'dashboard', label: 'Visão geral', shortLabel: 'Visão', icon: ChartNoAxesCombined },
+  { key: 'agenda', label: 'Agenda', shortLabel: 'Agenda', icon: CalendarDays },
   { key: 'followups', label: 'Acompanhamentos', shortLabel: 'Follow-ups', icon: MessageCircleHeart },
   { key: 'conversas', label: 'Respostas', shortLabel: 'Respostas', icon: MessagesSquare },
   { key: 'pacientes', label: 'Pacientes', shortLabel: 'Pacientes', icon: UsersRound },
@@ -50,6 +52,11 @@ const PAGE_META: Record<Tab, { eyebrow: string; title: string; subtitle: string 
     eyebrow: 'Cuidado contínuo',
     title: 'Acompanhamentos',
     subtitle: 'Cada paciente no momento certo da sua jornada.',
+  },
+  agenda: {
+    eyebrow: 'Tempo do cuidado',
+    title: 'Agenda',
+    subtitle: 'Horários de atendimento, bloqueios e consultas marcadas.',
   },
   conversas: {
     eyebrow: 'Escuta ativa',
@@ -304,6 +311,7 @@ export default function Home() {
             {tab === 'followups' && (
               <Followups patients={db.patients} templates={db.templates} setFollowup={setFollowup} />
             )}
+            {tab === 'agenda' && <Agenda patients={db.patients} />}
             {tab === 'conversas' && <Conversations />}
             {tab === 'pacientes' && (
               <Patients

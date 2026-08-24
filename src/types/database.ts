@@ -97,23 +97,44 @@ export type Database = {
         Row: {
           clinic_id: string
           created_at: string
+          schedule_horizon_days: number
+          schedule_min_notice_hours: number
+          schedule_slot_minutes: number
           template_d30: string
           template_m90: string
           updated_at: string
+          whatsapp_phone_number_id: string | null
+          whatsapp_template_language: string
+          whatsapp_template_name: string
+          whatsapp_waba_id: string | null
         }
         Insert: {
           clinic_id: string
           created_at?: string
+          schedule_horizon_days?: number
+          schedule_min_notice_hours?: number
+          schedule_slot_minutes?: number
           template_d30?: string
           template_m90?: string
           updated_at?: string
+          whatsapp_phone_number_id?: string | null
+          whatsapp_template_language?: string
+          whatsapp_template_name?: string
+          whatsapp_waba_id?: string | null
         }
         Update: {
           clinic_id?: string
           created_at?: string
+          schedule_horizon_days?: number
+          schedule_min_notice_hours?: number
+          schedule_slot_minutes?: number
           template_d30?: string
           template_m90?: string
           updated_at?: string
+          whatsapp_phone_number_id?: string | null
+          whatsapp_template_language?: string
+          whatsapp_template_name?: string
+          whatsapp_waba_id?: string | null
         }
         Relationships: [
           {
@@ -414,6 +435,156 @@ export type Database = {
         }
         Relationships: []
       }
+      clinic_units: {
+        Row: {
+          address: string
+          archived_at: string | null
+          clinic_id: string
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          address?: string
+          archived_at?: string | null
+          clinic_id: string
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          address?: string
+          archived_at?: string | null
+          clinic_id?: string
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      availability_rules: {
+        Row: {
+          clinic_id: string
+          created_at: string
+          ends_at: string
+          id: string
+          starts_at: string
+          unit_id: string
+          updated_at: string
+          weekday: number
+        }
+        Insert: {
+          clinic_id: string
+          created_at?: string
+          ends_at: string
+          id?: string
+          starts_at: string
+          unit_id: string
+          updated_at?: string
+          weekday: number
+        }
+        Update: {
+          clinic_id?: string
+          created_at?: string
+          ends_at?: string
+          id?: string
+          starts_at?: string
+          unit_id?: string
+          updated_at?: string
+          weekday?: number
+        }
+        Relationships: []
+      }
+      schedule_exceptions: {
+        Row: {
+          clinic_id: string
+          created_at: string
+          ends_at: string | null
+          exception_date: string
+          id: string
+          is_closed: boolean
+          reason: string
+          starts_at: string | null
+          unit_id: string | null
+        }
+        Insert: {
+          clinic_id: string
+          created_at?: string
+          ends_at?: string | null
+          exception_date: string
+          id?: string
+          is_closed?: boolean
+          reason?: string
+          starts_at?: string | null
+          unit_id?: string | null
+        }
+        Update: {
+          clinic_id?: string
+          created_at?: string
+          ends_at?: string | null
+          exception_date?: string
+          id?: string
+          is_closed?: boolean
+          reason?: string
+          starts_at?: string | null
+          unit_id?: string | null
+        }
+        Relationships: []
+      }
+      appointments: {
+        Row: {
+          cancelled_at: string | null
+          clinic_id: string
+          created_at: string
+          created_by: string | null
+          ends_at: string
+          id: string
+          patient_id: string | null
+          patient_note: string
+          source: Database["public"]["Enums"]["appointment_source"]
+          staff_note: string
+          starts_at: string
+          status: Database["public"]["Enums"]["appointment_status"]
+          unit_id: string
+          updated_at: string
+        }
+        Insert: {
+          cancelled_at?: string | null
+          clinic_id: string
+          created_at?: string
+          created_by?: string | null
+          ends_at: string
+          id?: string
+          patient_id?: string | null
+          patient_note?: string
+          source?: Database["public"]["Enums"]["appointment_source"]
+          staff_note?: string
+          starts_at: string
+          status?: Database["public"]["Enums"]["appointment_status"]
+          unit_id: string
+          updated_at?: string
+        }
+        Update: {
+          cancelled_at?: string | null
+          clinic_id?: string
+          created_at?: string
+          created_by?: string | null
+          ends_at?: string
+          id?: string
+          patient_id?: string | null
+          patient_note?: string
+          source?: Database["public"]["Enums"]["appointment_source"]
+          staff_note?: string
+          starts_at?: string
+          status?: Database["public"]["Enums"]["appointment_status"]
+          unit_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       whatsapp_conversations: {
         Row: {
           clinic_id: string
@@ -536,8 +707,14 @@ export type Database = {
         Args: { request_id: string }
         Returns: undefined
       }
+      available_slots: {
+        Args: { p_unit_id: string }
+        Returns: { slot_start: string; slot_end: string }[]
+      }
     }
     Enums: {
+      appointment_source: "clinic" | "whatsapp"
+      appointment_status: "scheduled" | "attended" | "cancelled" | "no_show"
       clinic_role: "owner" | "clinician" | "staff" | "viewer"
       followup_key: "d30" | "m90"
       followup_status: "pending" | "opened" | "completed"

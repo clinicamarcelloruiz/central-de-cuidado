@@ -327,6 +327,270 @@ export async function rejectAccessRequest(requestId: string) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Agenda
+ *
+ * Os horarios livres NAO sao calculados aqui: vem da funcao available_slots
+ * no banco. A mesma resposta precisa servir para esta tela e para o
+ * agendamento pelo WhatsApp, e duas implementacoes divergiriam com o tempo.
+ * ------------------------------------------------------------------ */
+
+export interface Unit {
+  id: string
+  name: string
+  address: string
+}
+
+export interface AvailabilityRule {
+  id: string
+  unitId: string
+  weekday: number
+  startsAt: string
+  endsAt: string
+}
+
+export interface ScheduleException {
+  id: string
+  unitId: string | null
+  date: string
+  isClosed: boolean
+  startsAt: string | null
+  endsAt: string | null
+  reason: string
+}
+
+export interface SchedulePreferences {
+  slotMinutes: number
+  horizonDays: number
+  minNoticeHours: number
+}
+
+export interface Appointment {
+  id: string
+  unitId: string
+  patientId: string | null
+  patientName: string
+  startsAt: string
+  endsAt: string
+  status: 'scheduled' | 'attended' | 'cancelled' | 'no_show'
+  source: 'clinic' | 'whatsapp'
+  staffNote: string
+}
+
+export const WEEKDAY_LABEL = [
+  'Domingo',
+  'Segunda',
+  'Terça',
+  'Quarta',
+  'Quinta',
+  'Sexta',
+  'Sábado',
+]
+
+export async function listUnits(clinicId: string): Promise<Unit[]> {
+  const { data, error } = await supabase
+    .from('clinic_units')
+    .select('id,name,address')
+    .eq('clinic_id', clinicId)
+    .is('archived_at', null)
+    .order('name')
+  if (error) fail(error)
+  return data ?? []
+}
+
+export async function createUnit(clinicId: string, name: string, address: string): Promise<Unit> {
+  const { data, error } = await supabase
+    .from('clinic_units')
+    .insert({ clinic_id: clinicId, name: name.trim(), address: address.trim() })
+    .select('id,name,address')
+    .single()
+  if (error) fail(error)
+  return data
+}
+
+/** Arquiva em vez de apagar: agendamentos antigos continuam apontando para a unidade. */
+export async function archiveUnit(unitId: string) {
+  const { error } = await supabase
+    .from('clinic_units')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', unitId)
+  if (error) fail(error)
+}
+
+export async function listAvailabilityRules(unitId: string): Promise<AvailabilityRule[]> {
+  const { data, error } = await supabase
+    .from('availability_rules')
+    .select('id,unit_id,weekday,starts_at,ends_at')
+    .eq('unit_id', unitId)
+    .order('weekday')
+    .order('starts_at')
+  if (error) fail(error)
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    unitId: row.unit_id,
+    weekday: row.weekday,
+    startsAt: row.starts_at.slice(0, 5),
+    endsAt: row.ends_at.slice(0, 5),
+  }))
+}
+
+export async function createAvailabilityRule(
+  clinicId: string,
+  unitId: string,
+  weekday: number,
+  startsAt: string,
+  endsAt: string,
+) {
+  const { error } = await supabase
+    .from('availability_rules')
+    .insert({ clinic_id: clinicId, unit_id: unitId, weekday, starts_at: startsAt, ends_at: endsAt })
+  if (error) fail(error)
+}
+
+export async function deleteAvailabilityRule(ruleId: string) {
+  const { error } = await supabase.from('availability_rules').delete().eq('id', ruleId)
+  if (error) fail(error)
+}
+
+export async function listScheduleExceptions(clinicId: string): Promise<ScheduleException[]> {
+  const { data, error } = await supabase
+    .from('schedule_exceptions')
+    .select('id,unit_id,exception_date,is_closed,starts_at,ends_at,reason')
+    .eq('clinic_id', clinicId)
+    .gte('exception_date', new Date().toISOString().slice(0, 10))
+    .order('exception_date')
+  if (error) fail(error)
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    unitId: row.unit_id,
+    date: row.exception_date,
+    isClosed: row.is_closed,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    reason: row.reason,
+  }))
+}
+
+export async function createScheduleException(
+  clinicId: string,
+  date: string,
+  reason: string,
+  unitId: string | null,
+) {
+  const { error } = await supabase.from('schedule_exceptions').insert({
+    clinic_id: clinicId,
+    unit_id: unitId,
+    exception_date: date,
+    is_closed: true,
+    reason: reason.trim(),
+  })
+  if (error) fail(error)
+}
+
+export async function deleteScheduleException(exceptionId: string) {
+  const { error } = await supabase.from('schedule_exceptions').delete().eq('id', exceptionId)
+  if (error) fail(error)
+}
+
+export async function getSchedulePreferences(clinicId: string): Promise<SchedulePreferences> {
+  const { data, error } = await supabase
+    .from('clinic_settings')
+    .select('schedule_slot_minutes,schedule_horizon_days,schedule_min_notice_hours')
+    .eq('clinic_id', clinicId)
+    .maybeSingle()
+  if (error) fail(error)
+  return {
+    slotMinutes: data?.schedule_slot_minutes ?? 30,
+    horizonDays: data?.schedule_horizon_days ?? 15,
+    minNoticeHours: data?.schedule_min_notice_hours ?? 2,
+  }
+}
+
+export async function saveSchedulePreferences(clinicId: string, prefs: SchedulePreferences) {
+  const { error } = await supabase
+    .from('clinic_settings')
+    .update({
+      schedule_slot_minutes: prefs.slotMinutes,
+      schedule_horizon_days: prefs.horizonDays,
+      schedule_min_notice_hours: prefs.minNoticeHours,
+    })
+    .eq('clinic_id', clinicId)
+  if (error) fail(error)
+}
+
+export async function listAvailableSlots(unitId: string): Promise<string[]> {
+  const { data, error } = await supabase.rpc('available_slots', { p_unit_id: unitId })
+  if (error) fail(error)
+  return (data ?? []).map((row) => row.slot_start)
+}
+
+export async function listAppointments(clinicId: string, unitId: string): Promise<Appointment[]> {
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note')
+    .eq('clinic_id', clinicId)
+    .eq('unit_id', unitId)
+    .neq('status', 'cancelled')
+    .gte('starts_at', new Date().toISOString())
+    .order('starts_at')
+  if (error) fail(error)
+
+  const rows = data ?? []
+  const patientIds = [...new Set(rows.map((r) => r.patient_id).filter(Boolean))] as string[]
+  const { data: patients } = patientIds.length
+    ? await supabase.from('patients').select('id,name').in('id', patientIds)
+    : { data: [] }
+  const nameById = new Map((patients ?? []).map((p) => [p.id, p.name]))
+
+  return rows.map((row) => ({
+    id: row.id,
+    unitId: row.unit_id,
+    patientId: row.patient_id,
+    patientName: (row.patient_id && nameById.get(row.patient_id)) || 'Sem paciente vinculado',
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    status: row.status,
+    source: row.source,
+    staffNote: row.staff_note,
+  }))
+}
+
+export async function createAppointment(
+  clinicId: string,
+  unitId: string,
+  patientId: string | null,
+  startsAt: string,
+  slotMinutes: number,
+  staffNote = '',
+) {
+  const endsAt = new Date(new Date(startsAt).getTime() + slotMinutes * 60000).toISOString()
+  const { error } = await supabase.from('appointments').insert({
+    clinic_id: clinicId,
+    unit_id: unitId,
+    patient_id: patientId,
+    starts_at: startsAt,
+    ends_at: endsAt,
+    source: 'clinic',
+    staff_note: staffNote.trim(),
+  })
+  // O indice unico do banco e a garantia real contra dois pacientes no mesmo
+  // horario. Traduzimos o erro tecnico para algo que a recepcao entenda.
+  if (error) {
+    if ((error as { code?: string }).code === '23505') {
+      throw new Error('Este horário acabou de ser ocupado. Atualize a agenda e escolha outro.')
+    }
+    fail(error)
+  }
+}
+
+export async function cancelAppointment(appointmentId: string) {
+  const { error } = await supabase
+    .from('appointments')
+    .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
+    .eq('id', appointmentId)
+  if (error) fail(error)
+}
+
+/* ------------------------------------------------------------------ *
  * Conversas do WhatsApp
  *
  * O webhook grava as respostas dos pacientes em whatsapp_conversations e
