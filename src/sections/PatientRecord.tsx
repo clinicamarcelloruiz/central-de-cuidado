@@ -81,6 +81,65 @@ function extensaoDoFormato(mime: string) {
   return 'webm'
 }
 
+/* ------------------------------------------------------------------ *
+ * Áudio compartilhado por toda a tela
+ *
+ * O prontuario tem mais de dez campos de texto, e cada um e um componente
+ * independente. Se cada um criasse o proprio AudioContext e a propria reserva
+ * de microfone, o navegador estouraria o limite (o Chrome permite cerca de
+ * seis contextos por pagina) depois de o medico ditar em alguns campos - e a
+ * partir dali nenhum audio passaria mais, em campo nenhum, ate fechar o
+ * navegador.
+ *
+ * Por isso o contexto e o microfone vivem aqui fora, um para a tela inteira.
+ * ------------------------------------------------------------------ */
+
+let contextoCompartilhado: AudioContext | null = null
+let streamCompartilhado: MediaStream | null = null
+let timerLiberacao: number | null = null
+
+function obterContexto(): AudioContext {
+  if (!contextoCompartilhado || contextoCompartilhado.state === 'closed') {
+    contextoCompartilhado = new AudioContext()
+  }
+  return contextoCompartilhado
+}
+
+function faixaViva(stream: MediaStream | null) {
+  const faixa = stream?.getAudioTracks()[0]
+  return Boolean(faixa && faixa.readyState === 'live' && !faixa.muted)
+}
+
+async function obterMicrofone(): Promise<MediaStream> {
+  if (timerLiberacao) {
+    window.clearTimeout(timerLiberacao)
+    timerLiberacao = null
+  }
+  if (faixaViva(streamCompartilhado)) return streamCompartilhado as MediaStream
+
+  liberarMicrofone()
+  streamCompartilhado = await navigator.mediaDevices.getUserMedia({
+    // Melhora bastante a transcricao em sala de consultorio.
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  })
+  return streamCompartilhado
+}
+
+function liberarMicrofone() {
+  if (timerLiberacao) {
+    window.clearTimeout(timerLiberacao)
+    timerLiberacao = null
+  }
+  streamCompartilhado?.getTracks().forEach((faixa) => faixa.stop())
+  streamCompartilhado = null
+}
+
+/** Mantem o microfone por um tempo curto, para ditados seguidos nao repedirem. */
+function agendarLiberacaoMicrofone() {
+  if (timerLiberacao) window.clearTimeout(timerLiberacao)
+  timerLiberacao = window.setTimeout(liberarMicrofone, 20000)
+}
+
 const editorColors = [
   { label: 'Escuro', value: '#081b2c' },
   { label: 'Azul', value: '#2563eb' },
@@ -225,12 +284,9 @@ function RichTextField({
   const editorRef = useRef<HTMLDivElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<BlobPart[]>([])
-  const streamRef = useRef<MediaStream | null>(null)
   const dispositivoRef = useRef('')
   const chunksCountRef = useRef(0)
-  const audioContextRef = useRef<AudioContext | null>(null)
   const fonteRef = useRef<MediaStreamAudioSourceNode | null>(null)
-  const liberacaoRef = useRef<number | null>(null)
   const picoRef = useRef(0)
   const [nivel, setNivel] = useState(0)
   const [diagnostico, setDiagnostico] = useState('')
@@ -254,9 +310,7 @@ function RichTextField({
       } catch {
         // gravacao ja encerrada
       }
-      streamRef.current?.getTracks().forEach((track) => track.stop())
-      void audioContextRef.current?.close().catch(() => {})
-      audioContextRef.current = null
+      liberarMicrofone()
     },
     [],
   )
@@ -282,12 +336,7 @@ function RichTextField({
         }
         return
       }
-      if (liberacaoRef.current) {
-        window.clearTimeout(liberacaoRef.current)
-        liberacaoRef.current = null
-      }
-      streamRef.current?.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
+      liberarMicrofone()
     }
 
     document.addEventListener('visibilitychange', aoTrocarDeAba)
@@ -351,26 +400,9 @@ function RichTextField({
       return
     }
 
-    // Cancela a liberacao pendente: se o medico ditou de novo em seguida, o
-    // microfone continua o mesmo e nao precisa ser pedido outra vez.
-    if (liberacaoRef.current) {
-      window.clearTimeout(liberacaoRef.current)
-      liberacaoRef.current = null
-    }
-
     let stream: MediaStream
     try {
-      const reaproveitavel = streamRef.current
-      const faixaAtual = reaproveitavel?.getAudioTracks()[0]
-      if (reaproveitavel && faixaAtual && faixaAtual.readyState === 'live' && !faixaAtual.muted) {
-        stream = reaproveitavel
-      } else {
-        streamRef.current?.getTracks().forEach((t) => t.stop())
-        stream = await navigator.mediaDevices.getUserMedia({
-          // Melhora bastante a transcricao em sala de consultorio.
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        })
-      }
+      stream = await obterMicrofone()
     } catch (error) {
       const nome = error instanceof DOMException ? error.name : ''
       if (nome === 'NotFoundError' || nome === 'DevicesNotFoundError') {
@@ -383,7 +415,6 @@ function RichTextField({
       return
     }
 
-    streamRef.current = stream
     chunksRef.current = []
     const faixa = stream.getAudioTracks()[0]
     dispositivoRef.current = faixa?.label || 'microfone sem nome'
@@ -419,7 +450,7 @@ function RichTextField({
       chunksRef.current = []
       pararMonitor()
       recorderRef.current = null
-      agendarLiberacao()
+      agendarLiberacaoMicrofone()
       setListening(false)
       void enviarParaTranscricao(blob, mime)
     }
@@ -476,11 +507,14 @@ function RichTextField({
         linhas.push(`Dispositivo: ${faixa?.label || 'sem nome'}`)
         linhas.push(`Faixa: ${faixa?.readyState} | mudo: ${faixa?.muted}`)
 
-        const contexto = new AudioContext()
+        // Usa o contexto compartilhado: criar um por teste ajudaria a
+        // estourar justamente o limite que estamos investigando.
+        const contexto = obterContexto()
         if (contexto.state === 'suspended') await contexto.resume()
         const analisador = contexto.createAnalyser()
         analisador.fftSize = 512
-        contexto.createMediaStreamSource(stream).connect(analisador)
+        const fonteTeste = contexto.createMediaStreamSource(stream)
+        fonteTeste.connect(analisador)
         const amostras = new Uint8Array(analisador.frequencyBinCount)
         let pico = 0
 
@@ -513,8 +547,8 @@ function RichTextField({
         linhas.push(`Bytes: ${total} | pico: ${pico.toFixed(4)}`)
         linhas.push(total > 0 && pico > 0.005 ? '>>> GRAVOU <<<' : 'nao gravou')
 
+        fonteTeste.disconnect()
         stream.getTracks().forEach((t) => t.stop())
-        void contexto.close()
       } catch (erro) {
         linhas.push(`Falhou: ${erro instanceof Error ? `${erro.name} - ${erro.message}` : String(erro)}`)
       }
@@ -538,8 +572,7 @@ function RichTextField({
       // cada gravacao estourava o limite do Chrome (cerca de seis) e, a partir
       // dali, o medidor parava de funcionar sem aviso - era o motivo de o
       // ditado morrer depois de algumas gravacoes.
-      if (!audioContextRef.current) audioContextRef.current = new AudioContext()
-      const contexto = audioContextRef.current
+      const contexto = obterContexto()
 
       // Contextos entram em suspensao sozinhos apos um tempo ocioso.
       if (contexto.state === 'suspended') await contexto.resume()
@@ -586,12 +619,7 @@ function RichTextField({
 
   function encerrarMicrofone() {
     pararMonitor()
-    if (liberacaoRef.current) {
-      window.clearTimeout(liberacaoRef.current)
-      liberacaoRef.current = null
-    }
-    streamRef.current?.getTracks().forEach((track) => track.stop())
-    streamRef.current = null
+    liberarMicrofone()
     recorderRef.current = null
   }
 
@@ -606,14 +634,6 @@ function RichTextField({
    *
    * O indicador de gravacao do navegador fica aceso durante esse intervalo.
    */
-  function agendarLiberacao() {
-    if (liberacaoRef.current) window.clearTimeout(liberacaoRef.current)
-    liberacaoRef.current = window.setTimeout(() => {
-      streamRef.current?.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
-      liberacaoRef.current = null
-    }, 20000)
-  }
 
   async function enviarParaTranscricao(blob: Blob, mime: string) {
     if (blob.size === 0) {
