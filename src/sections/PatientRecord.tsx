@@ -230,6 +230,7 @@ function RichTextField({
   const chunksCountRef = useRef(0)
   const audioContextRef = useRef<AudioContext | null>(null)
   const fonteRef = useRef<MediaStreamAudioSourceNode | null>(null)
+  const liberacaoRef = useRef<number | null>(null)
   const picoRef = useRef(0)
   const [nivel, setNivel] = useState(0)
   const [listening, setListening] = useState(false)
@@ -316,12 +317,26 @@ function RichTextField({
       return
     }
 
+    // Cancela a liberacao pendente: se o medico ditou de novo em seguida, o
+    // microfone continua o mesmo e nao precisa ser pedido outra vez.
+    if (liberacaoRef.current) {
+      window.clearTimeout(liberacaoRef.current)
+      liberacaoRef.current = null
+    }
+
     let stream: MediaStream
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        // Melhora bastante a transcricao em sala de consultorio.
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      })
+      const reaproveitavel = streamRef.current
+      const faixaAtual = reaproveitavel?.getAudioTracks()[0]
+      if (reaproveitavel && faixaAtual && faixaAtual.readyState === 'live' && !faixaAtual.muted) {
+        stream = reaproveitavel
+      } else {
+        streamRef.current?.getTracks().forEach((t) => t.stop())
+        stream = await navigator.mediaDevices.getUserMedia({
+          // Melhora bastante a transcricao em sala de consultorio.
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        })
+      }
     } catch (error) {
       const nome = error instanceof DOMException ? error.name : ''
       if (nome === 'NotFoundError' || nome === 'DevicesNotFoundError') {
@@ -368,7 +383,9 @@ function RichTextField({
       const mime = recorder.mimeType || 'audio/webm'
       const blob = new Blob(chunksRef.current, { type: mime })
       chunksRef.current = []
-      encerrarMicrofone()
+      pararMonitor()
+      recorderRef.current = null
+      agendarLiberacao()
       setListening(false)
       void enviarParaTranscricao(blob, mime)
     }
@@ -388,6 +405,26 @@ function RichTextField({
     // Cortes curtos: garantem que mesmo uma gravacao de 1 segundo tenha dados.
     recorder.start(250)
     setListening(true)
+
+    // Avisa cedo se nenhum som estiver entrando. Sem isto o medico dita a
+    // consulta inteira para so no fim descobrir que nao gravou nada.
+    window.setTimeout(() => {
+      if (recorderRef.current !== recorder || recorder.state !== 'recording') return
+      if (picoRef.current >= 0.01) return
+      setSpeechError(
+        `Nenhum som está entrando pelo "${dispositivoRef.current}". A gravação foi interrompida. ` +
+          `Confira o botão de mudo do headset e o microfone selecionado no Windows.`,
+      )
+      try {
+        recorder.stop()
+      } catch {
+        // ja parado
+      }
+      // Aqui o dispositivo esta em estado ruim: solta de verdade para a
+      // proxima tentativa pedir um novo.
+      encerrarMicrofone()
+      setListening(false)
+    }, 2500)
   }
 
   /**
@@ -451,9 +488,33 @@ function RichTextField({
 
   function encerrarMicrofone() {
     pararMonitor()
+    if (liberacaoRef.current) {
+      window.clearTimeout(liberacaoRef.current)
+      liberacaoRef.current = null
+    }
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     recorderRef.current = null
+  }
+
+  /**
+   * Solta o microfone depois de um tempo sem uso, em vez de solta-lo a cada
+   * gravacao.
+   *
+   * Motivo: com headset USB, soltar e pedir o dispositivo de novo a cada
+   * ditado faz o Chrome devolver um stream mudo a partir da segunda vez. Era
+   * por isso que o ditado funcionava logo apos abrir o navegador e parava
+   * depois. Mantendo a reserva entre ditados seguidos, o problema nao ocorre.
+   *
+   * O indicador de gravacao do navegador fica aceso durante esse intervalo.
+   */
+  function agendarLiberacao() {
+    if (liberacaoRef.current) window.clearTimeout(liberacaoRef.current)
+    liberacaoRef.current = window.setTimeout(() => {
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+      liberacaoRef.current = null
+    }, 45000)
   }
 
   async function enviarParaTranscricao(blob: Blob, mime: string) {
