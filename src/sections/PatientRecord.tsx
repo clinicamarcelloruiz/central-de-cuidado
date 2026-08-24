@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { supabase } from '@/lib/supabase'
 import {
   ArrowLeft,
   Bold,
@@ -268,86 +269,131 @@ function RichTextField({
     window.setTimeout(syncEditor, 0)
   }
 
+  /**
+   * Gravacao de audio no estilo WhatsApp: aperta e grava, aperta de novo e o
+   * texto cai no editor.
+   *
+   * Substituiu o SpeechRecognition do Chrome, que mandava o audio do prontuario
+   * para servidor do Google sem contrato de tratamento de dados, so funcionava
+   * no Chrome e parava a cada pausa da fala. Aqui o audio vai para uma Edge
+   * Function nossa, que fala com a Groq com a chave guardada no servidor.
+   */
   async function toggleDictation() {
     if (listening) {
-      recognitionRef.current?.stop()
-      return
-    }
-
-    try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('microfone indisponível')
-      }
-      const microphone = await navigator.mediaDevices.getUserMedia({ audio: true })
-      microphone.getTracks().forEach((track) => track.stop())
-    } catch (error) {
-      const name = error instanceof DOMException ? error.name : ''
-      if (name === 'NotFoundError') {
-        setSpeechError('Nenhum microfone foi encontrado. Conecte um microfone e clique em Ditar novamente.')
-      } else if (name === 'NotAllowedError' || name === 'SecurityError') {
-        setSpeechError('O microfone está bloqueado no navegador. Clique no ícone de controles ou cadeado ao lado do endereço do site, permita Microfone e recarregue a página.')
-      } else {
-        setSpeechError('Não foi possível acessar o microfone. Verifique se ele está conectado e tente novamente.')
+      try {
+        recorderRef.current?.stop()
+      } catch {
+        setListening(false)
       }
       return
     }
-
-    const speechWindow = window as Window & {
-      SpeechRecognition?: SpeechRecognitionConstructor
-      webkitSpeechRecognition?: SpeechRecognitionConstructor
-    }
-    const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition
-
-    if (!Recognition) {
-      setSpeechError('O microfone foi autorizado, mas o ditado não é compatível com este navegador. Use o Google Chrome para converter a fala em texto.')
-      return
-    }
+    if (transcrevendo) return
 
     setSpeechError('')
-    const recognition = new Recognition()
-    let receivedTranscript = false
-    let receivedRecognitionError = false
-    recognition.lang = 'pt-BR'
-    recognition.interimResults = true
-    recognition.continuous = false
-    recognition.onresult = (event) => {
-      const transcript = Array.from(event.results)
-        .slice(event.resultIndex)
-        .filter((result) => result.isFinal)
-        .map((result) => result[0].transcript.trim())
-        .filter(Boolean)
-        .join(' ')
 
-      if (!transcript) return
-      receivedTranscript = true
-      const current = sanitizeRichText(editorRef.current?.innerHTML || '')
-      const next = `${current}${current ? '<br>' : ''}${textToEditorHtml(transcript)}`
-      if (editorRef.current) editorRef.current.innerHTML = next
-      onChange(sanitizeRichText(next))
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setSpeechError('Este navegador não permite gravar áudio. Use o Google Chrome atualizado.')
+      return
     }
-    recognition.onerror = (event) => {
-      if (event.error === 'aborted') return
-      receivedRecognitionError = true
-      const messageByError: Record<string, string> = {
-        'no-speech': 'Nenhuma fala foi detectada. Verifique se o microfone selecionado no computador está recebendo som e tente novamente.',
-        'audio-capture': 'O navegador não conseguiu captar o áudio. Verifique se o microfone está conectado e se o Chrome tem acesso ao microfone nas configurações do Windows.',
-        'not-allowed': 'O microfone foi bloqueado. Clique no ícone de controles ou cadeado ao lado do endereço do site, permita Microfone e recarregue a página.',
-        'service-not-allowed': 'O serviço de ditado foi bloqueado pelo navegador. Use o Google Chrome atualizado e tente novamente.',
-        network: 'O microfone foi autorizado, mas a transcrição não conseguiu se conectar. Verifique a internet e tente novamente.',
+
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        // Melhora bastante a transcricao em sala de consultorio.
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      })
+    } catch (error) {
+      const nome = error instanceof DOMException ? error.name : ''
+      if (nome === 'NotFoundError' || nome === 'DevicesNotFoundError') {
+        setSpeechError('Nenhum microfone foi encontrado neste computador. Conecte um e tente de novo.')
+      } else if (nome === 'NotAllowedError' || nome === 'SecurityError') {
+        setSpeechError('O microfone está bloqueado. Clique no cadeado ao lado do endereço do site, permita Microfone e recarregue a página.')
+      } else {
+        setSpeechError('Não foi possível acessar o microfone.')
       }
-      setSpeechError(messageByError[event.error] || 'Não foi possível concluir o ditado. Verifique o microfone e tente novamente.')
+      return
     }
-    recognition.onend = () => {
-      recognitionRef.current = null
+
+    streamRef.current = stream
+    chunksRef.current = []
+
+    const formato = FORMATOS_AUDIO.find((tipo) => MediaRecorder.isTypeSupported(tipo)) || ''
+    const recorder = new MediaRecorder(stream, formato ? { mimeType: formato } : undefined)
+    recorderRef.current = recorder
+
+    recorder.ondataavailable = (evento) => {
+      if (evento.data && evento.data.size > 0) chunksRef.current.push(evento.data)
+    }
+
+    recorder.onerror = () => {
+      setSpeechError('A gravação falhou. Tente novamente.')
+      encerrarMicrofone()
       setListening(false)
-      if (!receivedTranscript && !receivedRecognitionError) {
-        setSpeechError('Nenhuma fala foi detectada. Fale próximo ao microfone, aguarde um instante ao terminar e tente novamente.')
-      }
     }
 
-    recognitionRef.current = recognition
+    recorder.onstop = () => {
+      const mime = recorder.mimeType || 'audio/webm'
+      const blob = new Blob(chunksRef.current, { type: mime })
+      chunksRef.current = []
+      encerrarMicrofone()
+      setListening(false)
+      void enviarParaTranscricao(blob, mime)
+    }
+
+    // Pedaco a cada segundo evita perder tudo se algo travar no meio.
+    recorder.start(1000)
     setListening(true)
-    recognition.start()
+  }
+
+  function encerrarMicrofone() {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    recorderRef.current = null
+  }
+
+  async function enviarParaTranscricao(blob: Blob, mime: string) {
+    if (blob.size === 0) {
+      setSpeechError('Nada foi gravado. Fale mais perto do microfone.')
+      return
+    }
+
+    setTranscrevendo(true)
+    try {
+      const arquivo = new File([blob], `audio.${extensaoDoFormato(mime)}`, { type: mime })
+      const corpo = new FormData()
+      corpo.append('audio', arquivo)
+
+      const { data, error } = await supabase.functions.invoke('transcrever-audio', { body: corpo })
+
+      let payload = data as { texto?: string; error?: string } | null
+      if (error) {
+        const contexto = (error as { context?: Response } | null)?.context
+        if (contexto && typeof contexto.clone === 'function') {
+          try {
+            payload = await contexto.clone().json()
+          } catch {
+            payload = null
+          }
+        }
+        throw new Error(payload?.error || error.message)
+      }
+      if (payload?.error) throw new Error(payload.error)
+
+      const texto = (payload?.texto || '').trim()
+      if (!texto) {
+        setSpeechError('Nenhuma fala foi reconhecida no áudio.')
+        return
+      }
+
+      const atual = sanitizeRichText(editorRef.current?.innerHTML || '')
+      const proximo = `${atual}${atual ? '<br>' : ''}${textToEditorHtml(texto)}`
+      if (editorRef.current) editorRef.current.innerHTML = proximo
+      onChange(sanitizeRichText(proximo))
+    } catch (causa) {
+      setSpeechError(causa instanceof Error ? causa.message : 'Não foi possível transcrever o áudio.')
+    } finally {
+      setTranscrevendo(false)
+    }
   }
 
   return (
@@ -363,7 +409,36 @@ function RichTextField({
           <span className="mx-0.5 h-4 w-px bg-[#081b2c]/10" />
           {editorColors.map((color) => <button key={color.value} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('foreColor', color.value)} className="h-5 w-5 rounded-full border-2 border-white shadow-sm ring-1 ring-[#081b2c]/10" style={{ backgroundColor: color.value }} aria-label={`Cor ${color.label}`} title={`Cor ${color.label}`} />)}
           <span className="flex-1" />
-          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void toggleDictation()} className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[9px] font-extrabold transition ${listening ? 'bg-red-50 text-red-600' : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'}`} aria-label={listening ? 'Parar ditado' : 'Ditar por microfone'} title={listening ? 'Parar ditado' : 'Ditar por microfone'}>{listening ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}{listening ? 'Ouvindo...' : 'Ditar'}</button>
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => void toggleDictation()}
+            disabled={transcrevendo}
+            className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[9px] font-extrabold transition disabled:cursor-wait ${
+              listening
+                ? 'bg-red-50 text-red-600'
+                : transcrevendo
+                  ? 'bg-[#fdf3ec] text-[#8a4b1d]'
+                  : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'
+            }`}
+            aria-label={listening ? 'Parar gravação' : 'Gravar e transcrever'}
+            title={
+              listening
+                ? 'Clique para parar e transcrever'
+                : transcrevendo
+                  ? 'Transcrevendo o áudio...'
+                  : 'Gravar e transcrever'
+            }
+          >
+            {transcrevendo ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : listening ? (
+              <MicOff className="h-3.5 w-3.5" />
+            ) : (
+              <Mic className="h-3.5 w-3.5" />
+            )}
+            {transcrevendo ? 'Transcrevendo...' : listening ? 'Gravando' : 'Ditar'}
+          </button>
         </div>
         <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder={placeholder} onInput={syncEditor} onPaste={pasteAsText} className="min-h-[92px] px-3.5 py-2.5 text-xs font-medium leading-relaxed text-[#081b2c] outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)]" />
       </div>
