@@ -420,62 +420,75 @@ function RichTextField({
     setSpeechError('')
     setDiagnostico('Testando por 3 segundos, fale alguma coisa...')
     const linhas: string[] = []
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      })
-      const faixa = stream.getAudioTracks()[0]
-      linhas.push(`Dispositivo: ${faixa?.label || 'sem nome'}`)
-      linhas.push(`Estado da faixa: ${faixa?.readyState} | mudo: ${faixa?.muted} | ativa: ${faixa?.enabled}`)
 
-      const contexto = new AudioContext()
-      linhas.push(`AudioContext: ${contexto.state}`)
-      if (contexto.state === 'suspended') {
-        await contexto.resume()
-        linhas.push(`AudioContext apos resume: ${contexto.state}`)
-      }
-      const analisador = contexto.createAnalyser()
-      analisador.fftSize = 512
-      contexto.createMediaStreamSource(stream).connect(analisador)
-      const amostras = new Uint8Array(analisador.frequencyBinCount)
-      let pico = 0
+    // Duas configuracoes: com o processamento do navegador e sem nada. Se a
+    // segunda gravar e a primeira nao, o culpado e o processamento - conflito
+    // conhecido entre o cancelamento de eco do Chrome e drivers de headset USB.
+    const cenarios: { nome: string; restricao: MediaTrackConstraints | boolean }[] = [
+      {
+        nome: 'COM processamento',
+        restricao: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      },
+      {
+        nome: 'SEM processamento',
+        restricao: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      },
+    ]
 
-      const formato = FORMATOS_AUDIO.find((tipo) => MediaRecorder.isTypeSupported(tipo)) || ''
-      linhas.push(`Formato: ${formato || 'padrão do navegador'}`)
-      const pedacos: Blob[] = []
-      const gravador = new MediaRecorder(stream, formato ? { mimeType: formato } : undefined)
-      gravador.ondataavailable = (evento) => {
-        if (evento.data) pedacos.push(evento.data)
-      }
+    for (const cenario of cenarios) {
+      linhas.push(`--- ${cenario.nome} ---`)
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: cenario.restricao })
+        const faixa = stream.getAudioTracks()[0]
+        linhas.push(`Dispositivo: ${faixa?.label || 'sem nome'}`)
+        linhas.push(`Faixa: ${faixa?.readyState} | mudo: ${faixa?.muted}`)
 
-      await new Promise<void>((resolve) => {
-        const relogio = window.setInterval(() => {
-          analisador.getByteTimeDomainData(amostras)
-          let soma = 0
-          for (const amostra of amostras) {
-            const desvio = (amostra - 128) / 128
-            soma += desvio * desvio
-          }
-          pico = Math.max(pico, Math.sqrt(soma / amostras.length))
-        }, 100)
-        gravador.onstop = () => {
-          window.clearInterval(relogio)
-          resolve()
+        const contexto = new AudioContext()
+        if (contexto.state === 'suspended') await contexto.resume()
+        const analisador = contexto.createAnalyser()
+        analisador.fftSize = 512
+        contexto.createMediaStreamSource(stream).connect(analisador)
+        const amostras = new Uint8Array(analisador.frequencyBinCount)
+        let pico = 0
+
+        const formato = FORMATOS_AUDIO.find((tipo) => MediaRecorder.isTypeSupported(tipo)) || ''
+        const pedacos: Blob[] = []
+        const gravador = new MediaRecorder(stream, formato ? { mimeType: formato } : undefined)
+        gravador.ondataavailable = (evento) => {
+          if (evento.data) pedacos.push(evento.data)
         }
-        gravador.start(250)
-        window.setTimeout(() => gravador.stop(), 3000)
-      })
 
-      const total = pedacos.reduce((soma, pedaco) => soma + pedaco.size, 0)
-      linhas.push(`Pedaços: ${pedacos.length} | bytes: ${total}`)
-      linhas.push(`Pico de som: ${pico.toFixed(4)}`)
-      linhas.push(total > 0 ? 'GRAVOU ÁUDIO' : 'NÃO GRAVOU NADA')
+        await new Promise<void>((resolve) => {
+          const relogio = window.setInterval(() => {
+            analisador.getByteTimeDomainData(amostras)
+            let soma = 0
+            for (const amostra of amostras) {
+              const desvio = (amostra - 128) / 128
+              soma += desvio * desvio
+            }
+            pico = Math.max(pico, Math.sqrt(soma / amostras.length))
+          }, 100)
+          gravador.onstop = () => {
+            window.clearInterval(relogio)
+            resolve()
+          }
+          gravador.start(250)
+          window.setTimeout(() => gravador.stop(), 3000)
+        })
 
-      stream.getTracks().forEach((t) => t.stop())
-      void contexto.close()
-    } catch (erro) {
-      linhas.push(`Falhou: ${erro instanceof Error ? `${erro.name} - ${erro.message}` : String(erro)}`)
+        const total = pedacos.reduce((soma, pedaco) => soma + pedaco.size, 0)
+        linhas.push(`Bytes: ${total} | pico: ${pico.toFixed(4)}`)
+        linhas.push(total > 0 && pico > 0.005 ? '>>> GRAVOU <<<' : 'nao gravou')
+
+        stream.getTracks().forEach((t) => t.stop())
+        void contexto.close()
+      } catch (erro) {
+        linhas.push(`Falhou: ${erro instanceof Error ? `${erro.name} - ${erro.message}` : String(erro)}`)
+      }
+      // Deixa o dispositivo respirar entre um teste e outro.
+      await new Promise((resolve) => window.setTimeout(resolve, 600))
     }
+
     setDiagnostico(linhas.join('\n'))
   }
 
@@ -941,8 +954,8 @@ export default function PatientRecord({
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
-        side="right"
-        className="w-full gap-0 border-l border-[#081b2c]/10 bg-[#fbfaf8] p-0 sm:max-w-[760px] lg:max-w-[900px]"
+        side="left"
+        className="w-full gap-0 border-r border-[#081b2c]/10 bg-[#fbfaf8] p-0 sm:max-w-[760px] lg:max-w-[900px]"
       >
         <SheetHeader className="border-b border-[#081b2c]/[0.07] bg-white px-5 pb-5 pt-6 sm:px-7">
           <div className="flex items-start gap-3 pr-8">
