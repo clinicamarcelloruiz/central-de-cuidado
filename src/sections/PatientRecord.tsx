@@ -228,6 +228,9 @@ function RichTextField({
   const streamRef = useRef<MediaStream | null>(null)
   const dispositivoRef = useRef('')
   const chunksCountRef = useRef(0)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const picoRef = useRef(0)
+  const [nivel, setNivel] = useState(0)
   const [listening, setListening] = useState(false)
   const [transcrevendo, setTranscrevendo] = useState(false)
   const [speechError, setSpeechError] = useState('')
@@ -358,12 +361,59 @@ function RichTextField({
       void enviarParaTranscricao(blob, mime)
     }
 
+    monitorarNivel(stream)
+
     // Cortes curtos: garantem que mesmo uma gravacao de 1 segundo tenha dados.
     recorder.start(250)
     setListening(true)
   }
 
+  /**
+   * Mede o som que esta realmente entrando pelo microfone.
+   *
+   * Serve para duas coisas: mostrar ao medico que a gravacao esta captando, e
+   * distinguir "o navegador nao gravou" de "o microfone nao mandou som" - que
+   * sao problemas diferentes e levam a solucoes diferentes.
+   */
+  function monitorarNivel(stream: MediaStream) {
+    try {
+      const contexto = new AudioContext()
+      audioContextRef.current = contexto
+      const fonte = contexto.createMediaStreamSource(stream)
+      const analisador = contexto.createAnalyser()
+      analisador.fftSize = 512
+      fonte.connect(analisador)
+
+      const amostras = new Uint8Array(analisador.frequencyBinCount)
+      picoRef.current = 0
+
+      const medir = () => {
+        if (!audioContextRef.current) return
+        analisador.getByteTimeDomainData(amostras)
+        let soma = 0
+        for (const amostra of amostras) {
+          const desvio = (amostra - 128) / 128
+          soma += desvio * desvio
+        }
+        const rms = Math.sqrt(soma / amostras.length)
+        picoRef.current = Math.max(picoRef.current, rms)
+        setNivel(Math.min(1, rms * 4))
+        requestAnimationFrame(medir)
+      }
+      medir()
+    } catch {
+      // Medicao e um extra: se o navegador nao permitir, a gravacao segue.
+    }
+  }
+
+  function pararMonitor() {
+    void audioContextRef.current?.close().catch(() => {})
+    audioContextRef.current = null
+    setNivel(0)
+  }
+
   function encerrarMicrofone() {
+    pararMonitor()
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     recorderRef.current = null
@@ -371,13 +421,21 @@ function RichTextField({
 
   async function enviarParaTranscricao(blob: Blob, mime: string) {
     if (blob.size === 0) {
-      // Mensagem com diagnostico: sem isto o "nada foi gravado" nao diz se o
-      // problema foi o dispositivo, o formato ou a gravacao curta demais.
-      setSpeechError(
-        `O áudio voltou vazio (${chunksCountRef.current} pedaços, formato ${mime}, ` +
-          `dispositivo "${dispositivoRef.current}"). Verifique se o microfone certo está ` +
-          `selecionado no Windows e se não está mudo, e grave por pelo menos 2 segundos.`,
-      )
+      // O pico de som separa dois problemas diferentes: microfone que nao manda
+      // som algum, e navegador que nao consegue gravar o que recebe.
+      if (picoRef.current < 0.01) {
+        setSpeechError(
+          `Nenhum som chegou do "${dispositivoRef.current}". O microfone está conectado mas não ` +
+            `capta nada. Verifique: botão de mudo no próprio headset, volume de entrada em ` +
+            `Configurações do Windows > Sistema > Som, e se o Chrome está usando este microfone ` +
+            `(digite chrome://settings/content/microphone na barra de endereço).`,
+        )
+      } else {
+        setSpeechError(
+          `O microfone captou som, mas a gravação voltou vazia ` +
+            `(${chunksCountRef.current} pedaços, formato ${mime}). Tente fechar e reabrir o Chrome.`,
+        )
+      }
       return
     }
 
@@ -448,6 +506,21 @@ function RichTextField({
             )}
             {transcrevendo ? 'Transcrevendo...' : listening ? 'Gravando' : 'Ditar'}
           </button>
+          {listening && (
+            <span
+              className="flex items-center gap-0.5"
+              title="Nível do som captado. Se as barras não se mexem quando você fala, o microfone não está captando."
+            >
+              {[0.15, 0.35, 0.55, 0.75, 0.95].map((limite) => (
+                <span
+                  key={limite}
+                  className={`h-3 w-1 rounded-full transition-colors ${
+                    nivel >= limite ? 'bg-red-500' : 'bg-slate-200'
+                  }`}
+                />
+              ))}
+            </span>
+          )}
         </div>
         <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder={placeholder} onInput={syncEditor} onPaste={pasteAsText} className="min-h-[92px] px-3.5 py-2.5 text-xs font-medium leading-relaxed text-[#081b2c] outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)]" />
       </div>
