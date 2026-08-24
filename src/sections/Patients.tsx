@@ -5,6 +5,8 @@ import {
   CircleUserRound,
   Edit3,
   FileHeart,
+  LayoutGrid,
+  List as ListIcon,
   MapPin,
   MessageCircle,
   Plus,
@@ -116,6 +118,13 @@ export default function Patients({
   openCreateSignal = 0,
 }: Props) {
   const [query, setQuery] = useState('')
+  // Lista simples e o padrao: cabe mais paciente na tela e a busca visual e
+  // mais rapida. O modo de cartoes continua a um clique.
+  const [visao, setVisao] = useState<'lista' | 'cartoes'>('lista')
+  const [ordem, setOrdem] = useState<'nome' | 'consulta'>('nome')
+  const [mesFiltro, setMesFiltro] = useState('')
+  const [anoFiltro, setAnoFiltro] = useState('')
+  const [filtroAberto, setFiltroAberto] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<PatientDraft>(emptyDraft)
@@ -134,14 +143,45 @@ export default function Patients({
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase()
-    if (!normalized) return patients
-    return patients.filter((patient) =>
-      [patient.nome, patient.responsavel, patient.cidade, patient.bairro, patient.cid, patient.convenio]
-        .join(' ')
-        .toLowerCase()
-        .includes(normalized),
-    )
-  }, [patients, query])
+    let lista = patients
+
+    if (normalized) {
+      lista = lista.filter((patient) =>
+        [patient.nome, patient.responsavel, patient.cidade, patient.bairro, patient.cid, patient.convenio]
+          .join(' ')
+          .toLowerCase()
+          .includes(normalized),
+      )
+    }
+
+    // Filtro por periodo da consulta. Mes vazio significa o ano inteiro.
+    if (anoFiltro) {
+      lista = lista.filter((patient) => {
+        if (!patient.dataConsulta) return false
+        const [ano, mes] = patient.dataConsulta.split('-')
+        if (ano !== anoFiltro) return false
+        return mesFiltro ? mes === mesFiltro : true
+      })
+    }
+
+    // Ordenacao alfabetica respeitando acentos do portugues.
+    const ordenada = [...lista]
+    if (ordem === 'nome') {
+      ordenada.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }))
+    } else {
+      ordenada.sort((a, b) => (b.dataConsulta || '').localeCompare(a.dataConsulta || ''))
+    }
+    return ordenada
+  }, [patients, query, ordem, mesFiltro, anoFiltro])
+
+  /** Anos que realmente existem na base, para o filtro nao oferecer vazio. */
+  const anosDisponiveis = useMemo(() => {
+    const anos = new Set<string>()
+    for (const patient of patients) {
+      if (patient.dataConsulta) anos.add(patient.dataConsulta.slice(0, 4))
+    }
+    return [...anos].sort((a, b) => b.localeCompare(a))
+  }, [patients])
 
   const recordPatient = useMemo(
     () => patients.find((patient) => patient.id === recordPatientId) ?? null,
@@ -261,10 +301,106 @@ export default function Patients({
             aria-label="Buscar pacientes"
           />
         </div>
-        <p className="shrink-0 px-1 text-[10px] font-bold text-slate-400">
-          {filtered.length} {filtered.length === 1 ? 'resultado' : 'resultados'}
-        </p>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className="flex rounded-xl bg-[#eef3f2] p-0.5">
+            <button
+              type="button"
+              onClick={() => setOrdem('nome')}
+              className={`rounded-lg px-2.5 py-1.5 text-[10px] font-extrabold transition ${ordem === 'nome' ? 'bg-white text-[#081b2c] shadow-sm' : 'text-[#557f75]'}`}
+              title="Ordenar por nome"
+            >
+              A-Z
+            </button>
+            <button
+              type="button"
+              onClick={() => setOrdem('consulta')}
+              className={`rounded-lg px-2.5 py-1.5 text-[10px] font-extrabold transition ${ordem === 'consulta' ? 'bg-white text-[#081b2c] shadow-sm' : 'text-[#557f75]'}`}
+              title="Ordenar pela consulta mais recente"
+            >
+              Consulta
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setFiltroAberto((aberto) => !aberto)}
+            className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[10px] font-extrabold transition ${
+              anoFiltro ? 'bg-[#081b2c] text-white' : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'
+            }`}
+            title="Filtrar por período da consulta"
+          >
+            <CalendarDays className="h-3.5 w-3.5" />
+            {anoFiltro ? `${mesFiltro ? mesFiltro + '/' : ''}${anoFiltro}` : 'Período'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setVisao((atual) => (atual === 'lista' ? 'cartoes' : 'lista'))}
+            className="inline-flex items-center gap-1 rounded-xl bg-[#eef3f2] px-2.5 py-1.5 text-[10px] font-extrabold text-[#557f75] transition hover:bg-[#e2ece9]"
+            title={visao === 'lista' ? 'Ver em blocos' : 'Ver em lista'}
+          >
+            {visao === 'lista' ? <LayoutGrid className="h-3.5 w-3.5" /> : <ListIcon className="h-3.5 w-3.5" />}
+            {visao === 'lista' ? 'Blocos' : 'Lista'}
+          </button>
+
+          <p className="px-1 text-[10px] font-bold text-slate-400">
+            {filtered.length} {filtered.length === 1 ? 'resultado' : 'resultados'}
+          </p>
+        </div>
       </div>
+
+      {filtroAberto && (
+        <div className="flex flex-wrap items-end gap-2 rounded-[18px] border border-[#081b2c]/[0.08] bg-white/80 p-3">
+          <label className="block">
+            <span className="text-[9px] font-extrabold uppercase tracking-wide text-slate-400">Mês</span>
+            <select
+              value={mesFiltro}
+              onChange={(event) => setMesFiltro(event.target.value)}
+              className="mt-1 block rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none"
+            >
+              <option value="">Todos</option>
+              {[
+                'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+              ].map((nome, indice) => (
+                <option key={nome} value={String(indice + 1).padStart(2, '0')}>
+                  {nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[9px] font-extrabold uppercase tracking-wide text-slate-400">Ano</span>
+            <select
+              value={anoFiltro}
+              onChange={(event) => setAnoFiltro(event.target.value)}
+              className="mt-1 block rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none"
+            >
+              <option value="">Todos</option>
+              {anosDisponiveis.map((ano) => (
+                <option key={ano} value={ano}>
+                  {ano}
+                </option>
+              ))}
+            </select>
+          </label>
+          {(anoFiltro || mesFiltro) && (
+            <button
+              type="button"
+              onClick={() => {
+                setMesFiltro('')
+                setAnoFiltro('')
+              }}
+              className="rounded-xl bg-[#eef3f2] px-3 py-1.5 text-[10px] font-extrabold text-[#557f75]"
+            >
+              Limpar
+            </button>
+          )}
+          <p className="text-[10px] text-slate-400">
+            O mês sozinho não filtra; escolha o ano para o período valer.
+          </p>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <section className="surface-card rounded-[26px] px-6 py-14 text-center">
@@ -285,6 +421,58 @@ export default function Patients({
             </button>
           )}
         </section>
+      ) : visao === 'lista' ? (
+        <div className="surface-card overflow-hidden rounded-[22px]">
+          {filtered.map((patient, indice) => (
+            <div
+              key={patient.id}
+              className={`flex flex-wrap items-center gap-3 px-4 py-2.5 transition hover:bg-[#fafaf8] ${
+                indice > 0 ? 'border-t border-[#081b2c]/[0.06]' : ''
+              }`}
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[11px] bg-[#eef3f2] text-[10px] font-extrabold text-[#557f75]">
+                {patient.nome
+                  .split(' ')
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .map((parte) => parte[0])
+                  .join('')
+                  .toUpperCase()}
+              </span>
+
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-extrabold text-[#081b2c]">{patient.nome}</p>
+                <p className="truncate text-[10px] text-slate-400">
+                  {[
+                    patient.dataConsulta ? `Consulta ${fmtBR(patient.dataConsulta)}` : null,
+                    [patient.cidade, patient.bairro].filter(Boolean).join(' · ') || null,
+                    patient.convenio || null,
+                  ]
+                    .filter(Boolean)
+                    .join('  ·  ')}
+                </p>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setRecordPatientId(patient.id)}
+                  className="rounded-lg bg-[#eef3f2] px-2.5 py-1.5 text-[10px] font-extrabold text-[#557f75] transition hover:bg-[#e2ece9]"
+                >
+                  Prontuário
+                </button>
+                <button
+                  type="button"
+                  onClick={() => editRegistration(patient)}
+                  className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-[#081b2c]"
+                  aria-label={`Editar ${patient.nome}`}
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="grid gap-3 xl:grid-cols-2">
           {filtered.map((patient) => (

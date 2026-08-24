@@ -61,3 +61,40 @@ export function requireSupabase(): SupabaseClient<Database> {
   }
   return supabase
 }
+
+/**
+ * Chama uma Edge Function enviando arquivo.
+ *
+ * Nao usa supabase.functions.invoke de proposito: o invoke serializa o corpo e
+ * define o Content-Type por conta propria, o que corrompe um FormData com
+ * arquivo - o audio chegava vazio do outro lado. Com fetch puro o navegador
+ * monta o multipart e define o boundary correto sozinho.
+ */
+export async function invokeWithFormData<T>(nome: string, corpo: FormData): Promise<T> {
+  const { data: sessao } = await supabase.auth.getSession()
+  const token = sessao.session?.access_token
+  if (!token) throw new Error('Sua sessão expirou. Recarregue a página e entre de novo.')
+
+  const resposta = await fetch(`${supabaseUrl}/functions/v1/${nome}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: supabasePublishableKey ?? '',
+    },
+    body: corpo,
+  })
+
+  const texto = await resposta.text()
+  let payload: unknown = null
+  try {
+    payload = texto ? JSON.parse(texto) : null
+  } catch {
+    payload = null
+  }
+
+  if (!resposta.ok) {
+    const mensagem = (payload as { error?: string } | null)?.error
+    throw new Error(mensagem || `A função respondeu ${resposta.status}.`)
+  }
+  return payload as T
+}

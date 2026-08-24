@@ -109,6 +109,8 @@ export default function Home() {
     clearAll,
   } = useDb()
   const [tab, setTab] = useState<Tab>('followups')
+  // Paciente cuja conversa deve abrir ao entrar em Respostas pelo atalho.
+  const [conversaFoco, setConversaFoco] = useState<string | null>(null)
   const [newPatientSignal, setNewPatientSignal] = useState(0)
   const pendentes = dueCount(db.patients)
   const meta = PAGE_META[tab]
@@ -309,10 +311,18 @@ export default function Home() {
           <div key={tab} className="animate-enter">
             {tab === 'dashboard' && <Dashboard patients={db.patients} />}
             {tab === 'followups' && (
-              <Followups patients={db.patients} templates={db.templates} setFollowup={setFollowup} />
+              <Followups
+                patients={db.patients}
+                templates={db.templates}
+                setFollowup={setFollowup}
+                onAbrirConversa={(patientId) => {
+                  setConversaFoco(patientId)
+                  setTab('conversas')
+                }}
+              />
             )}
             {tab === 'agenda' && <Agenda patients={db.patients} />}
-            {tab === 'conversas' && <Conversations />}
+            {tab === 'conversas' && <Conversations focoPatientId={conversaFoco} />}
             {tab === 'pacientes' && (
               <Patients
                 patients={db.patients}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { invokeWithFormData } from '@/lib/supabase'
 import {
   ArrowLeft,
   Bold,
@@ -363,22 +363,7 @@ function RichTextField({
       const corpo = new FormData()
       corpo.append('audio', arquivo)
 
-      const { data, error } = await supabase.functions.invoke('transcrever-audio', { body: corpo })
-
-      let payload = data as { texto?: string; error?: string } | null
-      if (error) {
-        const contexto = (error as { context?: Response } | null)?.context
-        if (contexto && typeof contexto.clone === 'function') {
-          try {
-            payload = await contexto.clone().json()
-          } catch {
-            payload = null
-          }
-        }
-        throw new Error(payload?.error || error.message)
-      }
-      if (payload?.error) throw new Error(payload.error)
-
+      const payload = await invokeWithFormData<{ texto?: string }>('transcrever-audio', corpo)
       const texto = (payload?.texto || '').trim()
       if (!texto) {
         setSpeechError('Nenhuma fala foi reconhecida no áudio.')

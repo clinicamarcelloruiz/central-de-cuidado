@@ -38,7 +38,7 @@ function formatWhen(value: string | null) {
   ).format(date)
 }
 
-export default function Conversations() {
+export default function Conversations({ focoPatientId }: { focoPatientId?: string | null }) {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
@@ -72,6 +72,19 @@ export default function Conversations() {
   useEffect(() => {
     void load()
   }, [load])
+
+  /**
+   * Quando a tela e aberta pelo botao "Conversa" do acompanhamento, ja abre a
+   * conversa daquele paciente. Sem isso a equipe cairia na lista e teria de
+   * procurar de novo - que e justamente o atalho que queremos evitar.
+   */
+  useEffect(() => {
+    if (!focoPatientId || conversations.length === 0) return
+    const alvo = conversations.find((item) => item.patientId === focoPatientId)
+    if (alvo && alvo.id !== selectedId) void openConversation(alvo)
+    // openConversation e estavel o bastante para este uso pontual
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focoPatientId, conversations])
 
   /**
    * Tempo real: a tela se atualiza sozinha quando um paciente responde, sem

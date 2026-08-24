@@ -6,6 +6,7 @@ import {
   Clock3,
   HeartHandshake,
   MessageCircle,
+  MessageSquareText,
   Send,
   ShieldCheck,
   Sparkles,
@@ -27,6 +28,8 @@ interface Props {
   patients: Patient[]
   templates: Record<FollowupKey, string>
   setFollowup: (id: string, key: FollowupKey, status: FollowupStatus) => Promise<void>
+  /** Leva direto para a conversa do paciente, sem passar pelo menu Respostas. */
+  onAbrirConversa: (patientId: string) => void
 }
 
 type Accent = 'danger' | 'today' | 'upcoming' | 'scheduled'
@@ -115,7 +118,7 @@ function Group({
   )
 }
 
-export default function Followups({ patients, setFollowup }: Props) {
+export default function Followups({ patients, setFollowup, onAbrirConversa }: Props) {
   const [sending, setSending] = useState<string | null>(null)
   const items = pendingFollowups(patients)
   const overdue = items.filter((item) => item.urgencia === 'atrasado')
@@ -256,6 +259,16 @@ export default function Followups({ patients, setFollowup }: Props) {
             >
               <Check className="h-3.5 w-3.5" strokeWidth={3} />
               <span className="hidden min-[420px]:inline">Concluir</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onAbrirConversa(patient.id)}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-[#081b2c]/12 bg-white px-3 py-2.5 text-[10px] font-extrabold text-[#557f75] transition hover:border-[#081b2c]/25 hover:bg-[#fafaf8]"
+              aria-label={`Abrir conversa de ${patient.nome}`}
+              title="Abrir a conversa deste paciente"
+            >
+              <MessageSquareText className="h-3.5 w-3.5" strokeWidth={2.5} />
+              <span className="hidden min-[420px]:inline">Conversa</span>
             </button>
           </div>
         </div>
