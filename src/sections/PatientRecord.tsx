@@ -233,6 +233,7 @@ function RichTextField({
   const liberacaoRef = useRef<number | null>(null)
   const picoRef = useRef(0)
   const [nivel, setNivel] = useState(0)
+  const [diagnostico, setDiagnostico] = useState('')
   const [listening, setListening] = useState(false)
   const [transcrevendo, setTranscrevendo] = useState(false)
   const [speechError, setSpeechError] = useState('')
@@ -406,25 +407,76 @@ function RichTextField({
     recorder.start(250)
     setListening(true)
 
-    // Avisa cedo se nenhum som estiver entrando. Sem isto o medico dita a
-    // consulta inteira para so no fim descobrir que nao gravou nada.
-    window.setTimeout(() => {
-      if (recorderRef.current !== recorder || recorder.state !== 'recording') return
-      if (picoRef.current >= 0.01) return
-      setSpeechError(
-        `Nenhum som está entrando pelo "${dispositivoRef.current}". A gravação foi interrompida. ` +
-          `Confira o botão de mudo do headset e o microfone selecionado no Windows.`,
-      )
-      try {
-        recorder.stop()
-      } catch {
-        // ja parado
+  }
+
+  /**
+   * Autoteste do microfone: grava 3 segundos e mostra os numeros crus.
+   *
+   * Existe porque o ambiente de desenvolvimento nao tem microfone, entao esta e
+   * a unica forma de saber o que realmente acontece na maquina da clinica em
+   * vez de deduzir pelo sintoma.
+   */
+  async function testarMicrofone() {
+    setSpeechError('')
+    setDiagnostico('Testando por 3 segundos, fale alguma coisa...')
+    const linhas: string[] = []
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      })
+      const faixa = stream.getAudioTracks()[0]
+      linhas.push(`Dispositivo: ${faixa?.label || 'sem nome'}`)
+      linhas.push(`Estado da faixa: ${faixa?.readyState} | mudo: ${faixa?.muted} | ativa: ${faixa?.enabled}`)
+
+      const contexto = new AudioContext()
+      linhas.push(`AudioContext: ${contexto.state}`)
+      if (contexto.state === 'suspended') {
+        await contexto.resume()
+        linhas.push(`AudioContext apos resume: ${contexto.state}`)
       }
-      // Aqui o dispositivo esta em estado ruim: solta de verdade para a
-      // proxima tentativa pedir um novo.
-      encerrarMicrofone()
-      setListening(false)
-    }, 2500)
+      const analisador = contexto.createAnalyser()
+      analisador.fftSize = 512
+      contexto.createMediaStreamSource(stream).connect(analisador)
+      const amostras = new Uint8Array(analisador.frequencyBinCount)
+      let pico = 0
+
+      const formato = FORMATOS_AUDIO.find((tipo) => MediaRecorder.isTypeSupported(tipo)) || ''
+      linhas.push(`Formato: ${formato || 'padrão do navegador'}`)
+      const pedacos: Blob[] = []
+      const gravador = new MediaRecorder(stream, formato ? { mimeType: formato } : undefined)
+      gravador.ondataavailable = (evento) => {
+        if (evento.data) pedacos.push(evento.data)
+      }
+
+      await new Promise<void>((resolve) => {
+        const relogio = window.setInterval(() => {
+          analisador.getByteTimeDomainData(amostras)
+          let soma = 0
+          for (const amostra of amostras) {
+            const desvio = (amostra - 128) / 128
+            soma += desvio * desvio
+          }
+          pico = Math.max(pico, Math.sqrt(soma / amostras.length))
+        }, 100)
+        gravador.onstop = () => {
+          window.clearInterval(relogio)
+          resolve()
+        }
+        gravador.start(250)
+        window.setTimeout(() => gravador.stop(), 3000)
+      })
+
+      const total = pedacos.reduce((soma, pedaco) => soma + pedaco.size, 0)
+      linhas.push(`Pedaços: ${pedacos.length} | bytes: ${total}`)
+      linhas.push(`Pico de som: ${pico.toFixed(4)}`)
+      linhas.push(total > 0 ? 'GRAVOU ÁUDIO' : 'NÃO GRAVOU NADA')
+
+      stream.getTracks().forEach((t) => t.stop())
+      void contexto.close()
+    } catch (erro) {
+      linhas.push(`Falhou: ${erro instanceof Error ? `${erro.name} - ${erro.message}` : String(erro)}`)
+    }
+    setDiagnostico(linhas.join('\n'))
   }
 
   /**
@@ -622,7 +674,23 @@ function RichTextField({
         </div>
         <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder={placeholder} onInput={syncEditor} onPaste={pasteAsText} className="min-h-[92px] px-3.5 py-2.5 text-xs font-medium leading-relaxed text-[#081b2c] outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)]" />
       </div>
-      {speechError && <p className="mt-1.5 text-[9px] font-semibold leading-relaxed text-red-500">{speechError}</p>}
+      {speechError && (
+        <div className="mt-1.5">
+          <p className="text-[9px] font-semibold leading-relaxed text-red-500">{speechError}</p>
+          <button
+            type="button"
+            onClick={() => void testarMicrofone()}
+            className="mt-1 rounded-lg bg-[#eef3f2] px-2 py-1 text-[9px] font-extrabold text-[#557f75] transition hover:bg-[#e2ece9]"
+          >
+            Testar microfone
+          </button>
+        </div>
+      )}
+      {diagnostico && (
+        <pre className="mt-1.5 whitespace-pre-wrap rounded-lg bg-[#fafaf8] p-2 text-[9px] leading-relaxed text-[#081b2c]">
+          {diagnostico}
+        </pre>
+      )}
     </Field>
   )
 }
