@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Check,
@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Send,
 } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 import {
   getCurrentMembership,
   listConversationMessages,
@@ -44,24 +45,68 @@ export default function Conversations() {
   const [loading, setLoading] = useState(true)
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [error, setError] = useState('')
+  const [clinicId, setClinicId] = useState<string | null>(null)
+  const [aoVivo, setAoVivo] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  // A assinatura de tempo real e criada uma vez so. Sem estas refs ela ficaria
+  // presa ao valor de selectedId do primeiro render e nunca saberia qual
+  // conversa esta aberta agora.
+  const selectedIdRef = useRef<string | null>(null)
+  selectedIdRef.current = selectedId
+
+  const load = useCallback(async (silencioso = false) => {
+    if (!silencioso) setLoading(true)
     setError('')
     try {
       const membership = await getCurrentMembership()
       if (!membership) throw new Error('Não foi possível identificar a clínica do seu usuário.')
+      setClinicId(membership.clinicId)
       setConversations(await listConversations(membership.clinicId))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Não foi possível carregar as conversas.')
     } finally {
-      setLoading(false)
+      if (!silencioso) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  /**
+   * Tempo real: a tela se atualiza sozinha quando um paciente responde, sem
+   * ninguem precisar clicar em Atualizar. Numa clinica, depender de alguem
+   * lembrar de atualizar a pagina significa resposta de paciente parada na tela.
+   */
+  useEffect(() => {
+    if (!clinicId) return
+
+    const canal = supabase
+      .channel(`conversas-${clinicId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'whatsapp_messages', filter: `clinic_id=eq.${clinicId}` },
+        (payload) => {
+          const nova = payload.new as { conversation_id?: string } | null
+          // Se a conversa afetada esta aberta, recarrega o historico dela.
+          if (nova?.conversation_id && nova.conversation_id === selectedIdRef.current) {
+            void listConversationMessages(nova.conversation_id).then(setMessages).catch(() => {})
+          }
+          // A lista lateral sempre reflete a ultima mensagem e o contador.
+          void load(true)
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'whatsapp_conversations', filter: `clinic_id=eq.${clinicId}` },
+        () => void load(true),
+      )
+      .subscribe((status) => setAoVivo(status === 'SUBSCRIBED'))
+
+    return () => {
+      void supabase.removeChannel(canal)
+    }
+  }, [clinicId, load])
 
   async function openConversation(conversation: Conversation) {
     setSelectedId(conversation.id)
@@ -128,10 +173,16 @@ export default function Conversations() {
       )}
 
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-bold text-slate-500">
+        <p className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
           {conversations.length === 0
             ? 'Nenhuma conversa ainda'
             : `${conversations.length} ${conversations.length === 1 ? 'conversa' : 'conversas'}`}
+          {aoVivo && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#eef3f2] px-2 py-0.5 text-[9px] font-extrabold text-[#557f75]">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#3fa88a]" />
+              Ao vivo
+            </span>
+          )}
         </p>
         <button
           type="button"
