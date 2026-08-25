@@ -18,9 +18,11 @@ import {
   Mic,
   MicOff,
   Plus,
+  Printer,
   RefreshCw,
   Ruler,
   Scale,
+  Search,
   Stethoscope,
   Underline,
   UserRound,
@@ -142,6 +144,7 @@ function agendarLiberacaoMicrofone() {
 
 const editorColors = [
   { label: 'Escuro', value: '#081b2c' },
+  { label: 'Vermelho', value: '#c02626' },
   { label: 'Azul', value: '#2563eb' },
   { label: 'Verde', value: '#557f75' },
   { label: 'Laranja', value: '#c87543' },
@@ -191,6 +194,147 @@ function sanitizeRichText(value: string) {
   }
 
   return document.body.innerHTML
+}
+
+/** Converte "24,5" ou "24.5" em numero. Vazio ou invalido vira null. */
+function numeroBR(valor: string): number | null {
+  const limpo = valor.replace(',', '.').replace(/[^\d.]/g, '')
+  if (!limpo) return null
+  const numero = Number(limpo)
+  return Number.isFinite(numero) && numero > 0 ? numero : null
+}
+
+/**
+ * IMC a partir de peso em kg e altura em cm.
+ *
+ * Fica aqui e nao no banco porque e derivado: guardar o resultado criaria a
+ * chance de peso e IMC discordarem depois de uma correcao no cadastro.
+ */
+function calcularIMC(peso: string, altura: string): number | null {
+  const kg = numeroBR(peso)
+  const cm = numeroBR(altura)
+  if (!kg || !cm) return null
+  const metros = cm / 100
+  return kg / (metros * metros)
+}
+
+function formatarVariacao(atual: number | null, anterior: number | null) {
+  if (atual === null || anterior === null) return null
+  const diferenca = atual - anterior
+  if (Math.abs(diferenca) < 0.05) return 'sem mudança'
+  return `${diferenca > 0 ? '+' : ''}${diferenca.toFixed(1).replace('.', ',')}`
+}
+
+/**
+ * Monta e abre a versao para impressao do prontuario.
+ *
+ * Usa uma janela separada de proposito: o prontuario vive dentro de um painel
+ * com rolagem propria, e mandar imprimir a pagina como esta cortaria o
+ * conteudo. Aqui o documento nasce ja no formato de papel.
+ */
+function imprimirProntuario(patient: Patient, consultas: Consultation[]) {
+  const campos: [string, keyof Consultation][] = [
+    ['Queixa principal', 'queixa'],
+    ['História / evolução', 'historiaEvolucao'],
+    ['Antecedentes pessoais', 'antecedentesPessoais'],
+    ['Antecedentes familiares', 'antecedentesFamiliares'],
+    ['Alergias', 'alergias'],
+    ['Medicamentos em uso', 'medicamentos'],
+    ['Exame físico', 'exameFisico'],
+    ['Avaliação / hipótese diagnóstica', 'avaliacao'],
+    ['Conduta', 'conduta'],
+    ['Prescrição', 'prescricao'],
+    ['Retorno', 'retorno'],
+    ['Observações', 'observacoes'],
+  ]
+
+  const cabecalhoPaciente = [
+    ['Paciente', patient.nome],
+    ['Nascimento', patient.nascimento ? `${fmtBR(patient.nascimento)} (${idade(patient.nascimento)})` : ''],
+    ['Responsável', patient.responsavel],
+    ['Convênio', patient.convenio],
+    ['Cidade', [patient.cidade, patient.bairro].filter(Boolean).join(' · ')],
+    ['Contato', patient.telefone],
+  ]
+    .filter(([, valor]) => valor)
+    .map(([rotulo, valor]) => `<div><span class="r">${rotulo}</span><span class="v">${escapeHtml(String(valor))}</span></div>`)
+    .join('')
+
+  const corpo = consultas
+    .map((consulta) => {
+      const imc = calcularIMC(consulta.peso, consulta.altura)
+      const medidas = [
+        consulta.peso ? `${consulta.peso} kg` : '',
+        consulta.altura ? `${consulta.altura} cm` : '',
+        imc !== null ? `IMC ${imc.toFixed(1).replace('.', ',')}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')
+
+      const blocos = campos
+        .filter(([, chave]) => temTexto(String(consulta[chave] ?? '')))
+        .map(
+          ([rotulo, chave]) =>
+            `<div class="bloco"><h3>${rotulo}</h3><div class="txt">${editorValue(String(consulta[chave]))}</div></div>`,
+        )
+        .join('')
+
+      return `<section class="consulta">
+        <h2>${consultationLabels[consulta.tipo]} — ${fmtBR(consulta.data)}</h2>
+        <p class="meta">${[consulta.unidade, medidas, consulta.cid ? `CID ${consulta.cid.toUpperCase()}` : '']
+          .filter(Boolean)
+          .join('  ·  ')}</p>
+        ${blocos}
+      </section>`
+    })
+    .join('')
+
+  const documento = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+    <title>Prontuário - ${escapeHtml(patient.nome)}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: Georgia, 'Times New Roman', serif; color: #14202c; margin: 0; padding: 28px 32px; font-size: 12pt; line-height: 1.55; }
+      header { border-bottom: 2px solid #14202c; padding-bottom: 12px; margin-bottom: 18px; }
+      header h1 { margin: 0; font-size: 17pt; }
+      header p { margin: 2px 0 0; font-size: 10pt; color: #55606b; }
+      .paciente { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; margin-bottom: 22px; font-size: 11pt; }
+      .paciente .r { display: inline-block; min-width: 105px; color: #55606b; }
+      .paciente .v { font-weight: bold; }
+      .consulta { page-break-inside: avoid; border-top: 1px solid #d4d9de; padding-top: 14px; margin-top: 18px; }
+      .consulta h2 { font-size: 13pt; margin: 0 0 2px; }
+      .meta { margin: 0 0 12px; font-size: 10pt; color: #55606b; }
+      .bloco { margin-bottom: 11px; page-break-inside: avoid; }
+      .bloco h3 { font-size: 10pt; text-transform: uppercase; letter-spacing: .04em; color: #55606b; margin: 0 0 3px; font-weight: bold; }
+      .txt ul, .txt ol { margin: 4px 0; padding-left: 20px; }
+      footer { margin-top: 32px; border-top: 1px solid #d4d9de; padding-top: 10px; font-size: 9pt; color: #7b858e; }
+      @page { margin: 16mm; }
+    </style></head><body>
+    <header>
+      <h1>Clínica Dr. Marcello Ruiz</h1>
+      <p>Prontuário clínico</p>
+    </header>
+    <div class="paciente">${cabecalhoPaciente}</div>
+    ${corpo || '<p>Nenhuma consulta registrada.</p>'}
+    <footer>Documento gerado pelo sistema em ${new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date())}. Documento sigiloso, de uso restrito conforme a legislação de proteção de dados.</footer>
+    </body></html>`
+
+  const janela = window.open('', '_blank', 'width=900,height=1000')
+  if (!janela) {
+    window.alert('O navegador bloqueou a janela de impressão. Permita pop-ups para este site e tente de novo.')
+    return
+  }
+  janela.document.write(documento)
+  janela.document.close()
+  janela.focus()
+  // Espera o conteudo assentar antes de chamar a impressao.
+  window.setTimeout(() => janela.print(), 350)
+}
+
+/** Texto puro de um campo do editor, para comparar e para buscar. */
+function textoSimples(html: string) {
+  if (typeof window === 'undefined') return html
+  const documento = new DOMParser().parseFromString(html, 'text/html')
+  return (documento.body.textContent || '').replace(/\s+/g, ' ').trim()
 }
 
 /** Diz se o HTML tem conteudo de verdade, ignorando <br> e espacos. */
@@ -304,6 +448,15 @@ function RichTextField({
   useEffect(() => {
     const editor = editorRef.current
     if (!editor) return
+    // Nao reescreve o conteudo enquanto o medico esta digitando dentro dele.
+    //
+    // O editor guarda o texto no estado do React e devolve para o campo a cada
+    // mudanca. Como a limpeza do HTML normaliza o que o navegador gera, os dois
+    // quase nunca ficam identicos - e o campo era reescrito a cada tecla. Isso
+    // movia o cursor, desligava o negrito recem-ativado e impedia as listas de
+    // se formarem. Fora de foco a sincronia continua, para refletir edicoes
+    // vindas de outro lugar, como o ditado.
+    if (document.activeElement === editor) return
     const nextValue = editorValue(value)
     if (editor.innerHTML !== nextValue) editor.innerHTML = nextValue
   }, [value])
@@ -753,7 +906,7 @@ function RichTextField({
             </span>
           )}
         </div>
-        <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder={placeholder} onInput={syncEditor} onPaste={pasteAsText} className="min-h-[92px] px-3.5 py-2.5 text-xs font-medium leading-relaxed text-[#081b2c] outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)]" />
+        <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder={placeholder} onInput={syncEditor} onPaste={pasteAsText} className="min-h-[92px] px-3.5 py-2.5 text-[14px] font-medium leading-[1.6] text-[#081b2c] outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)] [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5" />
       </div>
       {speechError && (
         <div className="mt-1.5">
@@ -791,10 +944,13 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function Detail({ label, value }: { label: string; value: string }) {
   if (!value.trim()) return null
   return (
-    <div className="rounded-[14px] border border-[#081b2c]/[0.06] bg-[#faf9f7] px-3.5 py-3">
-      <p className="text-[9px] font-extrabold uppercase tracking-[0.1em] text-slate-400">{label}</p>
+    <div className="mb-4 last:mb-0">
+      {/* Rotulo em sans-serif, texto em serifa: o contraste entre as duas
+          familias separa "etiqueta do campo" de "conteudo clinico" sem
+          precisar de caixa, borda ou fundo. */}
+      <p className="text-[11px] font-extrabold uppercase tracking-[0.09em] text-slate-500">{label}</p>
       <div
-        className="mt-1.5 whitespace-pre-wrap text-[11px] font-medium leading-relaxed text-[#294054] [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-4"
+        className="mt-1 whitespace-pre-wrap font-serif text-[16px] leading-[1.65] text-[#1b2f42] [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5"
         dangerouslySetInnerHTML={{ __html: editorValue(value) }}
       />
     </div>
@@ -810,17 +966,40 @@ function ConsultationTypeIcon({ type }: { type: ConsultationType }) {
 
 function ConsultationCard({
   consultation,
+  anterior,
   onEdit,
 }: {
   consultation: Consultation
+  /** Consulta imediatamente anterior, para mostrar o que mudou. */
+  anterior?: Consultation
   onEdit: (consultation: Consultation) => void
 }) {
   const summary = consultation.avaliacao || consultation.queixa || consultation.historiaEvolucao || consultation.conduta
 
+  const imc = calcularIMC(consultation.peso, consultation.altura)
+  const imcAnterior = anterior ? calcularIMC(anterior.peso, anterior.altura) : null
+  const variacaoPeso = anterior ? formatarVariacao(numeroBR(consultation.peso), numeroBR(anterior.peso)) : null
+  const variacaoImc = formatarVariacao(imc, imcAnterior)
+
+  // Campos em que a mudanca importa clinicamente. Antecedentes e alergias
+  // mudam pouco e poluiriam o aviso.
+  const mudancas = anterior
+    ? (
+        [
+          ['Avaliação', consultation.avaliacao, anterior.avaliacao],
+          ['Conduta', consultation.conduta, anterior.conduta],
+          ['Prescrição', consultation.prescricao, anterior.prescricao],
+          ['Medicamentos', consultation.medicamentos, anterior.medicamentos],
+        ] as const
+      )
+        .filter(([, atual, antigo]) => textoSimples(atual) !== textoSimples(antigo))
+        .map(([rotulo]) => rotulo)
+    : []
+
   return (
     <AccordionItem
       value={consultation.id}
-      className="overflow-hidden rounded-[20px] border border-[#081b2c]/[0.075] bg-white shadow-[0_8px_24px_rgba(8,27,44,.035)]"
+      className="overflow-hidden rounded-[18px] border border-[#081b2c]/[0.09] bg-white shadow-[0_6px_20px_rgba(8,27,44,.04)]"
     >
       <AccordionTrigger className="gap-3 px-4 py-4 hover:no-underline sm:px-5">
         <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -829,16 +1008,16 @@ function ConsultationCard({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-extrabold text-[#081b2c]">
+              <span className="font-serif text-[16px] font-bold text-[#081b2c]">
                 {consultationLabels[consultation.tipo]}
               </span>
               {consultation.cid && (
-                <span className="rounded-full bg-[#eef3f2] px-2 py-1 text-[8px] font-extrabold uppercase tracking-[0.08em] text-[#557f75]">
+                <span className="rounded-full bg-[#eef3f2] px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.06em] text-[#557f75]">
                   CID {consultation.cid.toUpperCase()}
                 </span>
               )}
             </div>
-            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[9px] font-bold text-slate-400">
+            <div className="mt-2 flex flex-wrap gap-x-3.5 gap-y-1 text-[11px] font-bold text-slate-500">
               <span className="inline-flex items-center gap-1">
                 <CalendarDays className="h-3 w-3" /> {fmtBR(consultation.data)}
               </span>
@@ -850,6 +1029,9 @@ function ConsultationCard({
               {consultation.peso && (
                 <span className="inline-flex items-center gap-1">
                   <Scale className="h-3 w-3" /> {consultation.peso} kg
+                  {variacaoPeso && variacaoPeso !== 'sem mudança' && (
+                    <span className="text-slate-400">({variacaoPeso} kg)</span>
+                  )}
                 </span>
               )}
               {consultation.altura && (
@@ -857,14 +1039,25 @@ function ConsultationCard({
                   <Ruler className="h-3 w-3" /> {consultation.altura} cm
                 </span>
               )}
+              {imc !== null && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-[#eef3f2] px-2 py-0.5 text-[#41695f]"
+                  title="Índice de massa corporal, calculado a partir do peso e da altura desta consulta"
+                >
+                  IMC {imc.toFixed(1).replace('.', ',')}
+                  {variacaoImc && variacaoImc !== 'sem mudança' && (
+                    <span className="font-medium">({variacaoImc})</span>
+                  )}
+                </span>
+              )}
             </div>
-            {summary && <p className="mt-2 line-clamp-1 text-[10px] font-medium text-slate-500">{summary}</p>}
+            {summary && <p className="mt-2 line-clamp-1 text-[12px] font-medium text-slate-500">{summary}</p>}
           </div>
         </div>
       </AccordionTrigger>
 
-      <AccordionContent className="px-4 pb-4 sm:px-5 sm:pb-5">
-        <div className="flex justify-end border-t border-[#081b2c]/[0.06] pt-3">
+      <AccordionContent className="px-4 pb-5 sm:px-6 sm:pb-6">
+        <div className="flex justify-end border-t-2 border-[#081b2c] pt-3">
           <button
             type="button"
             onClick={() => onEdit(consultation)}
@@ -873,7 +1066,17 @@ function ConsultationCard({
             <Edit3 className="h-3.5 w-3.5" /> Editar consulta
           </button>
         </div>
-        <div className="grid gap-2 border-t border-[#081b2c]/[0.06] pt-4 sm:grid-cols-2">
+        {mudancas.length > 0 && (
+          <div className="mt-3 rounded-[14px] border border-[#dc8e5f]/30 bg-[#fdf5ef] px-4 py-3">
+            <p className="text-[11px] font-extrabold text-[#8a4b1d]">
+              Mudou desde a consulta de {fmtBR(anterior!.data)}
+            </p>
+            <p className="mt-1 text-[13px] font-semibold text-[#8a4b1d]/80">{mudancas.join(' · ')}</p>
+          </div>
+        )}
+        {/* Coluna unica: o modelo escolhido le como documento, e texto clinico
+            corrido em duas colunas obriga o olho a voltar ao topo o tempo todo. */}
+        <div className="border-t border-[#081b2c]/[0.06] pt-4">
           <Detail label="Queixa principal" value={consultation.queixa} />
           <Detail label="História / evolução" value={consultation.historiaEvolucao} />
           <Detail label="Antecedentes pessoais" value={consultation.antecedentesPessoais} />
@@ -904,6 +1107,42 @@ export default function PatientRecord({
 }: PatientRecordProps) {
   const [mode, setMode] = useState<'history' | 'form'>('history')
   const [consultations, setConsultations] = useState<Consultation[]>([])
+  const [buscaConsulta, setBuscaConsulta] = useState('')
+
+  // Busca em todos os campos de texto da consulta, sem acento e sem marcacao,
+  // para "sinusite" achar tanto "Sinusite" quanto "<b>sinusite</b>".
+  const consultasFiltradas = (() => {
+    const termo = buscaConsulta
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+    if (!termo) return consultations
+    return consultations.filter((consulta) =>
+      [
+        consulta.queixa,
+        consulta.historiaEvolucao,
+        consulta.antecedentesPessoais,
+        consulta.antecedentesFamiliares,
+        consulta.alergias,
+        consulta.medicamentos,
+        consulta.exameFisico,
+        consulta.avaliacao,
+        consulta.conduta,
+        consulta.prescricao,
+        consulta.retorno,
+        consulta.observacoes,
+        consulta.cid,
+        consulta.unidade,
+      ]
+        .map(textoSimples)
+        .join(' ')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .includes(termo),
+    )
+  })()
   const [form, setForm] = useState<ConsultationDraft>(() => emptyConsultation(patient))
   const [editingConsultationId, setEditingConsultationId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -1098,13 +1337,25 @@ export default function PatientRecord({
                     : 'Consultas e evoluções ficam organizadas aqui.'}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={startNewConsultation}
-                className="flex items-center justify-center gap-2 rounded-[14px] bg-[#dc8e5f] px-4 py-2.5 text-[10px] font-extrabold text-white shadow-[0_8px_18px_rgba(220,142,95,.2)] transition hover:-translate-y-0.5 hover:bg-[#cf7f50]"
-              >
-                <Plus className="h-3.5 w-3.5" /> Nova consulta
-              </button>
+              <div className="flex items-center gap-2">
+                {consultations.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => imprimirProntuario(patient, consultasFiltradas)}
+                    className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/10 bg-white px-3.5 py-2.5 text-[11px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c]"
+                    title="Abre a versão para impressão ou para salvar em PDF"
+                  >
+                    <Printer className="h-3.5 w-3.5" /> Imprimir
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={startNewConsultation}
+                  className="flex items-center justify-center gap-2 rounded-[14px] bg-[#dc8e5f] px-4 py-2.5 text-[11px] font-extrabold text-white shadow-[0_8px_18px_rgba(220,142,95,.2)] transition hover:-translate-y-0.5 hover:bg-[#cf7f50]"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Nova consulta
+                </button>
+              </div>
             </div>
 
             <div className="scrollbar-subtle flex-1 overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
@@ -1194,15 +1445,40 @@ export default function PatientRecord({
                   </div>
                 </div>
               ) : (
-                <Accordion type="single" collapsible className="space-y-3">
-                  {consultations.map((consultation) => (
-                    <ConsultationCard
-                      key={consultation.id}
-                      consultation={consultation}
-                      onEdit={startEditingConsultation}
+                <>
+                  <div className="relative mb-3">
+                    <Search className="absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={buscaConsulta}
+                      onChange={(evento) => setBuscaConsulta(evento.target.value)}
+                      placeholder="Buscar no prontuário: sintoma, medicamento, CID..."
+                      className="w-full rounded-2xl border border-[#081b2c]/[0.08] bg-white py-2.5 pl-10 pr-4 text-[13px] font-medium text-[#081b2c] outline-none transition placeholder:text-slate-400 focus:border-[#dc8e5f]/60 focus:ring-4 focus:ring-[#dc8e5f]/10"
                     />
-                  ))}
-                </Accordion>
+                  </div>
+
+                  {consultasFiltradas.length === 0 ? (
+                    <p className="py-10 text-center text-[13px] font-semibold text-slate-400">
+                      Nenhuma consulta menciona "{buscaConsulta}".
+                    </p>
+                  ) : (
+                    <Accordion type="single" collapsible className="space-y-3">
+                      {consultasFiltradas.map((consultation) => (
+                        <ConsultationCard
+                          key={consultation.id}
+                          consultation={consultation}
+                          // A lista vem da mais recente para a mais antiga,
+                          // entao a anterior no tempo e a proxima na lista.
+                          anterior={
+                            consultations[
+                              consultations.findIndex((item) => item.id === consultation.id) + 1
+                            ]
+                          }
+                          onEdit={startEditingConsultation}
+                        />
+                      ))}
+                    </Accordion>
+                  )}
+                </>
               )}
                 </div>
               </div>
