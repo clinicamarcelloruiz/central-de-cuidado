@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { invokeWithFormData } from '@/lib/supabase'
 import {
+  AlertTriangle,
   ArrowLeft,
   Bold,
   Building2,
@@ -942,7 +943,9 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 function Detail({ label, value, alerta = false }: { label: string; value: string; alerta?: boolean }) {
-  if (!value.trim()) return null
+  // value.trim() nao bastava: o editor salva "<div><br></div>" quando o campo
+  // fica vazio, e o rotulo aparecia sozinho (era o caso de "Observacoes").
+  if (!temTexto(value)) return null
   return (
     <div>
       {/* "Documento sereno": rotulo pequeno e apagado, texto clinico em serifa
@@ -1008,7 +1011,7 @@ function ConsultationCard({
       value={consultation.id}
       className="overflow-hidden rounded-[18px] border border-[#081b2c]/[0.09] bg-white shadow-[0_6px_20px_rgba(8,27,44,.04)]"
     >
-      <AccordionTrigger className="gap-3 px-4 py-4 hover:no-underline sm:px-5">
+      <AccordionTrigger className="group gap-3 px-4 py-4 hover:no-underline sm:px-5">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-[#f5e7dd] text-[#c87543]">
             <ConsultationTypeIcon type={consultation.tipo} />
@@ -1058,13 +1061,29 @@ function ConsultationCard({
                 </span>
               )}
             </div>
-            {summary && <p className="mt-2 line-clamp-1 text-[12px] font-medium text-slate-500">{summary}</p>}
+            {/* Some quando o cartao abre: la embaixo o mesmo texto ja aparece
+                inteiro em "Avaliacao", e repetido virava ruido. */}
+            {summary && (
+              <p className="mt-2 line-clamp-1 text-[12px] font-medium text-slate-500 group-data-[state=open]:hidden">
+                {summary}
+              </p>
+            )}
           </div>
         </div>
       </AccordionTrigger>
 
-      <AccordionContent className="px-4 pb-5 sm:px-6 sm:pb-6">
-        <div className="flex justify-end border-t border-[#081b2c]/[0.06] pt-3">
+      <AccordionContent className="px-4 pb-6 sm:px-7 sm:pb-7">
+        {/* Regua escura separando cabecalho e documento, como no modelo. A
+            alergia sobe para ca como etiqueta: e a informacao que nao pode
+            passar batida, e no meio da lista de campos ela se perdia. */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t-2 border-[#081b2c] pt-3">
+          {temTexto(consultation.alergias) ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#fceceb] px-3 py-1 text-[12px] font-extrabold text-[#b42318]">
+              <AlertTriangle className="h-3.5 w-3.5" /> {textoSimples(consultation.alergias)}
+            </span>
+          ) : (
+            <span />
+          )}
           <button
             type="button"
             onClick={() => onEdit(consultation)}
@@ -1084,15 +1103,14 @@ function ConsultationCard({
         {/* Uma coluna so, com largura de leitura limitada (~66 caracteres). Em
             tres colunas o texto quebrava em pedacos curtos e desalinhados; em
             coluna unica cada campo respira e a ordem de leitura fica obvia. */}
-        <div className="mt-4 max-w-[78ch] space-y-5 border-t border-[#081b2c]/[0.06] pt-5">
+        <div className="mt-3 max-w-[78ch] space-y-5 border-t border-[#081b2c]/[0.06] pt-5">
           <Detail label="Queixa principal" value={consultation.queixa} />
-          <Detail label="História / evolução" value={consultation.historiaEvolucao} />
+          <Detail label="História e evolução" value={consultation.historiaEvolucao} />
           <Detail label="Antecedentes pessoais" value={consultation.antecedentesPessoais} />
           <Detail label="Antecedentes familiares" value={consultation.antecedentesFamiliares} />
-          <Detail label="Alergias" value={consultation.alergias} alerta />
           <Detail label="Medicamentos em uso" value={consultation.medicamentos} />
           <Detail label="Exame físico" value={consultation.exameFisico} />
-          <Detail label="Avaliação / hipótese diagnóstica" value={consultation.avaliacao} />
+          <Detail label="Avaliação e hipótese diagnóstica" value={consultation.avaliacao} />
           <Detail label="Conduta" value={consultation.conduta} />
           <Detail label="Prescrição" value={consultation.prescricao} />
           <Detail label="Retorno" value={consultation.retorno} />
