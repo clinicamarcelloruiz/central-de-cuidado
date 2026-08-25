@@ -944,13 +944,12 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function Detail({ label, value }: { label: string; value: string }) {
   if (!value.trim()) return null
   return (
-    <div className="mb-4 last:mb-0">
-      {/* Rotulo em sans-serif, texto em serifa: o contraste entre as duas
-          familias separa "etiqueta do campo" de "conteudo clinico" sem
-          precisar de caixa, borda ou fundo. */}
+    <div>
+      {/* Sem caixa e sem fundo: o peso visual do cartao fica com as medidas no
+          topo, e os campos de texto ficam leves para nao competir com elas. */}
       <p className="text-[11px] font-extrabold uppercase tracking-[0.09em] text-slate-500">{label}</p>
       <div
-        className="mt-1 whitespace-pre-wrap font-serif text-[16px] leading-[1.65] text-[#1b2f42] [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5"
+        className="mt-1 whitespace-pre-wrap text-[15px] font-medium leading-[1.65] text-[#233b50] [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5"
         dangerouslySetInnerHTML={{ __html: editorValue(value) }}
       />
     </div>
@@ -1008,7 +1007,7 @@ function ConsultationCard({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-serif text-[16px] font-bold text-[#081b2c]">
+              <span className="text-[14px] font-extrabold text-[#081b2c]">
                 {consultationLabels[consultation.tipo]}
               </span>
               {consultation.cid && (
@@ -1057,7 +1056,7 @@ function ConsultationCard({
       </AccordionTrigger>
 
       <AccordionContent className="px-4 pb-5 sm:px-6 sm:pb-6">
-        <div className="flex justify-end border-t-2 border-[#081b2c] pt-3">
+        <div className="flex justify-end border-t border-[#081b2c]/[0.06] pt-3">
           <button
             type="button"
             onClick={() => onEdit(consultation)}
@@ -1074,9 +1073,53 @@ function ConsultationCard({
             <p className="mt-1 text-[13px] font-semibold text-[#8a4b1d]/80">{mudancas.join(' · ')}</p>
           </div>
         )}
-        {/* Coluna unica: o modelo escolhido le como documento, e texto clinico
-            corrido em duas colunas obriga o olho a voltar ao topo o tempo todo. */}
-        <div className="border-t border-[#081b2c]/[0.06] pt-4">
+        {/* Medidas em destaque no topo. Sao os unicos dados numericos da
+            consulta e os que mais se compara entre atendimentos, entao ganham
+            o melhor espaco e a maior tipografia do cartao. */}
+        {(consultation.peso || consultation.altura || imc !== null || consultation.cid) && (
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {consultation.peso && (
+              <div className="rounded-[14px] bg-[#faf9f7] px-4 py-3">
+                <p className="text-[11px] font-bold text-slate-500">Peso</p>
+                <p className="text-[24px] font-extrabold leading-tight tracking-[-0.02em] text-[#081b2c]">
+                  {consultation.peso} kg
+                </p>
+                {variacaoPeso && variacaoPeso !== 'sem mudança' && (
+                  <p className="text-[11px] font-extrabold text-[#557f75]">{variacaoPeso} kg</p>
+                )}
+              </div>
+            )}
+            {consultation.altura && (
+              <div className="rounded-[14px] bg-[#faf9f7] px-4 py-3">
+                <p className="text-[11px] font-bold text-slate-500">Altura</p>
+                <p className="text-[24px] font-extrabold leading-tight tracking-[-0.02em] text-[#081b2c]">
+                  {consultation.altura} cm
+                </p>
+              </div>
+            )}
+            {imc !== null && (
+              <div className="rounded-[14px] bg-[#faf9f7] px-4 py-3">
+                <p className="text-[11px] font-bold text-slate-500">IMC</p>
+                <p className="text-[24px] font-extrabold leading-tight tracking-[-0.02em] text-[#081b2c]">
+                  {imc.toFixed(1).replace('.', ',')}
+                </p>
+                {variacaoImc && variacaoImc !== 'sem mudança' && (
+                  <p className="text-[11px] font-extrabold text-slate-500">{variacaoImc}</p>
+                )}
+              </div>
+            )}
+            {consultation.cid && (
+              <div className="rounded-[14px] bg-[#faf9f7] px-4 py-3">
+                <p className="text-[11px] font-bold text-slate-500">CID-10</p>
+                <p className="text-[24px] font-extrabold leading-tight tracking-[-0.02em] text-[#081b2c]">
+                  {consultation.cid.toUpperCase()}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-4 grid gap-x-6 gap-y-4 border-t border-[#081b2c]/[0.06] pt-4 sm:grid-cols-2 lg:grid-cols-3">
           <Detail label="Queixa principal" value={consultation.queixa} />
           <Detail label="História / evolução" value={consultation.historiaEvolucao} />
           <Detail label="Antecedentes pessoais" value={consultation.antecedentesPessoais} />
