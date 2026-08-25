@@ -941,15 +941,18 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
+function Detail({ label, value, alerta = false }: { label: string; value: string; alerta?: boolean }) {
   if (!value.trim()) return null
   return (
     <div>
-      {/* Sem caixa e sem fundo: o peso visual do cartao fica com as medidas no
-          topo, e os campos de texto ficam leves para nao competir com elas. */}
-      <p className="text-[11px] font-extrabold uppercase tracking-[0.09em] text-slate-500">{label}</p>
+      {/* "Documento sereno": rotulo pequeno e apagado, texto clinico em serifa
+          grande. Nada de caixas ou fundos — a leitura corrida e o que importa.
+          Cor so aparece no campo de alergias, o unico que precisa saltar. */}
+      <p className="text-[10px] font-extrabold uppercase tracking-[0.13em] text-slate-400">{label}</p>
       <div
-        className="mt-1 whitespace-pre-wrap text-[15px] font-medium leading-[1.65] text-[#233b50] [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5"
+        className={`mt-1 whitespace-pre-wrap font-serif text-[16.5px] leading-[1.72] [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6 ${
+          alerta ? 'font-semibold text-[#b42318]' : 'text-[#2b4257]'
+        }`}
         dangerouslySetInnerHTML={{ __html: editorValue(value) }}
       />
     </div>
@@ -973,7 +976,12 @@ function ConsultationCard({
   anterior?: Consultation
   onEdit: (consultation: Consultation) => void
 }) {
-  const summary = consultation.avaliacao || consultation.queixa || consultation.historiaEvolucao || consultation.conduta
+  // Os campos guardam HTML (negrito, cor). Para a linha de resumo so interessa
+  // o texto: sem esta limpeza o cartao exibia a marcacao crua, tipo
+  // <span style="color:...">, no lugar da frase.
+  const summary = textoSimples(
+    consultation.avaliacao || consultation.queixa || consultation.historiaEvolucao || consultation.conduta,
+  )
 
   const imc = calcularIMC(consultation.peso, consultation.altura)
   const imcAnterior = anterior ? calcularIMC(anterior.peso, anterior.altura) : null
@@ -1073,58 +1081,15 @@ function ConsultationCard({
             <p className="mt-1 text-[13px] font-semibold text-[#8a4b1d]/80">{mudancas.join(' · ')}</p>
           </div>
         )}
-        {/* Medidas em destaque no topo. Sao os unicos dados numericos da
-            consulta e os que mais se compara entre atendimentos, entao ganham
-            o melhor espaco e a maior tipografia do cartao. */}
-        {(consultation.peso || consultation.altura || imc !== null || consultation.cid) && (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {consultation.peso && (
-              <div className="rounded-[14px] bg-[#faf9f7] px-4 py-3">
-                <p className="text-[11px] font-bold text-slate-500">Peso</p>
-                <p className="text-[24px] font-extrabold leading-tight tracking-[-0.02em] text-[#081b2c]">
-                  {consultation.peso} kg
-                </p>
-                {variacaoPeso && variacaoPeso !== 'sem mudança' && (
-                  <p className="text-[11px] font-extrabold text-[#557f75]">{variacaoPeso} kg</p>
-                )}
-              </div>
-            )}
-            {consultation.altura && (
-              <div className="rounded-[14px] bg-[#faf9f7] px-4 py-3">
-                <p className="text-[11px] font-bold text-slate-500">Altura</p>
-                <p className="text-[24px] font-extrabold leading-tight tracking-[-0.02em] text-[#081b2c]">
-                  {consultation.altura} cm
-                </p>
-              </div>
-            )}
-            {imc !== null && (
-              <div className="rounded-[14px] bg-[#faf9f7] px-4 py-3">
-                <p className="text-[11px] font-bold text-slate-500">IMC</p>
-                <p className="text-[24px] font-extrabold leading-tight tracking-[-0.02em] text-[#081b2c]">
-                  {imc.toFixed(1).replace('.', ',')}
-                </p>
-                {variacaoImc && variacaoImc !== 'sem mudança' && (
-                  <p className="text-[11px] font-extrabold text-slate-500">{variacaoImc}</p>
-                )}
-              </div>
-            )}
-            {consultation.cid && (
-              <div className="rounded-[14px] bg-[#faf9f7] px-4 py-3">
-                <p className="text-[11px] font-bold text-slate-500">CID-10</p>
-                <p className="text-[24px] font-extrabold leading-tight tracking-[-0.02em] text-[#081b2c]">
-                  {consultation.cid.toUpperCase()}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="mt-4 grid gap-x-6 gap-y-4 border-t border-[#081b2c]/[0.06] pt-4 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Uma coluna so, com largura de leitura limitada (~66 caracteres). Em
+            tres colunas o texto quebrava em pedacos curtos e desalinhados; em
+            coluna unica cada campo respira e a ordem de leitura fica obvia. */}
+        <div className="mt-4 max-w-[66ch] space-y-5 border-t border-[#081b2c]/[0.06] pt-5">
           <Detail label="Queixa principal" value={consultation.queixa} />
           <Detail label="História / evolução" value={consultation.historiaEvolucao} />
           <Detail label="Antecedentes pessoais" value={consultation.antecedentesPessoais} />
           <Detail label="Antecedentes familiares" value={consultation.antecedentesFamiliares} />
-          <Detail label="Alergias" value={consultation.alergias} />
+          <Detail label="Alergias" value={consultation.alergias} alerta />
           <Detail label="Medicamentos em uso" value={consultation.medicamentos} />
           <Detail label="Exame físico" value={consultation.exameFisico} />
           <Detail label="Avaliação / hipótese diagnóstica" value={consultation.avaliacao} />
