@@ -1084,7 +1084,7 @@ function ConsultationCard({
         {/* Uma coluna so, com largura de leitura limitada (~66 caracteres). Em
             tres colunas o texto quebrava em pedacos curtos e desalinhados; em
             coluna unica cada campo respira e a ordem de leitura fica obvia. */}
-        <div className="mt-4 max-w-[66ch] space-y-5 border-t border-[#081b2c]/[0.06] pt-5">
+        <div className="mt-4 max-w-[78ch] space-y-5 border-t border-[#081b2c]/[0.06] pt-5">
           <Detail label="Queixa principal" value={consultation.queixa} />
           <Detail label="História / evolução" value={consultation.historiaEvolucao} />
           <Detail label="Antecedentes pessoais" value={consultation.antecedentesPessoais} />
@@ -1268,9 +1268,11 @@ export default function PatientRecord({
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
+      {/* Metade da tela como piso: em monitores largos o prontuario vai ate o
+          meio do monitor, e nunca fica menor do que os 900px de antes. */}
       <SheetContent
         side="left"
-        className="w-full gap-0 border-r border-[#081b2c]/10 bg-[#fbfaf8] p-0 sm:max-w-[760px] lg:max-w-[900px]"
+        className="w-full gap-0 border-r border-[#081b2c]/10 bg-[#fbfaf8] p-0 sm:max-w-[760px] lg:max-w-[max(900px,50vw)]"
       >
         <SheetHeader className="border-b border-[#081b2c]/[0.07] bg-white px-5 pb-5 pt-6 sm:px-7">
           <div className="flex items-start gap-3 pr-8">
