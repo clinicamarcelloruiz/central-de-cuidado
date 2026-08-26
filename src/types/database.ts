@@ -100,6 +100,9 @@ export type Database = {
           schedule_horizon_days: number
           schedule_min_notice_hours: number
           schedule_slot_minutes: number
+          appointment_reminder_enabled: boolean
+          appointment_reminder_days: number
+          whatsapp_reminder_template_name: string
           template_d30: string
           template_m90: string
           updated_at: string
@@ -114,6 +117,9 @@ export type Database = {
           schedule_horizon_days?: number
           schedule_min_notice_hours?: number
           schedule_slot_minutes?: number
+          appointment_reminder_enabled?: boolean
+          appointment_reminder_days?: number
+          whatsapp_reminder_template_name?: string
           template_d30?: string
           template_m90?: string
           updated_at?: string
@@ -128,6 +134,9 @@ export type Database = {
           schedule_horizon_days?: number
           schedule_min_notice_hours?: number
           schedule_slot_minutes?: number
+          appointment_reminder_enabled?: boolean
+          appointment_reminder_days?: number
+          whatsapp_reminder_template_name?: string
           template_d30?: string
           template_m90?: string
           updated_at?: string
@@ -537,6 +546,11 @@ export type Database = {
       appointments: {
         Row: {
           cancelled_at: string | null
+          confirmed_at: string | null
+          reminder_sent_at: string | null
+          reminder_failed_at: string | null
+          reminder_failure_reason: string | null
+          reschedule_requested_at: string | null
           clinic_id: string
           created_at: string
           created_by: string | null
@@ -553,6 +567,11 @@ export type Database = {
         }
         Insert: {
           cancelled_at?: string | null
+          confirmed_at?: string | null
+          reminder_sent_at?: string | null
+          reminder_failed_at?: string | null
+          reminder_failure_reason?: string | null
+          reschedule_requested_at?: string | null
           clinic_id: string
           created_at?: string
           created_by?: string | null
@@ -569,6 +588,11 @@ export type Database = {
         }
         Update: {
           cancelled_at?: string | null
+          confirmed_at?: string | null
+          reminder_sent_at?: string | null
+          reminder_failed_at?: string | null
+          reminder_failure_reason?: string | null
+          reschedule_requested_at?: string | null
           clinic_id?: string
           created_at?: string
           created_by?: string | null
@@ -639,6 +663,7 @@ export type Database = {
           failed_at: string | null
           failure_reason: string | null
           followup_id: string | null
+          appointment_id: string | null
           id: string
           message_type: string
           patient_id: string | null
@@ -658,6 +683,7 @@ export type Database = {
           failed_at?: string | null
           failure_reason?: string | null
           followup_id?: string | null
+          appointment_id?: string | null
           id?: string
           message_type?: string
           patient_id?: string | null
@@ -677,6 +703,7 @@ export type Database = {
           failed_at?: string | null
           failure_reason?: string | null
           followup_id?: string | null
+          appointment_id?: string | null
           id?: string
           message_type?: string
           patient_id?: string | null

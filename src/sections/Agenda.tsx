@@ -73,9 +73,11 @@ export default function Agenda({ patients }: { patients: Patient[] }) {
   const [rules, setRules] = useState<AvailabilityRule[]>([])
   const [exceptions, setExceptions] = useState<ScheduleException[]>([])
   const [prefs, setPrefs] = useState<SchedulePreferences>({
-    slotMinutes: 30,
+    slotMinutes: 40,
     horizonDays: 15,
     minNoticeHours: 2,
+    reminderEnabled: true,
+    reminderDays: 1,
   })
   const [slots, setSlots] = useState<string[]>([])
   const [appointments, setAppointments] = useState<Appointment[]>([])
@@ -532,6 +534,46 @@ export default function Agenda({ patients }: { patients: Patient[] }) {
                 <p className="mt-2 text-[10px] text-slate-500">
                   A antecedência impede o paciente de marcar para daqui a poucos minutos.
                 </p>
+
+                {/* Lembrete de consulta. Fica junto das preferencias porque e
+                    salvo no mesmo botao - dois "salvar" no mesmo cartao
+                    confundiriam sobre o que cada um grava. */}
+                <div className="mt-4 border-t border-[#081b2c]/[0.07] pt-3">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={prefs.reminderEnabled}
+                      onChange={(e) => setPrefs({ ...prefs, reminderEnabled: e.target.checked })}
+                      className="h-3.5 w-3.5 accent-[#dc8e5f]"
+                    />
+                    <span className="text-[11px] font-bold text-[#081b2c]">
+                      Enviar lembrete de consulta pelo WhatsApp
+                    </span>
+                  </label>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={30}
+                      disabled={!prefs.reminderEnabled}
+                      value={prefs.reminderDays}
+                      onChange={(e) => setPrefs({ ...prefs, reminderDays: Number(e.target.value) })}
+                      className="w-16 rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none focus:border-[#dc8e5f] disabled:bg-slate-50 disabled:text-slate-400"
+                    />
+                    <span className="text-[11px] text-slate-600">
+                      {prefs.reminderDays === 0
+                        ? 'dias antes — envia na manhã do próprio dia'
+                        : prefs.reminderDays === 1
+                          ? 'dia antes — envia na véspera'
+                          : 'dias antes da consulta'}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[10px] text-slate-500">
+                    Sai todo dia às 10h. O paciente responde CONFIRMAR ou REAGENDAR; quem pede para
+                    remarcar aparece marcado em Respostas.
+                  </p>
+                </div>
+
                 <button
                   type="button"
                   onClick={() =>

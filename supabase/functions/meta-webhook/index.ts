@@ -106,8 +106,15 @@ Deno.serve(async (req) => {
           const body = messageBody(message)
           const reply = normalizedReply(body)
           const optedOut = reply === 'sair' || reply === 'nao quero receber'
-          const needsAttention = reply === 'preciso de ajuda'
           const isWell = reply === 'estou bem'
+          // Respostas ao lembrete de consulta. Aceita a palavra sozinha ou o
+          // numero do botao, porque o paciente escreve dos dois jeitos.
+          const confirma = reply === 'confirmar' || reply === 'confirmo' || reply === '1'
+          const remarca =
+            reply === 'reagendar' || reply === 'remarcar' || reply === 'reagendar consulta' || reply === '2'
+          // Remarcar exige alguem da equipe: o paciente pediu, mas ninguem
+          // escolheu o novo horario ainda.
+          const needsAttention = reply === 'preciso de ajuda' || remarca
           const receivedAt = message.timestamp
             ? new Date(Number(message.timestamp) * 1000).toISOString()
             : new Date().toISOString()
@@ -150,7 +157,36 @@ Deno.serve(async (req) => {
             await admin.from('patients').update({ whatsapp_opt_out_at: receivedAt }).eq('id', patient.id)
           }
 
-          if (patient?.id && (isWell || needsAttention)) {
+          // Confirmacao ou pedido de remarcacao referem-se sempre a ultima
+          // consulta sobre a qual mandamos lembrete nesta conversa.
+          if (patient?.id && (confirma || remarca)) {
+            const { data: ultimoLembrete } = await admin
+              .from('whatsapp_messages')
+              .select('appointment_id')
+              .eq('conversation_id', conversation.id)
+              .eq('direction', 'outbound')
+              .not('appointment_id', 'is', null)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+
+            if (ultimoLembrete?.appointment_id) {
+              await admin
+                .from('appointments')
+                .update(
+                  confirma
+                    ? { confirmed_at: receivedAt, reschedule_requested_at: null }
+                    : { reschedule_requested_at: receivedAt, confirmed_at: null },
+                )
+                .eq('id', ultimoLembrete.appointment_id)
+                .eq('status', 'scheduled')
+            }
+          }
+
+          // "Preciso de ajuda" explicito, e nao qualquer coisa que acendeu a
+          // bandeira de atencao: um pedido de remarcacao nao reabre um
+          // acompanhamento clinico.
+          if (patient?.id && (isWell || reply === 'preciso de ajuda')) {
             const { data: lastOutbound } = await admin
               .from('whatsapp_messages')
               .select('followup_id')

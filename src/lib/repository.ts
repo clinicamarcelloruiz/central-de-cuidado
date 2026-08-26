@@ -362,6 +362,10 @@ export interface SchedulePreferences {
   slotMinutes: number
   horizonDays: number
   minNoticeHours: number
+  /** Liga ou desliga o lembrete automatico de consulta. */
+  reminderEnabled: boolean
+  /** Dias antes da consulta. 1 = vespera, 0 = no proprio dia. */
+  reminderDays: number
 }
 
 export interface Appointment {
@@ -494,14 +498,18 @@ export async function deleteScheduleException(exceptionId: string) {
 export async function getSchedulePreferences(clinicId: string): Promise<SchedulePreferences> {
   const { data, error } = await supabase
     .from('clinic_settings')
-    .select('schedule_slot_minutes,schedule_horizon_days,schedule_min_notice_hours')
+    // Precisa ser uma string literal unica: concatenar quebra a inferencia de
+    // tipos do supabase-js e o retorno vira GenericStringError.
+    .select('schedule_slot_minutes,schedule_horizon_days,schedule_min_notice_hours,appointment_reminder_enabled,appointment_reminder_days')
     .eq('clinic_id', clinicId)
     .maybeSingle()
   if (error) fail(error)
   return {
-    slotMinutes: data?.schedule_slot_minutes ?? 30,
+    slotMinutes: data?.schedule_slot_minutes ?? 40,
     horizonDays: data?.schedule_horizon_days ?? 15,
     minNoticeHours: data?.schedule_min_notice_hours ?? 2,
+    reminderEnabled: data?.appointment_reminder_enabled ?? true,
+    reminderDays: data?.appointment_reminder_days ?? 1,
   }
 }
 
@@ -512,6 +520,8 @@ export async function saveSchedulePreferences(clinicId: string, prefs: ScheduleP
       schedule_slot_minutes: prefs.slotMinutes,
       schedule_horizon_days: prefs.horizonDays,
       schedule_min_notice_hours: prefs.minNoticeHours,
+      appointment_reminder_enabled: prefs.reminderEnabled,
+      appointment_reminder_days: prefs.reminderDays,
     })
     .eq('clinic_id', clinicId)
   if (error) fail(error)
