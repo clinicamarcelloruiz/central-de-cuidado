@@ -7,10 +7,15 @@ import { sendFollowup } from '../_shared/sendFollowup.ts'
  * Chamada pelo pg_cron (ver migration de agendamento). Nao ha usuario logado,
  * entao a autorizacao e feita por um segredo compartilhado em CRON_SECRET.
  *
- * Regra deliberada: aqui so sai mensagem para paciente que JA tem consentimento
- * registrado. Um robo nao pode presumir consentimento em nome da equipe - quem
- * nunca deu opt-in continua aparecendo na tela para envio manual, onde alguem
- * confirma de forma consciente.
+ * Sobre consentimento: a clinica decidiu que todo paciente atendido pelo medico
+ * e um contato legitimo para o acompanhamento pos-consulta, e autorizou o envio
+ * para toda a base. A base legal e a assistencia (LGPD art. 11, tutela da
+ * saude), nao a autorizacao.
+ *
+ * O que continua valendo sem excecao: quem respondeu SAIR nunca mais recebe
+ * nada. Essa checagem vem antes de qualquer envio, em sendFollowup.
+ *
+ * Para voltar atras, troque consentConfirmed por requireExistingConsent: true.
  */
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -47,7 +52,10 @@ Deno.serve(async (req) => {
     const detalhes: { followupId: string; resultado: string }[] = []
 
     for (const followup of due ?? []) {
-      const result = await sendFollowup(followup.id, { requireExistingConsent: true })
+      const result = await sendFollowup(followup.id, {
+        consentConfirmed: true,
+        consentSource: 'clinic_care_relationship',
+      })
       if (result.ok && !result.alreadySent) {
         resumo.enviados += 1
         detalhes.push({ followupId: followup.id, resultado: 'enviado' })

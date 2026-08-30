@@ -217,6 +217,16 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
                     mensagem aberta
                   </span>
                 )}
+                {/* Sem isto a equipe olha a fila e acha que precisa clicar em
+                    tudo, sem saber que o sistema envia sozinho no dia certo. */}
+                {!wasSent && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[#f2f5f4] px-2 py-1 text-[8px] font-extrabold uppercase tracking-[0.1em] text-[#6b7c86]">
+                    <Clock3 className="h-2.5 w-2.5" strokeWidth={3} />
+                    {isOverdue || isToday
+                      ? 'sai automático hoje às 9h'
+                      : `envio automático em ${fmtBR(item.due)}`}
+                  </span>
+                )}
               </div>
 
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-semibold text-slate-400">
@@ -241,11 +251,16 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
               type="button"
               onClick={() => void send(item)}
               disabled={isSending || wasSent}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#1fbd69] px-3.5 py-2.5 text-[10px] font-extrabold text-white shadow-[0_8px_18px_rgba(31,189,105,.18)] transition hover:bg-[#18a95c] disabled:cursor-not-allowed disabled:opacity-55 sm:flex-none"
+              className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-3.5 py-2.5 text-[10px] font-extrabold transition disabled:cursor-not-allowed disabled:opacity-55 sm:flex-none ${
+                wasSent
+                  ? 'bg-[#e9f4f1] text-[#47766b]'
+                  : 'border border-[#1fbd69]/35 bg-[#f2fbf6] text-[#1a8a4f] hover:border-[#1fbd69] hover:bg-[#e6f7ee]'
+              }`}
+              title={wasSent ? 'Ja enviado' : 'Antecipa o envio que aconteceria automaticamente'}
               aria-label={`Enviar WhatsApp para ${patient.nome}`}
             >
               <Send className="h-4 w-4" strokeWidth={2} />
-              {isSending ? 'Enviando...' : wasSent ? 'Enviado' : 'Enviar agora'}
+              {isSending ? 'Enviando...' : wasSent ? 'Enviado' : 'Antecipar envio'}
             </button>
             <button
               type="button"

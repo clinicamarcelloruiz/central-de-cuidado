@@ -23,6 +23,12 @@ type SendOptions = {
    * consentimento em nome de ninguem.
    */
   requireExistingConsent?: boolean
+  /**
+   * O que fica gravado em whatsapp_consent_source. Existe para o registro ser
+   * honesto sobre de onde veio a autorizacao, em vez de dizer sempre a mesma
+   * coisa para origens diferentes.
+   */
+  consentSource?: string
 }
 
 export async function sendFollowup(followupId: string, options: SendOptions = {}): Promise<SendResult> {
@@ -111,7 +117,10 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
     }
     await admin
       .from('patients')
-      .update({ whatsapp_opt_in_at: new Date().toISOString(), whatsapp_consent_source: 'clinic_system' })
+      .update({
+        whatsapp_opt_in_at: new Date().toISOString(),
+        whatsapp_consent_source: options.consentSource ?? 'clinic_system',
+      })
       .eq('id', patient.id)
   }
 
