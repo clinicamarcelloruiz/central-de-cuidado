@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Check,
   CircleSlash,
   MessageSquareText,
   RefreshCw,
+  Search,
   Send,
   Sparkles,
+  UserPlus,
+  X,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import {
@@ -80,8 +83,20 @@ function formatWhen(value: string | null) {
   ).format(date)
 }
 
-export default function Conversations({ focoPatientId }: { focoPatientId?: string | null }) {
+export type PreCadastro = { nome: string; telefone: string }
+
+export default function Conversations({
+  focoPatientId,
+  onCadastrarContato,
+}: {
+  focoPatientId?: string | null
+  /** Abre a tela de pacientes com nome e telefone do contato ja preenchidos. */
+  onCadastrarContato?: (dados: PreCadastro) => void
+}) {
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const [busca, setBusca] = useState('')
+  const [de, setDe] = useState('')
+  const [ate, setAte] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [loading, setLoading] = useState(true)
@@ -275,6 +290,33 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
     }
   }
 
+  // Busca e filtro rodam sobre o que ja esta na tela: a listagem carrega as
+  // mensagens da clinica para descobrir a ultima de cada conversa, entao
+  // procurar dentro do texto nao custa consulta nova.
+  const visiveis = useMemo(() => {
+    const termo = busca.trim().toLowerCase()
+    const digitosBusca = termo.replace(/\D/g, '')
+    const inicio = de ? new Date(`${de}T00:00:00`).getTime() : null
+    // Ate o fim do dia escolhido, e nao a meia-noite: quem digita 15/08 quer o
+    // dia 15 inteiro.
+    const fim = ate ? new Date(`${ate}T23:59:59.999`).getTime() : null
+
+    return conversations.filter((item) => {
+      if (inicio !== null || fim !== null) {
+        const quando = item.lastMessageAt ? new Date(item.lastMessageAt).getTime() : null
+        if (quando === null) return false
+        if (inicio !== null && quando < inicio) return false
+        if (fim !== null && quando > fim) return false
+      }
+      if (!termo) return true
+      if (item.patientName.toLowerCase().includes(termo)) return true
+      if (item.profileName.toLowerCase().includes(termo)) return true
+      if (digitosBusca && item.phoneDigits.includes(digitosBusca)) return true
+      return item.textoBusca.includes(termo)
+    })
+  }, [conversations, busca, de, ate])
+
+  const filtrando = Boolean(busca.trim() || de || ate)
   const attention = conversations.filter((item) => item.needsAttention)
   const querAtendente = attention.filter(
     (item) => item.attentionReason === 'atendente' || item.attentionReason === 'falha',
@@ -442,11 +484,59 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
         )}
       </div>
 
+      {conversations.length > 0 && (
+        <div className="surface-card flex flex-wrap items-center gap-2 rounded-[18px] p-3">
+          <div className="relative min-w-[200px] flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Buscar por nome, telefone ou algo que foi dito"
+              className="w-full rounded-[12px] border border-[#081b2c]/10 bg-white py-2 pl-9 pr-3 text-[11px] outline-none focus:border-[#dc8e5f]"
+            />
+          </div>
+          <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
+            De
+            <input
+              type="date"
+              value={de}
+              onChange={(e) => setDe(e.target.value)}
+              className="rounded-[12px] border border-[#081b2c]/10 bg-white px-2 py-2 text-[11px] outline-none focus:border-[#dc8e5f]"
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
+            até
+            <input
+              type="date"
+              value={ate}
+              onChange={(e) => setAte(e.target.value)}
+              className="rounded-[12px] border border-[#081b2c]/10 bg-white px-2 py-2 text-[11px] outline-none focus:border-[#dc8e5f]"
+            />
+          </label>
+          {filtrando && (
+            <button
+              type="button"
+              onClick={() => {
+                setBusca('')
+                setDe('')
+                setAte('')
+              }}
+              className="inline-flex items-center gap-1 rounded-[12px] bg-slate-100 px-3 py-2 text-[10px] font-extrabold text-slate-600 transition hover:bg-slate-200"
+            >
+              <X className="h-3 w-3" />
+              Limpar
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <p className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
           {conversations.length === 0
             ? 'Nenhuma conversa ainda'
-            : `${conversations.length} ${conversations.length === 1 ? 'conversa' : 'conversas'}`}
+            : filtrando
+              ? `${visiveis.length} de ${conversations.length} ${conversations.length === 1 ? 'conversa' : 'conversas'}`
+              : `${conversations.length} ${conversations.length === 1 ? 'conversa' : 'conversas'}`}
           {aoVivo && (
             <span className="inline-flex items-center gap-1 rounded-full bg-[#eef3f2] px-2 py-0.5 text-[9px] font-extrabold text-[#557f75]">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#3fa88a]" />
@@ -475,7 +565,12 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
           <div className="space-y-2">
-            {conversations.map((conversation) => {
+            {visiveis.length === 0 && (
+              <div className="surface-card rounded-[18px] p-6 text-center text-[11px] font-semibold text-slate-500">
+                Nenhuma conversa encontrada com esses filtros.
+              </div>
+            )}
+            {visiveis.map((conversation) => {
               const active = conversation.id === selectedId
               const motivo = conversation.needsAttention && conversation.attentionReason
                 ? MOTIVO_ATENCAO[conversation.attentionReason]
@@ -487,25 +582,43 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
                 : active
                   ? 'border-[#dc8e5f] bg-white shadow-[0_10px_28px_rgba(8,27,44,.10)]'
                   : 'border-[#081b2c]/10 bg-white/70 hover:border-[#081b2c]/20 hover:bg-white'
+              const semCadastro = !conversation.patientId
+              // Sem cadastro, o nome do WhatsApp e melhor do que "Contato sem
+              // cadastro" - mas vem com etiqueta, porque e o apelido que a
+              // pessoa escolheu, nao um nome conferido pela clinica.
+              const titulo = semCadastro
+                ? conversation.profileName || 'Contato sem cadastro'
+                : conversation.patientName
               return (
-                <button
+                <div
                   key={conversation.id}
-                  type="button"
-                  onClick={() => void openConversation(conversation)}
-                  className={`w-full rounded-[18px] border p-3 text-left transition ${contorno}`}
+                  className={`w-full rounded-[18px] border p-3 transition ${contorno}`}
                 >
+                  <button
+                    type="button"
+                    onClick={() => void openConversation(conversation)}
+                    className="w-full text-left"
+                  >
                   <div className="flex items-start justify-between gap-2">
                     <span className="truncate text-xs font-extrabold text-[#081b2c]">
-                      {conversation.patientName}
+                      {titulo}
                     </span>
                     <span className="shrink-0 text-[9px] font-bold text-slate-400">
                       {formatWhen(conversation.lastMessageAt)}
                     </span>
                   </div>
+                  <p className="mt-0.5 text-[10px] font-bold tracking-wide text-slate-400">
+                    {conversation.phone}
+                  </p>
                   <p className="mt-1 truncate text-[11px] text-slate-500">
                     {conversation.lastMessage || 'Sem mensagens'}
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {semCadastro && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-extrabold text-slate-500">
+                        {conversation.profileName ? 'Nome do WhatsApp' : 'Sem cadastro'}
+                      </span>
+                    )}
                     {motivo ? (
                       <span
                         className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${motivo.classe}`}
@@ -534,7 +647,26 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
                       </span>
                     )}
                   </div>
-                </button>
+                  </button>
+
+                  {semCadastro && onCadastrarContato && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onCadastrarContato({
+                          // O apelido do WhatsApp entra so como ponto de
+                          // partida: quem cadastra confere e corrige.
+                          nome: conversation.profileName,
+                          telefone: conversation.phone,
+                        })
+                      }
+                      className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-[#081b2c]/15 bg-white px-3 py-2 text-[10px] font-extrabold text-[#081b2c] transition hover:border-[#dc8e5f] hover:text-[#8a4b1d]"
+                    >
+                      <UserPlus className="h-3.5 w-3.5" />
+                      Cadastrar como paciente
+                    </button>
+                  )}
+                </div>
               )
             })}
           </div>

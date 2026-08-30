@@ -112,11 +112,23 @@ export default function Home() {
   // Paciente cuja conversa deve abrir ao entrar em Respostas pelo atalho.
   const [conversaFoco, setConversaFoco] = useState<string | null>(null)
   const [newPatientSignal, setNewPatientSignal] = useState(0)
+  const [preCadastro, setPreCadastro] = useState<{ nome: string; telefone: string } | null>(null)
   const pendentes = dueCount(db.patients)
   const meta = PAGE_META[tab]
   const tabs = role === 'owner' ? TABS : TABS.filter((item) => item.key !== 'admin')
 
   function createPatient() {
+    setPreCadastro(null)
+    setTab('pacientes')
+    setNewPatientSignal((value) => value + 1)
+  }
+
+  /**
+   * Cadastro que comeca de uma conversa do WhatsApp. Leva nome e telefone
+   * prontos para a tela de pacientes - a equipe so confere e completa.
+   */
+  function cadastrarContato(dados: { nome: string; telefone: string }) {
+    setPreCadastro(dados)
     setTab('pacientes')
     setNewPatientSignal((value) => value + 1)
   }
@@ -322,7 +334,9 @@ export default function Home() {
               />
             )}
             {tab === 'agenda' && <Agenda patients={db.patients} />}
-            {tab === 'conversas' && <Conversations focoPatientId={conversaFoco} />}
+            {tab === 'conversas' && (
+              <Conversations focoPatientId={conversaFoco} onCadastrarContato={cadastrarContato} />
+            )}
             {tab === 'pacientes' && (
               <Patients
                 patients={db.patients}
@@ -333,6 +347,7 @@ export default function Home() {
                 addConsultation={addConsultation}
                 updateConsultation={updateConsultation}
                 openCreateSignal={newPatientSignal}
+                preCadastro={preCadastro}
               />
             )}
             {tab === 'config' && (

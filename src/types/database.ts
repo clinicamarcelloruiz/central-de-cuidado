@@ -647,6 +647,7 @@ export type Database = {
           booking_unit_id: string | null
           booking_updated_at: string | null
           menu_sent_at: string | null
+          profile_name: string
           attention_reason: string | null
           patient_id: string | null
           status: string
@@ -667,6 +668,7 @@ export type Database = {
           booking_unit_id?: string | null
           booking_updated_at?: string | null
           menu_sent_at?: string | null
+          profile_name?: string
           attention_reason?: string | null
           patient_id?: string | null
           status?: string
@@ -687,6 +689,7 @@ export type Database = {
           booking_unit_id?: string | null
           booking_updated_at?: string | null
           menu_sent_at?: string | null
+          profile_name?: string
           attention_reason?: string | null
           patient_id?: string | null
           status?: string
@@ -782,6 +785,10 @@ export type Database = {
       available_slots: {
         Args: { p_unit_id: string }
         Returns: { slot_start: string; slot_end: string }[]
+      }
+      vincular_contato_ao_paciente: {
+        Args: { p_patient_id: string }
+        Returns: { conversas: number; mensagens: number; consultas: number }[]
       }
     }
     Enums: {

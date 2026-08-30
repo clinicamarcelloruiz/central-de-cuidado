@@ -83,6 +83,16 @@ Deno.serve(async (req) => {
         if (!settings?.clinic_id) continue
         const clinicId = settings.clinic_id
 
+        // A Meta manda em `contacts` o nome que a pessoa configurou no WhatsApp
+        // dela. Nao e nome verificado, mas para um contato sem cadastro e a
+        // unica coisa que a equipe tem para saber com quem esta falando.
+        const nomePorWaId = new Map<string, string>()
+        for (const contato of value.contacts ?? []) {
+          const id = digits(String(contato?.wa_id ?? ''))
+          const nome = String(contato?.profile?.name ?? '').trim()
+          if (id && nome) nomePorWaId.set(id, nome.slice(0, 120))
+        }
+
         for (const message of value.messages ?? []) {
           const externalId = String(message.id ?? '')
           if (!externalId) continue
@@ -188,6 +198,10 @@ Deno.serve(async (req) => {
           const aguardandoEquipe = Boolean(conversaAnterior?.needs_attention)
           const marcarAtencao = aguardandoEquipe || Boolean(motivoAtencao)
 
+          // Sem nome novo no evento, mantem o que ja estava gravado em vez de
+          // apagar: nem todo evento traz o bloco `contacts`.
+          const nomeDoPerfil = nomePorWaId.get(waId) ?? ''
+
           const { data: conversation, error: conversationError } = await admin
             .from('whatsapp_conversations')
             .upsert({
@@ -198,6 +212,7 @@ Deno.serve(async (req) => {
               status: optedOut ? 'opted_out' : 'open',
               needs_attention: marcarAtencao,
               last_message_at: receivedAt,
+              ...(nomeDoPerfil ? { profile_name: nomeDoPerfil } : {}),
             }, { onConflict: 'clinic_id,wa_id' })
             .select('id,unread_count')
             .single()
@@ -209,6 +224,7 @@ Deno.serve(async (req) => {
             status: optedOut ? 'opted_out' : 'open',
           }
           if (motivoAtencao) atualizacaoConversa.attention_reason = motivoAtencao
+          if (nomeDoPerfil) atualizacaoConversa.profile_name = nomeDoPerfil
           await admin
             .from('whatsapp_conversations')
             .update(atualizacaoConversa)

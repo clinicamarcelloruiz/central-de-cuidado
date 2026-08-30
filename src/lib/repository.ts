@@ -631,11 +631,34 @@ export async function cancelAppointment(appointmentId: string) {
  * na tela: sem elas o paciente responde "Preciso de ajuda" e ninguem ve.
  * ------------------------------------------------------------------ */
 
+/**
+ * Telefone do jeito que se le em voz alta. O banco guarda so digitos, com o 55
+ * na frente, e "5511975175747" na tela nao ajuda ninguem a conferir um numero.
+ */
+export function formatarTelefone(digitos: string) {
+  const limpo = (digitos ?? '').replace(/\D/g, '')
+  const nacional = limpo.startsWith('55') && limpo.length > 11 ? limpo.slice(2) : limpo
+  if (nacional.length === 11) {
+    return `(${nacional.slice(0, 2)}) ${nacional.slice(2, 7)}-${nacional.slice(7)}`
+  }
+  if (nacional.length === 10) {
+    return `(${nacional.slice(0, 2)}) ${nacional.slice(2, 6)}-${nacional.slice(6)}`
+  }
+  return limpo
+}
+
 export interface Conversation {
   id: string
   patientId: string | null
   patientName: string
+  /**
+   * Nome que a pessoa configurou no WhatsApp dela. Serve para reconhecer a
+   * conversa; nao e nome verificado e nunca substitui o cadastro.
+   */
+  profileName: string
   phone: string
+  /** So digitos, para casar com o cadastro e montar o pre-cadastro. */
+  phoneDigits: string
   status: 'open' | 'resolved' | 'opted_out'
   needsAttention: boolean
   /**
@@ -647,6 +670,12 @@ export interface Conversation {
   unreadCount: number
   lastMessageAt: string | null
   lastMessage: string
+  /**
+   * Todo o texto trocado nesta conversa, em minusculas, so para a busca. Vem
+   * das mensagens que a listagem ja carrega para descobrir a ultima de cada
+   * conversa - nao custa consulta nova.
+   */
+  textoBusca: string
 }
 
 export interface ConversationMessage {
@@ -663,7 +692,7 @@ export async function listConversations(clinicId: string): Promise<Conversation[
   const { data, error } = await supabase
     .from('whatsapp_conversations')
     .select(
-      'id,patient_id,display_phone,wa_id,status,needs_attention,attention_reason,unread_count,last_message_at',
+      'id,patient_id,display_phone,wa_id,profile_name,status,needs_attention,attention_reason,unread_count,last_message_at',
     )
     .eq('clinic_id', clinicId)
     .order('last_message_at', { ascending: false, nullsFirst: false })
@@ -690,24 +719,52 @@ export async function listConversations(clinicId: string): Promise<Conversation[
 
   const nameById = new Map((patientsResult.data ?? []).map((p) => [p.id, p.name]))
   const lastBodyByConversation = new Map<string, string>()
+  const textoPorConversa = new Map<string, string[]>()
   for (const message of messagesResult.data ?? []) {
     if (!lastBodyByConversation.has(message.conversation_id)) {
       lastBodyByConversation.set(message.conversation_id, message.body)
     }
+    const acumulado = textoPorConversa.get(message.conversation_id)
+    if (acumulado) acumulado.push(message.body)
+    else textoPorConversa.set(message.conversation_id, [message.body])
   }
 
   return rows.map((row) => ({
     id: row.id,
     patientId: row.patient_id,
     patientName: (row.patient_id && nameById.get(row.patient_id)) || 'Contato sem cadastro',
-    phone: row.display_phone || row.wa_id,
+    profileName: row.profile_name ?? '',
+    phone: formatarTelefone(row.display_phone || row.wa_id),
+    phoneDigits: (row.display_phone || row.wa_id || '').replace(/\D/g, ''),
     status: row.status as Conversation['status'],
     needsAttention: row.needs_attention,
     attentionReason: (row.attention_reason ?? null) as Conversation['attentionReason'],
     unreadCount: row.unread_count,
     lastMessageAt: row.last_message_at,
     lastMessage: lastBodyByConversation.get(row.id) ?? '',
+    textoBusca: (textoPorConversa.get(row.id) ?? []).join(' \n ').toLowerCase(),
   }))
+}
+
+/**
+ * Liga conversas, mensagens e consultas do WhatsApp ao paciente recem-cadastrado.
+ *
+ * O robo so procura o paciente pelo telefone quando a mensagem chega. Sem esta
+ * costura, cadastrar alguem depois deixaria a conversa como "Contato sem
+ * cadastro" ate a proxima mensagem - e a consulta que a pessoa marcou sozinha
+ * ficaria sem dono, fora do prontuario.
+ */
+export async function vincularContatoAoPaciente(patientId: string) {
+  const { data, error } = await supabase.rpc('vincular_contato_ao_paciente', {
+    p_patient_id: patientId,
+  })
+  if (error) fail(error)
+  const linha = Array.isArray(data) ? data[0] : data
+  return {
+    conversas: linha?.conversas ?? 0,
+    mensagens: linha?.mensagens ?? 0,
+    consultas: linha?.consultas ?? 0,
+  }
 }
 
 export async function listConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
