@@ -105,6 +105,8 @@ interface Props {
   addConsultation: (patientId: string, draft: ConsultationDraft) => Promise<void>
   updateConsultation: (patientId: string, consultationId: string, draft: ConsultationDraft) => Promise<void>
   openCreateSignal?: number
+  /** Nome e telefone trazidos de uma conversa do WhatsApp, para adiantar o cadastro. */
+  preCadastro?: { nome: string; telefone: string } | null
 }
 
 export default function Patients({
@@ -116,6 +118,7 @@ export default function Patients({
   addConsultation,
   updateConsultation,
   openCreateSignal = 0,
+  preCadastro = null,
 }: Props) {
   const [query, setQuery] = useState('')
   // Lista simples e o padrao: cabe mais paciente na tela e a busca visual e
@@ -136,9 +139,16 @@ export default function Patients({
   useEffect(() => {
     if (openCreateSignal <= 0) return
     setEditingId(null)
-    setForm(emptyDraft())
+    // preCadastro so preenche nome e telefone; o resto do formulario continua
+    // em branco de proposito, para ninguem sair salvando dado presumido.
+    setForm({ ...emptyDraft(), ...(preCadastro
+      ? { nome: preCadastro.nome, telefone: preCadastro.telefone }
+      : {}) })
     setError('')
     setFormOpen(true)
+    // preCadastro fica fora das dependencias: quem manda abrir o formulario e o
+    // sinal. Reagir ao objeto reabriria a tela a cada render do pai.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openCreateSignal])
 
   const filtered = useMemo(() => {

@@ -20,6 +20,7 @@ import {
   importPatients,
   listConsultations,
   saveTemplates,
+  vincularContatoAoPaciente,
   type ClinicRole,
 } from '@/lib/repository'
 
@@ -103,6 +104,19 @@ export function useDb() {
   async function addPatient(draft: PatientDraft) {
     const patient = await run(() => createPatient(requireClinic(), draft))
     setDb((current) => ({ ...current, patients: [patient, ...current.patients] }))
+
+    // Costura o passado: conversas, mensagens e consultas que a pessoa ja tinha
+    // no WhatsApp com este telefone passam a pertencer ao paciente. Fica aqui, e
+    // nao na tela, para valer em qualquer caminho de cadastro.
+    //
+    // Falhar aqui nao pode desfazer o cadastro - o paciente ja existe, e a
+    // proxima mensagem dele refaz o vinculo sozinha.
+    try {
+      await vincularContatoAoPaciente(patient.id)
+    } catch (cause) {
+      console.error('Nao consegui ligar o historico do WhatsApp ao paciente novo', cause)
+    }
+
     return patient
   }
 
