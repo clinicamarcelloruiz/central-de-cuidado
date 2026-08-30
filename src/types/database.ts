@@ -103,6 +103,7 @@ export type Database = {
           appointment_reminder_enabled: boolean
           whatsapp_autoreply_enabled: boolean
           whatsapp_autoreply_known_text: string
+          whatsapp_menu_info_text: string
           whatsapp_autoreply_text: string
           appointment_reminder_days: number
           whatsapp_reminder_template_name: string
@@ -123,6 +124,7 @@ export type Database = {
           appointment_reminder_enabled?: boolean
           whatsapp_autoreply_enabled?: boolean
           whatsapp_autoreply_known_text?: string
+          whatsapp_menu_info_text?: string
           whatsapp_autoreply_text?: string
           appointment_reminder_days?: number
           whatsapp_reminder_template_name?: string
@@ -143,6 +145,7 @@ export type Database = {
           appointment_reminder_enabled?: boolean
           whatsapp_autoreply_enabled?: boolean
           whatsapp_autoreply_known_text?: string
+          whatsapp_menu_info_text?: string
           whatsapp_autoreply_text?: string
           appointment_reminder_days?: number
           whatsapp_reminder_template_name?: string
@@ -643,6 +646,8 @@ export type Database = {
           booking_options: Json | null
           booking_unit_id: string | null
           booking_updated_at: string | null
+          menu_sent_at: string | null
+          attention_reason: string | null
           patient_id: string | null
           status: string
           unread_count: number
@@ -661,6 +666,8 @@ export type Database = {
           booking_options?: Json | null
           booking_unit_id?: string | null
           booking_updated_at?: string | null
+          menu_sent_at?: string | null
+          attention_reason?: string | null
           patient_id?: string | null
           status?: string
           unread_count?: number
@@ -679,6 +686,8 @@ export type Database = {
           booking_options?: Json | null
           booking_unit_id?: string | null
           booking_updated_at?: string | null
+          menu_sent_at?: string | null
+          attention_reason?: string | null
           patient_id?: string | null
           status?: string
           unread_count?: number

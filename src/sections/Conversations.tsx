@@ -30,6 +30,42 @@ const STATUS_LABEL: Record<Conversation['status'], string> = {
   opted_out: 'Pediu para não receber',
 }
 
+/**
+ * Nem todo pedido de atencao e igual. Quem escolheu "falar com a equipe" no
+ * menu esta esperando uma pessoa agora; uma falha do sistema e assunto nosso,
+ * nao do paciente. Cada motivo tem sua cor para a equipe priorizar de longe.
+ */
+const MOTIVO_ATENCAO: Record<
+  NonNullable<Conversation['attentionReason']>,
+  { rotulo: string; classe: string; borda: string }
+> = {
+  atendente: {
+    rotulo: 'Quer falar com a equipe',
+    classe: 'bg-[#8a4b1d] text-white',
+    borda: 'border-[#8a4b1d] ring-1 ring-[#8a4b1d]/30',
+  },
+  remarcacao: {
+    rotulo: 'Pediu para remarcar',
+    classe: 'bg-[#fdf3ec] text-[#8a4b1d]',
+    borda: 'border-[#dc8e5f]',
+  },
+  cancelamento: {
+    rotulo: 'Cancelou a consulta',
+    classe: 'bg-red-50 text-red-700',
+    borda: 'border-red-300',
+  },
+  ajuda: {
+    rotulo: 'Pediu ajuda',
+    classe: 'bg-[#fdf3ec] text-[#8a4b1d]',
+    borda: 'border-[#dc8e5f]',
+  },
+  falha: {
+    rotulo: 'Falha no atendimento automático',
+    classe: 'bg-red-600 text-white',
+    borda: 'border-red-500 ring-1 ring-red-500/30',
+  },
+}
+
 function formatWhen(value: string | null) {
   if (!value) return '-'
   const date = new Date(value)
@@ -60,7 +96,12 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
   // Recalculado a cada minuto: sem isso a caixa continuaria habilitada depois
   // de a janela vencer com a tela aberta.
   const [agora, setAgora] = useState(() => Date.now())
-  const [autoReply, setAutoReply] = useState<AutoReplySettings>({ enabled: false, text: '', knownText: '' })
+  const [autoReply, setAutoReply] = useState<AutoReplySettings>({
+    enabled: false,
+    text: '',
+    knownText: '',
+    infoText: '',
+  })
   const [autoReplyAberto, setAutoReplyAberto] = useState(false)
   const [salvandoAuto, setSalvandoAuto] = useState(false)
   const [avisoAuto, setAvisoAuto] = useState('')
@@ -171,7 +212,9 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
         await markConversationSeen(conversation.id)
         setConversations((current) =>
           current.map((item) =>
-            item.id === conversation.id ? { ...item, unreadCount: 0, needsAttention: false } : item,
+            item.id === conversation.id
+              ? { ...item, unreadCount: 0, needsAttention: false, attentionReason: null }
+              : item,
           ),
         )
       }
@@ -223,7 +266,7 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
       setConversations((current) =>
         current.map((item) =>
           item.id === conversationId
-            ? { ...item, status: 'resolved', needsAttention: false, unreadCount: 0 }
+            ? { ...item, status: 'resolved', needsAttention: false, attentionReason: null, unreadCount: 0 }
             : item,
         ),
       )
@@ -233,6 +276,12 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
   }
 
   const attention = conversations.filter((item) => item.needsAttention)
+  const querAtendente = attention.filter(
+    (item) => item.attentionReason === 'atendente' || item.attentionReason === 'falha',
+  )
+  const outrasAtencoes = attention.filter(
+    (item) => item.attentionReason !== 'atendente' && item.attentionReason !== 'falha',
+  )
   const selected = conversations.find((item) => item.id === selectedId) ?? null
 
   if (loading) {
@@ -252,12 +301,28 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
         </div>
       )}
 
-      {attention.length > 0 && (
+      {/* Quem escolheu "falar com a equipe" ganha um aviso proprio e mais forte:
+          o robo parou de responder essa pessoa, entao ela so sai do lugar se
+          alguem daqui abrir a conversa. */}
+      {querAtendente.length > 0 && (
+        <button
+          type="button"
+          onClick={() => void openConversation(querAtendente[0])}
+          className="flex w-full items-center gap-2 rounded-[16px] border-2 border-[#8a4b1d] bg-[#8a4b1d] p-3 text-left text-[11px] font-bold text-white transition hover:bg-[#763f18]"
+        >
+          <MessageSquareText className="h-4 w-4 shrink-0" />
+          {querAtendente.length === 1
+            ? '1 pessoa pediu para falar com a equipe e está esperando resposta.'
+            : `${querAtendente.length} pessoas pediram para falar com a equipe e estão esperando resposta.`}
+        </button>
+      )}
+
+      {outrasAtencoes.length > 0 && (
         <div className="flex items-center gap-2 rounded-[16px] border border-[#dc8e5f]/40 bg-[#fdf3ec] p-3 text-[11px] font-bold text-[#8a4b1d]">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          {attention.length === 1
+          {outrasAtencoes.length === 1
             ? '1 paciente respondeu e está aguardando retorno da equipe.'
-            : `${attention.length} pacientes responderam e estão aguardando retorno da equipe.`}
+            : `${outrasAtencoes.length} pacientes responderam e estão aguardando retorno da equipe.`}
         </div>
       )}
 
@@ -272,7 +337,7 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
         >
           <span className="flex items-center gap-2 text-[11px] font-extrabold text-[#081b2c]">
             <Sparkles className="h-3.5 w-3.5 text-[#dc8e5f]" />
-            Resposta automática para quem escreve pela primeira vez
+            Menu automático do WhatsApp
           </span>
           <span
             className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
@@ -295,36 +360,70 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
                 className="h-3.5 w-3.5 accent-[#dc8e5f]"
               />
               <span className="text-[11px] font-bold text-[#081b2c]">
-                Responder automaticamente contatos novos
+                Responder automaticamente quem escreve para a clínica
               </span>
             </label>
+
+            {/* As opcoes 1, 2 e 3 nao sao editaveis: elas correspondem ao que o
+                sistema sabe fazer. Mostrar o menu montado evita a duvida de
+                "onde eu escrevo as opcoes?". */}
             <p className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
-              Para quem não é paciente cadastrado
+              Como a mensagem chega
+            </p>
+            <div className="mt-1 rounded-[14px] border border-[#081b2c]/10 bg-[#fbfaf8] p-3 text-[11px] leading-relaxed text-[#081b2c]">
+              <span className="text-slate-500">{autoReply.text || 'Saudação'}</span>
+              <br />
+              <br />
+              Como podemos ajudar? Responda com o número:
+              <br />
+              <br />
+              1 - Informações sobre a consulta
+              <br />
+              2 - Agendar consulta
+              <br />
+              3 - Falar com a nossa equipe
+            </div>
+
+            <p className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+              Saudação para quem não é paciente cadastrado
             </p>
             <textarea
               value={autoReply.text}
               onChange={(e) => setAutoReply({ ...autoReply, text: e.target.value })}
-              rows={12}
+              rows={2}
               className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
             />
 
             <p className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
-              Para quem já é paciente
+              Saudação para quem já é paciente
             </p>
             <textarea
               value={autoReply.knownText}
               onChange={(e) => setAutoReply({ ...autoReply, knownText: e.target.value })}
-              rows={5}
+              rows={2}
               className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
             />
             <p className="mt-2 text-[10px] text-slate-500">
               O sistema identifica o paciente pelo telefone. Escreva <strong>{'{nome}'}</strong> onde
-              quiser o primeiro nome dele. Deixe vazio para não responder a pacientes cadastrados.
+              quiser o primeiro nome dele.
+            </p>
+
+            <p className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+              Opção 1 - Informações sobre a consulta
+            </p>
+            <textarea
+              value={autoReply.infoText}
+              onChange={(e) => setAutoReply({ ...autoReply, infoText: e.target.value })}
+              rows={12}
+              className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
+            />
+            <p className="mt-2 text-[10px] text-slate-500">
+              Valores, formas de contato e orientações. É o que o paciente recebe ao responder 1.
             </p>
             <p className="mt-1 text-[10px] text-slate-500">
-              Enviada uma única vez por contato, e apenas para quem nunca recebeu nada da
-              clínica. Quem está respondendo acompanhamento ou lembrete de consulta não
-              recebe nenhum dos dois textos.
+              A opção 2 usa a agenda das unidades. A opção 3 marca a conversa aqui em
+              destaque e o robô para de responder, para não falar por cima da equipe.
+              Quem está respondendo acompanhamento ou lembrete de consulta não recebe o menu.
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <button
@@ -333,7 +432,7 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
                 disabled={salvandoAuto}
                 className="rounded-xl bg-[#081b2c] px-4 py-2 text-[10px] font-extrabold text-white transition hover:bg-[#102d47] disabled:opacity-40"
               >
-                {salvandoAuto ? 'Salvando...' : 'Salvar resposta automática'}
+                {salvandoAuto ? 'Salvando...' : 'Salvar menu automático'}
               </button>
               {avisoAuto && (
                 <span className="text-[10px] font-bold text-[#557f75]">{avisoAuto}</span>
@@ -378,16 +477,22 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
           <div className="space-y-2">
             {conversations.map((conversation) => {
               const active = conversation.id === selectedId
+              const motivo = conversation.needsAttention && conversation.attentionReason
+                ? MOTIVO_ATENCAO[conversation.attentionReason]
+                : null
+              // O contorno do motivo vence o de "selecionada": quem pediu
+              // atendente precisa saltar da lista mesmo sem estar aberta.
+              const contorno = motivo
+                ? `${motivo.borda} bg-white`
+                : active
+                  ? 'border-[#dc8e5f] bg-white shadow-[0_10px_28px_rgba(8,27,44,.10)]'
+                  : 'border-[#081b2c]/10 bg-white/70 hover:border-[#081b2c]/20 hover:bg-white'
               return (
                 <button
                   key={conversation.id}
                   type="button"
                   onClick={() => void openConversation(conversation)}
-                  className={`w-full rounded-[18px] border p-3 text-left transition ${
-                    active
-                      ? 'border-[#dc8e5f] bg-white shadow-[0_10px_28px_rgba(8,27,44,.10)]'
-                      : 'border-[#081b2c]/10 bg-white/70 hover:border-[#081b2c]/20 hover:bg-white'
-                  }`}
+                  className={`w-full rounded-[18px] border p-3 text-left transition ${contorno}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <span className="truncate text-xs font-extrabold text-[#081b2c]">
@@ -401,11 +506,17 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
                     {conversation.lastMessage || 'Sem mensagens'}
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {conversation.needsAttention && (
+                    {motivo ? (
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${motivo.classe}`}
+                      >
+                        {motivo.rotulo}
+                      </span>
+                    ) : conversation.needsAttention ? (
                       <span className="rounded-full bg-[#fdf3ec] px-2 py-0.5 text-[9px] font-extrabold text-[#8a4b1d]">
                         Aguardando retorno
                       </span>
-                    )}
+                    ) : null}
                     {conversation.unreadCount > 0 && (
                       <span className="rounded-full bg-[#081b2c] px-2 py-0.5 text-[9px] font-extrabold text-white">
                         {conversation.unreadCount} nova{conversation.unreadCount > 1 ? 's' : ''}

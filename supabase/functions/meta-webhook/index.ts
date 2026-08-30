@@ -1,6 +1,6 @@
 import '../_shared/whatsapp.ts'
 import { adminClient, digits, sha256HmacHex, safeEqual } from '../_shared/whatsapp.ts'
-import { pediuAgendamento, tratarAgendamento } from '../_shared/agendamento.ts'
+import { type Estado, tratarConversa } from '../_shared/atendimento.ts'
 
 function text(body: string, status = 200) {
   return new Response(body, { status, headers: { 'Content-Type': 'text/plain' } })
@@ -75,7 +75,9 @@ Deno.serve(async (req) => {
 
         const { data: settings } = await admin
           .from('clinic_settings')
-          .select('clinic_id,whatsapp_autoreply_enabled,whatsapp_autoreply_text,whatsapp_autoreply_known_text')
+          .select(
+            'clinic_id,whatsapp_autoreply_enabled,whatsapp_autoreply_text,whatsapp_autoreply_known_text,whatsapp_menu_info_text',
+          )
           .eq('whatsapp_phone_number_id', phoneNumberId)
           .maybeSingle()
         if (!settings?.clinic_id) continue
@@ -108,15 +110,45 @@ Deno.serve(async (req) => {
           // pessoa e nova: depois do upsert a linha ja existe sempre.
           const { data: conversaAnterior } = await admin
             .from('whatsapp_conversations')
-            .select('id,autoreply_sent_at,booking_state,booking_options,booking_unit_id')
+            .select(
+              'id,booking_state,booking_options,booking_unit_id,needs_attention',
+            )
             .eq('clinic_id', clinicId)
             .eq('wa_id', waId)
             .maybeSingle()
 
-          // Ja em um agendamento? Entao "1", "2", "3" sao escolhas de menu, e
-          // nao respostas ao lembrete de consulta. Sem esta distincao, escolher
-          // o segundo horario pediria remarcacao da consulta anterior.
-          const emFluxo = Boolean(conversaAnterior?.booking_state)
+          // A ultima coisa que NOS mandamos foi um lembrete de consulta ou um
+          // acompanhamento? So nesse caso "1", "2" e "3" significam confirmar,
+          // remarcar e cancelar. Fora dele sao opcoes de menu.
+          //
+          // Antes isso era decidido por "esta no meio de um agendamento?", o
+          // que deixava o numero ambiguo em toda conversa parada. Amarrar a
+          // leitura ao que acabamos de perguntar acaba com a duvida.
+          let respondendoEnvioNosso = false
+          // Alguem escreveu para esta pessoa ha pouco. Sem etapa aberta, isso
+          // quase sempre significa conversa humana em andamento - e o robo nao
+          // pode entrar no meio dela oferecendo menu.
+          let falamosRecentemente = false
+          if (conversaAnterior?.id) {
+            const { data: ultimoNosso } = await admin
+              .from('whatsapp_messages')
+              .select('followup_id,appointment_id,created_at')
+              .eq('conversation_id', conversaAnterior.id)
+              .eq('direction', 'outbound')
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+
+            const desdeOUltimo = ultimoNosso?.created_at
+              ? Date.now() - new Date(ultimoNosso.created_at).getTime()
+              : Number.POSITIVE_INFINITY
+
+            respondendoEnvioNosso = Boolean(
+              desdeOUltimo < 48 * 3600 * 1000 &&
+                (ultimoNosso?.followup_id || ultimoNosso?.appointment_id),
+            )
+            falamosRecentemente = desdeOUltimo < 12 * 3600 * 1000
+          }
 
           const body = messageBody(message)
           const reply = normalizedReply(body)
@@ -124,20 +156,37 @@ Deno.serve(async (req) => {
           const isWell = reply === 'estou bem'
           // Respostas ao lembrete de consulta. Aceita a palavra sozinha ou o
           // numero do botao, porque o paciente escreve dos dois jeitos.
-          const confirma = !emFluxo && (reply === 'confirmar' || reply === 'confirmo' || reply === '1')
+          const confirma =
+            respondendoEnvioNosso &&
+            (reply === 'confirmar' || reply === 'confirmo' || reply === '1')
           const remarca =
-            !emFluxo &&
+            respondendoEnvioNosso &&
             (reply === 'reagendar' || reply === 'remarcar' || reply === 'reagendar consulta' || reply === '2')
           const cancela =
-            !emFluxo &&
+            respondendoEnvioNosso &&
             (reply === 'cancelar' || reply === 'cancelo' || reply === 'cancelar consulta' || reply === '3')
+          const respondeuLembrete = confirma || remarca || cancela
           // Remarcar e cancelar exigem alguem da equipe: no primeiro caso
           // ninguem escolheu o novo horario ainda; no segundo a agenda abriu um
           // buraco que a recepcao pode querer preencher.
-          const needsAttention = reply === 'preciso de ajuda' || remarca || cancela
+          const pediuAjuda = reply === 'preciso de ajuda'
+          const motivoAtencao = remarca
+            ? 'remarcacao'
+            : cancela
+              ? 'cancelamento'
+              : pediuAjuda
+                ? 'ajuda'
+                : null
           const receivedAt = message.timestamp
             ? new Date(Number(message.timestamp) * 1000).toISOString()
             : new Date().toISOString()
+
+          // A bandeira de atencao so sobe aqui, nunca desce: quem baixa e a
+          // equipe, abrindo a conversa na tela. Antes cada nova mensagem do
+          // paciente apagava o pedido anterior - quem escrevia duas vezes
+          // sumia da lista de quem esperava retorno.
+          const aguardandoEquipe = Boolean(conversaAnterior?.needs_attention)
+          const marcarAtencao = aguardandoEquipe || Boolean(motivoAtencao)
 
           const { data: conversation, error: conversationError } = await admin
             .from('whatsapp_conversations')
@@ -147,18 +196,23 @@ Deno.serve(async (req) => {
               wa_id: waId,
               display_phone: waId,
               status: optedOut ? 'opted_out' : 'open',
-              needs_attention: needsAttention,
+              needs_attention: marcarAtencao,
               last_message_at: receivedAt,
             }, { onConflict: 'clinic_id,wa_id' })
             .select('id,unread_count')
             .single()
           if (conversationError) throw conversationError
 
-          await admin.from('whatsapp_conversations').update({
+          const atualizacaoConversa: Record<string, unknown> = {
             unread_count: (conversation.unread_count ?? 0) + 1,
-            needs_attention: needsAttention,
+            needs_attention: marcarAtencao,
             status: optedOut ? 'opted_out' : 'open',
-          }).eq('id', conversation.id)
+          }
+          if (motivoAtencao) atualizacaoConversa.attention_reason = motivoAtencao
+          await admin
+            .from('whatsapp_conversations')
+            .update(atualizacaoConversa)
+            .eq('id', conversation.id)
 
           const { error: messageError } = await admin.from('whatsapp_messages').insert({
             clinic_id: clinicId,
@@ -218,115 +272,48 @@ Deno.serve(async (req) => {
             return envio.ok
           }
 
-          // ---- Agendamento ----
+          // ---- Atendimento automatico ----
           //
-          // Vem antes da resposta automatica: quem escreve "agendar" quer marcar
-          // consulta, nao receber tabela de precos. E quem esta no meio do fluxo
-          // ("2") precisa que o numero seja lido como escolha.
-          let respondeuAgendamento = false
-
-          if (!optedOut && (emFluxo || pediuAgendamento(body))) {
-            const resultado = await tratarAgendamento({
+          // Um unico ponto decide o que responder: menu, informacoes,
+          // agendamento ou silencio. Antes eram dois blocos independentes que
+          // podiam falar juntos.
+          //
+          // Nao roda quando a pessoa esta respondendo um lembrete: ali "1" e
+          // confirmacao de consulta, e o trecho mais abaixo cuida disso.
+          if (!optedOut && !respondeuLembrete && !isWell && settings.whatsapp_autoreply_enabled) {
+            const resultado = await tratarConversa({
               admin,
               clinicId,
               conversationId: conversation.id,
-              estadoAtual: conversaAnterior?.booking_state ?? null,
+              estadoAtual: (conversaAnterior?.booking_state ?? null) as Estado | null,
               opcoesAtuais: conversaAnterior?.booking_options ?? null,
               unidadeEmAndamento: conversaAnterior?.booking_unit_id ?? null,
+              podeIniciarMenu: !respondendoEnvioNosso && !falamosRecentemente,
+              aguardandoEquipe,
               texto: body,
               telefone: waId,
               paciente: patient?.id ? { id: patient.id, name: patient.name ?? '' } : null,
+              textos: {
+                saudacao: settings.whatsapp_autoreply_text ?? '',
+                saudacaoConhecida: settings.whatsapp_autoreply_known_text ?? '',
+                informacoes: settings.whatsapp_menu_info_text ?? '',
+              },
             })
+
             if (resultado) {
               await responder(resultado.resposta)
-              respondeuAgendamento = true
-            }
-          }
-
-          // ---- Resposta automatica de primeiro contato ----
-          //
-          // Tres travas, e todas importam:
-          //  - so para quem a clinica nunca respondeu nesta conversa;
-          //  - nunca para quem esta respondendo acompanhamento ou lembrete,
-          //    porque receber tabela de precos depois de "Estou bem" e pessimo;
-          //  - nunca para quem pediu para sair.
-          const jaFalamosAntes = Boolean(conversaAnterior?.autoreply_sent_at)
-
-          // Dois textos. Quem o sistema reconhece pelo telefone recebe um aceno
-          // curto com o nome; quem nao esta cadastrado recebe valores e
-          // telefones. Mandar tabela de precos para paciente antigo e ruim.
-          const primeiroNome = (patient?.name ?? '').trim().split(/\s+/)[0] ?? ''
-          const textoAutomatico = patient?.id
-            ? (settings.whatsapp_autoreply_known_text ?? '').replace(/\{nome\}/g, primeiroNome).trim()
-            : (settings.whatsapp_autoreply_text ?? '').trim()
-
-          if (
-            settings.whatsapp_autoreply_enabled &&
-            textoAutomatico &&
-            !jaFalamosAntes &&
-            !optedOut &&
-            !respondeuAgendamento
-          ) {
-            const { count: enviosAnteriores } = await admin
-              .from('whatsapp_messages')
-              .select('id', { count: 'exact', head: true })
-              .eq('conversation_id', conversation.id)
-              .eq('direction', 'outbound')
-
-            // Qualquer envio anterior nossa (acompanhamento, lembrete, resposta
-            // da equipe) significa que a pessoa nao esta chegando do zero.
-            if (!enviosAnteriores) {
-              const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
-              if (token) {
-                const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
-                const texto = textoAutomatico
-                const enviadoEm = new Date().toISOString()
-
-                // Texto livre e permitido: a mensagem que acabou de chegar abriu
-                // a janela de 24h, entao nao precisa de modelo aprovado.
-                const envio = await fetch(
-                  `https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`,
-                  {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      messaging_product: 'whatsapp',
-                      recipient_type: 'individual',
-                      to: waId,
-                      type: 'text',
-                      text: { preview_url: false, body: texto },
-                    }),
-                  },
-                )
-                const corpoEnvio = await envio.json()
-
-                await admin.from('whatsapp_messages').insert({
-                  clinic_id: clinicId,
-                  conversation_id: conversation.id,
-                  patient_id: patient?.id ?? null,
-                  external_message_id: envio.ok ? corpoEnvio?.messages?.[0]?.id ?? null : null,
-                  direction: 'outbound',
-                  message_type: 'text',
-                  body: texto,
-                  status: envio.ok ? 'accepted' : 'failed',
-                  sent_at: envio.ok ? enviadoEm : null,
-                  failed_at: envio.ok ? null : enviadoEm,
-                  failure_reason: envio.ok ? null : corpoEnvio?.error?.message ?? 'Meta recusou o envio.',
-                })
-
-                if (envio.ok) {
-                  await admin
-                    .from('whatsapp_conversations')
-                    .update({ autoreply_sent_at: enviadoEm })
-                    .eq('id', conversation.id)
-                }
+              if (resultado.atencao) {
+                await admin
+                  .from('whatsapp_conversations')
+                  .update({ needs_attention: true, attention_reason: resultado.atencao })
+                  .eq('id', conversation.id)
               }
             }
           }
 
           // Confirmar, remarcar ou cancelar referem-se sempre a ultima consulta
           // sobre a qual mandamos lembrete nesta conversa.
-          if (patient?.id && (confirma || remarca || cancela)) {
+          if (patient?.id && respondeuLembrete) {
             const { data: ultimoLembrete } = await admin
               .from('whatsapp_messages')
               .select('appointment_id')
@@ -352,12 +339,21 @@ Deno.serve(async (req) => {
                 .eq('id', ultimoLembrete.appointment_id)
                 .eq('status', 'scheduled')
             }
+
+            // Ate aqui o sistema anotava a resposta e nao dizia nada de volta.
+            // Quem confirmava a consulta ficava sem saber se tinha dado certo.
+            const aviso = confirma
+              ? 'Consulta confirmada, obrigado! Até lá.'
+              : cancela
+                ? 'Consulta cancelada. Se quiser marcar outra data, responda AGENDAR.'
+                : 'Certo! Já avisei a nossa equipe para remarcar com você. Alguém retorna por aqui.'
+            await responder(`${aviso}\n\nDigite MENU se precisar de mais alguma coisa.`)
           }
 
           // "Preciso de ajuda" explicito, e nao qualquer coisa que acendeu a
           // bandeira de atencao: um pedido de remarcacao nao reabre um
           // acompanhamento clinico.
-          if (patient?.id && (isWell || reply === 'preciso de ajuda')) {
+          if (patient?.id && (isWell || pediuAjuda)) {
             const { data: lastOutbound } = await admin
               .from('whatsapp_messages')
               .select('followup_id')

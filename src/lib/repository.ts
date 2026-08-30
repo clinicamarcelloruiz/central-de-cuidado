@@ -638,6 +638,12 @@ export interface Conversation {
   phone: string
   status: 'open' | 'resolved' | 'opted_out'
   needsAttention: boolean
+  /**
+   * Por que a conversa pede alguem da equipe. 'atendente' e o paciente pedindo
+   * para falar com gente; 'falha' e o sistema admitindo que travou. Os dois
+   * merecem destaque diferente de uma resposta comum.
+   */
+  attentionReason: 'atendente' | 'remarcacao' | 'cancelamento' | 'ajuda' | 'falha' | null
   unreadCount: number
   lastMessageAt: string | null
   lastMessage: string
@@ -656,7 +662,9 @@ export interface ConversationMessage {
 export async function listConversations(clinicId: string): Promise<Conversation[]> {
   const { data, error } = await supabase
     .from('whatsapp_conversations')
-    .select('id,patient_id,display_phone,wa_id,status,needs_attention,unread_count,last_message_at')
+    .select(
+      'id,patient_id,display_phone,wa_id,status,needs_attention,attention_reason,unread_count,last_message_at',
+    )
     .eq('clinic_id', clinicId)
     .order('last_message_at', { ascending: false, nullsFirst: false })
 
@@ -695,6 +703,7 @@ export async function listConversations(clinicId: string): Promise<Conversation[
     phone: row.display_phone || row.wa_id,
     status: row.status as Conversation['status'],
     needsAttention: row.needs_attention,
+    attentionReason: (row.attention_reason ?? null) as Conversation['attentionReason'],
     unreadCount: row.unread_count,
     lastMessageAt: row.last_message_at,
     lastMessage: lastBodyByConversation.get(row.id) ?? '',
@@ -724,24 +733,28 @@ export async function listConversationMessages(conversationId: string): Promise<
 export async function markConversationSeen(conversationId: string) {
   const { error } = await supabase
     .from('whatsapp_conversations')
-    .update({ unread_count: 0, needs_attention: false })
+    .update({ unread_count: 0, needs_attention: false, attention_reason: null })
     .eq('id', conversationId)
   if (error) fail(error)
 }
 
 export interface AutoReplySettings {
   enabled: boolean
-  /** Texto para quem nao esta cadastrado como paciente. */
+  /** Saudacao mostrada acima do menu para quem nao esta cadastrado. */
   text: string
-  /** Texto para quem o sistema reconhece pelo telefone. Aceita {nome}. */
+  /** Saudacao para quem o sistema reconhece pelo telefone. Aceita {nome}. */
   knownText: string
+  /** Conteudo da opcao 1 do menu: valores, contatos e orientacoes. */
+  infoText: string
 }
 
-/** Resposta automatica enviada a quem escreve pela primeira vez. */
+/** Menu automatico enviado a quem escreve para o numero da clinica. */
 export async function getAutoReply(clinicId: string): Promise<AutoReplySettings> {
   const { data, error } = await supabase
     .from('clinic_settings')
-    .select('whatsapp_autoreply_enabled,whatsapp_autoreply_text,whatsapp_autoreply_known_text')
+    .select(
+      'whatsapp_autoreply_enabled,whatsapp_autoreply_text,whatsapp_autoreply_known_text,whatsapp_menu_info_text',
+    )
     .eq('clinic_id', clinicId)
     .maybeSingle()
   if (error) fail(error)
@@ -749,6 +762,7 @@ export async function getAutoReply(clinicId: string): Promise<AutoReplySettings>
     enabled: data?.whatsapp_autoreply_enabled ?? false,
     text: data?.whatsapp_autoreply_text ?? '',
     knownText: data?.whatsapp_autoreply_known_text ?? '',
+    infoText: data?.whatsapp_menu_info_text ?? '',
   }
 }
 
@@ -759,6 +773,7 @@ export async function saveAutoReply(clinicId: string, prefs: AutoReplySettings) 
       whatsapp_autoreply_enabled: prefs.enabled,
       whatsapp_autoreply_text: prefs.text,
       whatsapp_autoreply_known_text: prefs.knownText,
+      whatsapp_menu_info_text: prefs.infoText,
     })
     .eq('clinic_id', clinicId)
   if (error) fail(error)
@@ -806,7 +821,7 @@ export async function sendConversationReply(conversationId: string, text: string
 export async function resolveConversation(conversationId: string) {
   const { error } = await supabase
     .from('whatsapp_conversations')
-    .update({ status: 'resolved', needs_attention: false, unread_count: 0 })
+    .update({ status: 'resolved', needs_attention: false, attention_reason: null, unread_count: 0 })
     .eq('id', conversationId)
   if (error) fail(error)
 }
