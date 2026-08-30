@@ -48,6 +48,15 @@ import type { Patient } from '@/types/patient'
 
 type Aba = 'calendario' | 'configuracao'
 
+/**
+ * Sugestoes de paciente mostradas de uma vez ao vincular uma consulta.
+ *
+ * Cinco cabe na tela sem rolar e obriga quem procura a escrever mais duas
+ * letras em vez de varrer a lista com o olho. Despejar a base inteira aqui nao
+ * ajudaria a achar ninguem.
+ */
+const MAX_SUGESTOES = 5
+
 function diaLegivel(iso: string) {
   return new Intl.DateTimeFormat('pt-BR', {
     weekday: 'long',
@@ -190,17 +199,38 @@ export default function Agenda({
     })
   }
 
-  const pacientesFiltrados = useMemo(() => {
+  /**
+   * Paciente que ja usa o telefone da consulta.
+   *
+   * O WhatsApp entrega o numero com o 55 na frente e o cadastro costuma ter so
+   * o DDD, entao os dois lados sao normalizados antes de comparar. A comparacao
+   * inclui o DDD de proposito: olhar so o final confundiria (11) 99723-7155 com
+   * (13) 99723-7155, que sao pessoas diferentes.
+   */
+  const sugeridos = useMemo(() => {
+    const nacional = (bruto: string) => {
+      const d = bruto.replace(/\D/g, '')
+      return (d.length === 12 || d.length === 13) && d.startsWith('55') ? d.slice(2) : d
+    }
+    const alvo = nacional(formConsulta.contactPhone)
+    if (alvo.length < 10) return []
+    return patients.filter((p) => nacional(p.telefone) === alvo)
+  }, [patients, formConsulta.contactPhone])
+
+  /**
+   * Resultado da busca. Sem termo nao devolve nada de proposito: despejar os
+   * primeiros da base nao ajuda a achar ninguem, e ainda passa a impressao de
+   * que so existem aqueles.
+   */
+  const encontrados = useMemo(() => {
     const termo = buscaPaciente.trim().toLowerCase()
     const digitos = termo.replace(/\D/g, '')
-    const lista = termo
-      ? patients.filter(
-          (p) =>
-            p.nome.toLowerCase().includes(termo) ||
-            (digitos.length >= 4 && p.telefone.replace(/\D/g, '').includes(digitos)),
-        )
-      : patients
-    return lista.slice(0, 8)
+    if (termo.length < 2 && digitos.length < 4) return []
+    return patients.filter(
+      (p) =>
+        p.nome.toLowerCase().includes(termo) ||
+        (digitos.length >= 4 && p.telefone.replace(/\D/g, '').includes(digitos)),
+    )
   }, [patients, buscaPaciente])
 
   async function salvarConsulta() {
@@ -878,14 +908,41 @@ export default function Agenda({
                         Sem paciente vinculado, esta consulta não entra no prontuário nem gera
                         acompanhamento de 30 e 90 dias.
                       </p>
+                      {/* Mesmo telefone: e quase sempre a pessoa certa, entao
+                          vem antes da busca e ja destacado. */}
+                      {sugeridos.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-[9px] font-extrabold uppercase tracking-wide text-[#557f75]">
+                            Mesmo telefone desta consulta
+                          </p>
+                          <div className="mt-1 space-y-1">
+                            {sugeridos.slice(0, MAX_SUGESTOES).map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => setFormConsulta({ ...formConsulta, patientId: p.id })}
+                                className="flex w-full items-center justify-between gap-2 rounded-[12px] border border-[#557f75]/40 bg-[#eef3f2] px-3 py-2 text-left transition hover:border-[#557f75]"
+                              >
+                                <span className="truncate text-[11px] font-bold text-[#2f5a50]">
+                                  {p.nome}
+                                </span>
+                                <span className="shrink-0 text-[10px] text-[#557f75]">
+                                  {p.telefone}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       <input
                         value={buscaPaciente}
                         onChange={(e) => setBuscaPaciente(e.target.value)}
-                        placeholder="Buscar paciente por nome ou telefone"
+                        placeholder="Buscar entre os pacientes cadastrados"
                         className="mt-2 w-full rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-[11px] outline-none focus:border-[#dc8e5f]"
                       />
                       <div className="mt-2 space-y-1">
-                        {pacientesFiltrados.map((p) => (
+                        {encontrados.slice(0, MAX_SUGESTOES).map((p) => (
                           <button
                             key={p.id}
                             type="button"
@@ -898,9 +955,26 @@ export default function Agenda({
                             <span className="shrink-0 text-[10px] text-slate-400">{p.telefone}</span>
                           </button>
                         ))}
-                        {pacientesFiltrados.length === 0 && (
+
+                        {encontrados.length > MAX_SUGESTOES && (
+                          <p className="px-1 text-[10px] text-slate-400">
+                            e mais {encontrados.length - MAX_SUGESTOES}. Escreva um pouco mais para afinar
+                            a busca.
+                          </p>
+                        )}
+
+                        {buscaPaciente.trim().length === 0 && (
                           <p className="rounded-[12px] bg-white px-3 py-3 text-center text-[10px] text-slate-400">
-                            Nenhum paciente encontrado.
+                            Digite o nome ou o telefone para procurar entre os{' '}
+                            {patients.length} pacientes cadastrados.
+                          </p>
+                        )}
+
+                        {buscaPaciente.trim().length > 0 && encontrados.length === 0 && (
+                          <p className="rounded-[12px] bg-white px-3 py-3 text-center text-[10px] text-slate-400">
+                            {buscaPaciente.trim().length < 2
+                              ? 'Escreva ao menos duas letras.'
+                              : 'Nenhum paciente encontrado com esse nome ou telefone.'}
                           </p>
                         )}
                       </div>
