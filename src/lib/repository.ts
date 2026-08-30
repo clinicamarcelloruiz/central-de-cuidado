@@ -626,6 +626,35 @@ export async function listPendingRequests(clinicId: string): Promise<PendingRequ
   }))
 }
 
+/**
+ * Ajustes que a equipe faz numa consulta ja marcada.
+ *
+ * Vale principalmente para o que chegou pelo WhatsApp: corrigir um nome mal
+ * digitado, anotar um recado, e sobretudo dizer de quem e aquela consulta.
+ * Enquanto patientId for nulo, a consulta nao entra no prontuario nem nos
+ * acompanhamentos de 30 e 90 dias.
+ */
+export async function updateAppointmentDetails(
+  appointmentId: string,
+  dados: {
+    contactName: string
+    contactPhone: string
+    staffNote: string
+    patientId: string | null
+  },
+) {
+  const { error } = await supabase
+    .from('appointments')
+    .update({
+      contact_name: dados.contactName.trim().slice(0, 160),
+      contact_phone: dados.contactPhone.replace(/\D/g, '').slice(0, 20),
+      staff_note: dados.staffNote.trim(),
+      patient_id: dados.patientId,
+    })
+    .eq('id', appointmentId)
+  if (error) fail(error)
+}
+
 /** A recepcao aceita a solicitacao feita pelo WhatsApp por quem nao tem cadastro. */
 export async function confirmAppointment(appointmentId: string) {
   const { error } = await supabase

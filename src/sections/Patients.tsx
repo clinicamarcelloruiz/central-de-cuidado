@@ -105,8 +105,14 @@ interface Props {
   addConsultation: (patientId: string, draft: ConsultationDraft) => Promise<void>
   updateConsultation: (patientId: string, consultationId: string, draft: ConsultationDraft) => Promise<void>
   openCreateSignal?: number
-  /** Nome e telefone trazidos de uma conversa do WhatsApp, para adiantar o cadastro. */
+  /** Nome e telefone trazidos de uma conversa ou consulta, para adiantar o cadastro. */
   preCadastro?: { nome: string; telefone: string } | null
+  /**
+   * Chamado depois de salvar um cadastro que veio de outra tela. Quando existe,
+   * o prontuario NAO abre sozinho: quem veio da agenda quer voltar para a
+   * agenda, nao cair no registro clinico.
+   */
+  onPacienteCriado?: () => void
 }
 
 export default function Patients({
@@ -119,6 +125,7 @@ export default function Patients({
   updateConsultation,
   openCreateSignal = 0,
   preCadastro = null,
+  onPacienteCriado,
 }: Props) {
   const [query, setQuery] = useState('')
   // Lista simples e o padrao: cabe mais paciente na tela e a busca visual e
@@ -249,8 +256,14 @@ export default function Patients({
         await updatePatient(editingId, form)
       } else {
         const patient = await addPatient(form)
-        setRecordPatientId(patient.id)
-        setStartConsultationPatientId(patient.id)
+        // Cadastro iniciado na agenda ou nas conversas: a pessoa tinha outro
+        // objetivo em mao. Abrir o prontuario aqui seria tira-la do lugar.
+        if (preCadastro && onPacienteCriado) {
+          onPacienteCriado()
+        } else {
+          setRecordPatientId(patient.id)
+          setStartConsultationPatientId(patient.id)
+        }
       }
       setFormOpen(false)
       setEditingId(null)

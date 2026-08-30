@@ -29,6 +29,7 @@ import {
   listScheduleExceptions,
   listUnits,
   saveSchedulePreferences,
+  updateAppointmentDetails,
   WEEKDAY_LABEL,
   type Appointment,
   type AvailabilityRule,
@@ -36,6 +37,13 @@ import {
   type SchedulePreferences,
   type Unit,
 } from '@/lib/repository'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import type { Patient } from '@/types/patient'
 
 type Aba = 'calendario' | 'configuracao'
@@ -70,9 +78,12 @@ export default function Agenda({
   patients,
   /** Avisa o Home para o contador do menu e o aviso da Visao geral acompanharem. */
   onSolicitacoesMudaram,
+  onCadastrarContato,
 }: {
   patients: Patient[]
   onSolicitacoesMudaram?: () => void
+  /** Abre a tela de pacientes com nome e telefone da consulta ja preenchidos. */
+  onCadastrarContato?: (dados: { nome: string; telefone: string }) => void
 }) {
   const [aba, setAba] = useState<Aba>('calendario')
   const [clinicId, setClinicId] = useState<string | null>(null)
@@ -152,6 +163,62 @@ export default function Agenda({
 
   const dias = useMemo(() => agruparPorDia(slots, appointments), [slots, appointments])
   const unidadeAtual = units.find((u) => u.id === unitId) ?? null
+
+  // ---- Painel de edicao de uma consulta ----
+  //
+  // Existe sobretudo por causa do que chega pelo WhatsApp: a consulta nasce sem
+  // paciente vinculado, e enquanto ficar assim nao entra no prontuario nem nos
+  // acompanhamentos de 30 e 90 dias.
+  const [emEdicao, setEmEdicao] = useState<Appointment | null>(null)
+  const [formConsulta, setFormConsulta] = useState({
+    contactName: '',
+    contactPhone: '',
+    staffNote: '',
+    patientId: '',
+  })
+  const [salvandoConsulta, setSalvandoConsulta] = useState(false)
+  const [buscaPaciente, setBuscaPaciente] = useState('')
+
+  function abrirConsulta(item: Appointment) {
+    setEmEdicao(item)
+    setBuscaPaciente('')
+    setFormConsulta({
+      contactName: item.contactName,
+      contactPhone: item.contactPhone,
+      staffNote: item.staffNote,
+      patientId: item.patientId ?? '',
+    })
+  }
+
+  const pacientesFiltrados = useMemo(() => {
+    const termo = buscaPaciente.trim().toLowerCase()
+    const digitos = termo.replace(/\D/g, '')
+    const lista = termo
+      ? patients.filter(
+          (p) =>
+            p.nome.toLowerCase().includes(termo) ||
+            (digitos.length >= 4 && p.telefone.replace(/\D/g, '').includes(digitos)),
+        )
+      : patients
+    return lista.slice(0, 8)
+  }, [patients, buscaPaciente])
+
+  async function salvarConsulta() {
+    if (!emEdicao) return
+    setSalvandoConsulta(true)
+    await acao(
+      () =>
+        updateAppointmentDetails(emEdicao.id, {
+          contactName: formConsulta.contactName,
+          contactPhone: formConsulta.contactPhone,
+          staffNote: formConsulta.staffNote,
+          patientId: formConsulta.patientId || null,
+        }),
+      'Consulta atualizada.',
+    )
+    setSalvandoConsulta(false)
+    setEmEdicao(null)
+  }
 
   async function acao(fn: () => Promise<void>, mensagem?: string) {
     setError('')
@@ -302,7 +369,12 @@ export default function Agenda({
                               : 'border border-[#dc8e5f] bg-[#8a4b1d]'
                           }`}
                         >
-                          <div className="min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => abrirConsulta(item)}
+                            title="Abrir para editar"
+                            className="min-w-0 flex-1 text-left"
+                          >
                             <p className="truncate text-[11px] font-bold text-white">
                               {hora(item.startsAt)} · {item.patientName}
                               {!item.confirmedByClinic && ' · AGUARDANDO CONFIRMAÇÃO'}
@@ -324,7 +396,7 @@ export default function Agenda({
                                       : '-'
                                   }`}
                             </p>
-                          </div>
+                          </button>
                           {/* Solicitacao de quem nao tem cadastro: a recepcao
                               precisa aceitar, senao a vaga se libera sozinha. */}
                           {!item.confirmedByClinic && (
@@ -759,6 +831,180 @@ export default function Agenda({
           </div>
         </div>
       )}
+
+      <Sheet open={emEdicao !== null} onOpenChange={(aberto) => !aberto && setEmEdicao(null)}>
+        <SheetContent
+          side="right"
+          className="w-full gap-0 border-l border-[#081b2c]/10 bg-[#fbfaf8] p-0 sm:max-w-[520px]"
+        >
+          {emEdicao && (
+            <>
+              <SheetHeader className="border-b border-[#081b2c]/[0.07] bg-white px-5 pb-5 pt-6">
+                <SheetTitle className="text-left text-lg font-extrabold tracking-[-0.03em] text-[#081b2c]">
+                  {diaLegivel(emEdicao.startsAt)}, {hora(emEdicao.startsAt)}
+                </SheetTitle>
+                <SheetDescription className="mt-1 text-left text-[11px]">
+                  {emEdicao.source === 'whatsapp'
+                    ? 'Marcada pelo próprio paciente no WhatsApp.'
+                    : 'Marcada pela equipe.'}
+                  {!emEdicao.confirmedByClinic && ' Ainda aguardando confirmação.'}
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="space-y-5 overflow-y-auto px-5 py-5">
+                {/* Vincular vem primeiro: e o que falta para a consulta virar
+                    prontuario e disparar os acompanhamentos. */}
+                <div>
+                  <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                    Paciente
+                  </p>
+                  {formConsulta.patientId ? (
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded-[14px] border border-[#557f75]/30 bg-[#eef3f2] px-3 py-2.5">
+                      <span className="truncate text-[11px] font-bold text-[#2f5a50]">
+                        {patients.find((p) => p.id === formConsulta.patientId)?.nome ??
+                          'Paciente vinculado'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setFormConsulta({ ...formConsulta, patientId: '' })}
+                        className="shrink-0 rounded-lg px-2 py-1 text-[10px] font-extrabold text-[#557f75] transition hover:bg-white"
+                      >
+                        Trocar
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        Sem paciente vinculado, esta consulta não entra no prontuário nem gera
+                        acompanhamento de 30 e 90 dias.
+                      </p>
+                      <input
+                        value={buscaPaciente}
+                        onChange={(e) => setBuscaPaciente(e.target.value)}
+                        placeholder="Buscar paciente por nome ou telefone"
+                        className="mt-2 w-full rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-[11px] outline-none focus:border-[#dc8e5f]"
+                      />
+                      <div className="mt-2 space-y-1">
+                        {pacientesFiltrados.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => setFormConsulta({ ...formConsulta, patientId: p.id })}
+                            className="flex w-full items-center justify-between gap-2 rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-left transition hover:border-[#dc8e5f]"
+                          >
+                            <span className="truncate text-[11px] font-bold text-[#081b2c]">
+                              {p.nome}
+                            </span>
+                            <span className="shrink-0 text-[10px] text-slate-400">{p.telefone}</span>
+                          </button>
+                        ))}
+                        {pacientesFiltrados.length === 0 && (
+                          <p className="rounded-[12px] bg-white px-3 py-3 text-center text-[10px] text-slate-400">
+                            Nenhum paciente encontrado.
+                          </p>
+                        )}
+                      </div>
+                      {onCadastrarContato && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onCadastrarContato({
+                              nome: formConsulta.contactName,
+                              telefone: formConsulta.contactPhone,
+                            })
+                          }
+                          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-[#081b2c]/15 bg-white px-3 py-2.5 text-[10px] font-extrabold text-[#081b2c] transition hover:border-[#dc8e5f] hover:text-[#8a4b1d]"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Cadastrar como paciente novo
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                    Quem marcou
+                  </p>
+                  <input
+                    value={formConsulta.contactName}
+                    onChange={(e) =>
+                      setFormConsulta({ ...formConsulta, contactName: e.target.value })
+                    }
+                    placeholder="Nome informado no contato"
+                    className="mt-1 w-full rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-[11px] outline-none focus:border-[#dc8e5f]"
+                  />
+                  <input
+                    value={formConsulta.contactPhone}
+                    onChange={(e) =>
+                      setFormConsulta({ ...formConsulta, contactPhone: e.target.value })
+                    }
+                    placeholder="Telefone"
+                    className="mt-2 w-full rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-[11px] outline-none focus:border-[#dc8e5f]"
+                  />
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                    Observação da equipe
+                  </p>
+                  <textarea
+                    value={formConsulta.staffNote}
+                    onChange={(e) =>
+                      setFormConsulta({ ...formConsulta, staffNote: e.target.value })
+                    }
+                    rows={4}
+                    placeholder="Recado interno sobre esta consulta"
+                    className="mt-1 w-full resize-y rounded-[12px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 border-t border-[#081b2c]/[0.07] bg-white px-5 py-4">
+                <button
+                  type="button"
+                  onClick={() => void salvarConsulta()}
+                  disabled={salvandoConsulta}
+                  className="rounded-xl bg-[#081b2c] px-4 py-2.5 text-[11px] font-extrabold text-white transition hover:bg-[#102d47] disabled:opacity-40"
+                >
+                  {salvandoConsulta ? 'Salvando...' : 'Salvar'}
+                </button>
+                {!emEdicao.confirmedByClinic && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = emEdicao.id
+                      setEmEdicao(null)
+                      void acao(
+                        () => confirmAppointment(id),
+                        'Consulta confirmada. A vaga deixou de ser provisória.',
+                      ).then(() => onSolicitacoesMudaram?.())
+                    }}
+                    className="rounded-xl bg-[#557f75] px-4 py-2.5 text-[11px] font-extrabold text-white transition hover:bg-[#456a61]"
+                  >
+                    Confirmar consulta
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = emEdicao.id
+                    setEmEdicao(null)
+                    void acao(
+                      () => cancelAppointment(id),
+                      'Consulta cancelada. O horário voltou a ficar livre.',
+                    ).then(() => onSolicitacoesMudaram?.())
+                  }}
+                  className="ml-auto rounded-xl px-3 py-2.5 text-[11px] font-extrabold text-red-600 transition hover:bg-red-50"
+                >
+                  Cancelar consulta
+                </button>
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }
