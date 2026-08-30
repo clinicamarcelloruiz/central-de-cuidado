@@ -35,11 +35,15 @@ type Admin = ReturnType<typeof adminClient>
 
 export type Estado =
   | 'menu'
+  | 'minha_consulta'
+  | 'confirmar_cancelamento'
+  | 'ja_tem_consulta'
+  | 'aguardando_paciente'
   | 'aguardando_unidade'
   | 'aguardando_dia'
   | 'aguardando_horario'
   | 'atendente'
-export type MotivoAtencao = 'atendente' | 'falha'
+export type MotivoAtencao = 'atendente' | 'falha' | 'cancelou_sozinho'
 
 export type Resultado = {
   resposta: string
@@ -48,7 +52,18 @@ export type Resultado = {
 } | null
 
 type Unidade = { id: string; name: string; address: string }
+type Paciente = { id: string; name: string }
 type Horario = { inicio: string; fim: string }
+
+/** Consulta futura ja marcada para este telefone. */
+export type ConsultaMarcada = {
+  id: string
+  inicio: string
+  unidade: string
+  endereco: string
+  paciente: string
+  confirmada: boolean
+}
 
 function normalizar(texto: string) {
   return texto.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase()
@@ -113,6 +128,39 @@ function desistiu(texto: string) {
   return t === 'cancelar' || t === 'sair' || t === 'parar' || t === 'desistir'
 }
 
+/**
+ * Le uma hora escrita por extenso: "10h", "09:20", "as 9 h".
+ *
+ * So conta como hora quando ha marca explicita (`h` ou `:`). Numero solto
+ * continua sendo indice da lista, que e o que a mensagem pede.
+ *
+ * Existe por causa de um erro silencioso: num dia com 15 horarios, quem
+ * digitava "10h" era entendido como "opcao 10" e saia marcado as 14:00,
+ * convencido de que tinha marcado as 10:00. Errar calado e pior do que nao
+ * entender.
+ */
+function horaEscrita(texto: string): { hora: number; minuto: number | null } | null {
+  const t = normalizar(texto)
+  if (!/[h:]/.test(t)) return null
+  const m = t.match(/(\d{1,2})\s*[:h]\s*(\d{2})?/)
+  if (!m) return null
+  const hora = Number(m[1])
+  const minuto = m[2] === undefined ? null : Number(m[2])
+  if (hora > 23) return null
+  if (minuto !== null && minuto > 59) return null
+  return { hora, minuto }
+}
+
+/** Le "31/08" e devolve dia e mes, para quem responde a data em vez do numero. */
+function dataEscrita(texto: string): { dia: number; mes: number } | null {
+  const m = normalizar(texto).match(/(\d{1,2})\s*[/.-]\s*(\d{1,2})/)
+  if (!m) return null
+  const dia = Number(m[1])
+  const mes = Number(m[2])
+  if (dia < 1 || dia > 31 || mes < 1 || mes > 12) return null
+  return { dia, mes }
+}
+
 /** Le "2" ou "2." e devolve o indice na lista mostrada. */
 function escolha(texto: string, total: number): number | null {
   const limpo = normalizar(texto).replace(/[^0-9]/g, '')
@@ -170,6 +218,7 @@ const OPCOES = [
   '1 - Informações sobre a consulta',
   '2 - Agendar consulta',
   '3 - Falar com a nossa equipe',
+  '4 - Ver ou cancelar minha consulta',
 ].join('\n')
 
 const VOLTA = 'Digite MENU a qualquer momento para voltar ao início.'
@@ -191,6 +240,8 @@ async function limparEstado(admin: Admin, conversationId: string) {
     booking_state: null,
     booking_options: null,
     booking_unit_id: null,
+    booking_patient_id: null,
+    booking_replaces_id: null,
   })
 }
 
@@ -293,8 +344,165 @@ async function chamarEquipe(admin: Admin, conversationId: string): Promise<Resul
 }
 
 // ---------------------------------------------------------------
+// Opcao 4: minha consulta
+// ---------------------------------------------------------------
+
+function descreverConsulta(c: ConsultaMarcada, timezone: string) {
+  const linhas = [formatarData(c.inicio, timezone), c.unidade]
+  if (c.endereco) linhas.push(c.endereco)
+  if (c.paciente) linhas.unshift(c.paciente)
+  if (!c.confirmada) linhas.push('(aguardando confirmação da equipe)')
+  return linhas.join('\n')
+}
+
+async function mostrarMinhaConsulta(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+  consultas: ConsultaMarcada[],
+): Promise<Resultado> {
+  const timezone = await fusoDaClinica(admin, clinicId)
+
+  if (consultas.length === 0) {
+    await salvarEstado(admin, conversationId, { booking_state: 'menu' })
+    return {
+      resposta:
+        'Não encontrei nenhuma consulta marcada para este número.\n\n' +
+        'Digite 2 para agendar, ou MENU para ver as opções.',
+    }
+  }
+
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'minha_consulta',
+    booking_options: consultas.map((c) => c.id),
+  })
+
+  if (consultas.length === 1) {
+    return {
+      resposta:
+        `Sua consulta:\n\n${descreverConsulta(consultas[0], timezone)}\n\n` +
+        'Digite CANCELAR para desmarcar, REMARCAR para trocar a data, ou MENU para voltar.',
+    }
+  }
+
+  const linhas = consultas
+    .map((c, i) => `${i + 1} - ${formatarData(c.inicio, timezone)} · ${c.unidade}`)
+    .join('\n')
+  return {
+    resposta:
+      `Você tem ${consultas.length} consultas marcadas:\n\n${linhas}\n\n` +
+      'Responda com o número da que quer cancelar ou remarcar, ou MENU para voltar.',
+  }
+}
+
+/** Cancelamento e destrutivo: nunca acontece sem um sim explicito. */
+async function pedirConfirmacaoCancelamento(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+  consulta: ConsultaMarcada,
+  remarcar: boolean,
+): Promise<Resultado> {
+  const timezone = await fusoDaClinica(admin, clinicId)
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'confirmar_cancelamento',
+    booking_options: [consulta.id],
+    booking_replaces_id: remarcar ? consulta.id : null,
+  })
+  return {
+    resposta:
+      (remarcar
+        ? 'Vamos remarcar esta consulta:\n\n'
+        : 'Confirma o cancelamento desta consulta?\n\n') +
+      `${descreverConsulta(consulta, timezone)}\n\n` +
+      (remarcar
+        ? 'Responda SIM para escolher a nova data. A consulta atual só será cancelada depois que a nova estiver marcada.'
+        : 'Responda SIM para cancelar, ou MENU para deixar como está.'),
+  }
+}
+
+async function cancelarConsulta(admin: Admin, appointmentId: string) {
+  const { error } = await admin
+    .from('appointments')
+    .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
+    .eq('id', appointmentId)
+    .eq('status', 'scheduled')
+  if (error) console.error('Falha ao cancelar consulta', { appointmentId, error })
+  return !error
+}
+
+// ---------------------------------------------------------------
 // Opcao 2: agendar
 // ---------------------------------------------------------------
+
+/**
+ * Primeira etapa quando o telefone atende a mais de um paciente.
+ *
+ * Numa gastropediatria e o caso comum: a mae cadastra os dois filhos com o
+ * proprio celular. Sem esta pergunta o sistema escolhia sozinho e marcava a
+ * consulta no nome do irmao errado.
+ */
+async function perguntarPaciente(
+  admin: Admin,
+  conversationId: string,
+  pacientes: Paciente[],
+): Promise<Resultado> {
+  const linhas = pacientes.map((p, i) => `${i + 1} - ${p.name}`).join('\n')
+
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'aguardando_paciente',
+    booking_options: pacientes.map((p) => p.id),
+    booking_unit_id: null,
+    booking_patient_id: null,
+  })
+
+  return {
+    resposta:
+      `Vamos agendar. Para quem é a consulta?\n\n${linhas}\n\n` +
+      `Responda com o número. ${SAIDAS}`,
+  }
+}
+
+/**
+ * Entrada do agendamento. Pergunta o paciente antes de tudo quando ha mais de
+ * um no mesmo telefone; caso contrario segue direto para a unidade.
+ */
+async function iniciarAgendamento(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+  pacientes: Paciente[],
+  consultas: ConsultaMarcada[] = [],
+  jaAvisouDaOutra = false,
+): Promise<Resultado> {
+  // Ja existe consulta futura para este telefone. Seguir direto para as datas
+  // produziria uma segunda consulta em silencio - e na maioria das vezes a
+  // pessoa queria justamente trocar a data da que ja tem.
+  if (consultas.length > 0 && !jaAvisouDaOutra) {
+    const timezone = await fusoDaClinica(admin, clinicId)
+    await salvarEstado(admin, conversationId, {
+      booking_state: 'ja_tem_consulta',
+      booking_options: [consultas[0].id],
+      booking_replaces_id: null,
+    })
+    return {
+      resposta:
+        `Você já tem uma consulta marcada:\n\n${descreverConsulta(consultas[0], timezone)}\n\n` +
+        'O que você prefere?\n\n' +
+        '1 - Remarcar (trocar por outra data)\n' +
+        '2 - Marcar mais uma consulta, além dessa\n\n' +
+        VOLTA,
+    }
+  }
+
+  if (pacientes.length > 1) {
+    return await perguntarPaciente(admin, conversationId, pacientes)
+  }
+  await salvarEstado(admin, conversationId, {
+    booking_patient_id: pacientes[0]?.id ?? null,
+  })
+  return await perguntarUnidade(admin, clinicId, conversationId)
+}
 
 async function perguntarUnidade(
   admin: Admin,
@@ -481,10 +689,12 @@ async function marcar(
   clinicId: string,
   conversationId: string,
   unitId: string,
-  paciente: { id: string; name: string } | null,
+  paciente: Paciente | null,
   telefone: string,
   nomeDoPerfil: string,
   slot: Horario,
+  /** Consulta antiga a cancelar assim que a nova entrar (remarcacao). */
+  substitui: string | null = null,
 ): Promise<Resultado> {
   const { data: unidade } = await admin
     .from('clinic_units')
@@ -536,20 +746,27 @@ async function marcar(
     }
   }
 
+  // A nova esta garantida: so agora a antiga cai. Fazer o contrario deixaria a
+  // pessoa sem consulta nenhuma se ela desistisse no meio do caminho.
+  let remarcou = false
+  if (substitui) remarcou = await cancelarConsulta(admin, substitui)
+
   const quando = formatarData(slot.inicio, timezone)
   const onde = `${unidade?.name ?? 'nossa unidade'}${unidade?.address ? `\n${unidade.address}` : ''}`
+  const aviso = remarcou ? 'Consulta remarcada!' : 'Consulta marcada!'
 
   if (cadastrado) {
     return {
       resposta:
-        `Consulta marcada!\n\n${quando}\n${onde}\n\n` +
+        `${aviso}\n\n${quando}\n${onde}\n\n` +
         'Um dia antes enviamos um lembrete para você confirmar.\n\n' + VOLTA,
     }
   }
 
   return {
     resposta:
-      `Recebemos sua solicitação para ${quando}, em ${unidade?.name ?? 'nossa unidade'}.\n\n` +
+      `${remarcou ? 'Remarcamos! ' : ''}Recebemos sua solicitação para ${quando}, ` +
+      `em ${unidade?.name ?? 'nossa unidade'}.\n\n` +
       'O horário está reservado para você. Nossa equipe confirma em até 24 horas e ' +
       'retorna por aqui.\n\n' + VOLTA,
   }
@@ -580,19 +797,37 @@ export async function tratarConversa(opcoes: {
   aguardandoEquipe: boolean
   texto: string
   telefone: string
-  paciente: { id: string; name: string } | null
+  /**
+   * Todos os pacientes cadastrados com este telefone, em ordem de nome. Vazio
+   * quando ninguem foi reconhecido. Mais de um e o caso da mae com dois filhos.
+   */
+  pacientes: Paciente[]
+  /** Paciente ja escolhido nesta conversa, quando a pergunta ja foi feita. */
+  pacienteEmAndamento: string | null
+  /** Consultas futuras ja marcadas para este telefone, da mais proxima em diante. */
+  consultas: ConsultaMarcada[]
+  /** Consulta a cancelar assim que a nova entrar, num fluxo de remarcacao. */
+  consultaASubstituir: string | null
   /** Nome que a pessoa usa no WhatsApp. Vazio quando o evento nao trouxe. */
   nomeDoPerfil: string
   textos: { saudacao: string; saudacaoConhecida: string; informacoes: string }
 }): Promise<Resultado> {
   const { admin, clinicId, conversationId, estadoAtual, texto } = opcoes
 
-  const primeiroNome = (opcoes.paciente?.name ?? '').trim().split(/\s+/)[0] ?? ''
+  // Chamar pelo nome so quando ha um paciente neste telefone. Com dois irmaos
+  // cadastrados, usar o nome de um deles seria adivinhar - e adivinhar errado
+  // metade das vezes.
+  const unico = opcoes.pacientes.length === 1 ? opcoes.pacientes[0] : null
+  const primeiroNome = (unico?.name ?? '').trim().split(/\s+/)[0] ?? ''
   const saudacao = (
-    opcoes.paciente?.id && opcoes.textos.saudacaoConhecida.trim()
+    unico && opcoes.textos.saudacaoConhecida.trim()
       ? opcoes.textos.saudacaoConhecida.replace(/\{nome\}/g, primeiroNome)
       : opcoes.textos.saudacao
   ).trim() || 'Olá! Aqui é o consultório do Dr. Marcello Ruiz.'
+
+  /** Quem vai no prontuario da consulta: o escolhido, ou o unico que existe. */
+  const pacienteDaConsulta =
+    opcoes.pacientes.find((p) => p.id === opcoes.pacienteEmAndamento) ?? unico ?? null
 
   // MENU vem antes de tudo, ate de "a equipe assumiu": e a saida de emergencia
   // que prometemos em toda mensagem, e promessa que falha uma vez nao vale.
@@ -615,7 +850,13 @@ export async function tratarConversa(opcoes: {
     return await chamarEquipe(admin, conversationId)
   }
 
-  if (desistiu(texto) && estadoAtual) {
+  // "Cancelar" muda de sentido dentro de "minha consulta": ali nao e desistir
+  // do fluxo, e desmarcar a consulta. Sem esta excecao a palavra era engolida
+  // aqui e a pessoa nunca chegava a poder cancelar de fato.
+  const naEtapaDeCancelar =
+    estadoAtual === 'minha_consulta' || estadoAtual === 'confirmar_cancelamento'
+
+  if (desistiu(texto) && estadoAtual && !naEtapaDeCancelar) {
     return await mostrarMenu(
       admin,
       conversationId,
@@ -627,7 +868,9 @@ export async function tratarConversa(opcoes: {
   // ---- Sem etapa em andamento ----
   if (!estadoAtual) {
     if (pediuAgendamento(texto)) {
-      return await perguntarUnidade(admin, clinicId, conversationId)
+      return await iniciarAgendamento(
+        admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
+      )
     }
     // Sem etapa aberta, o menu e uma iniciativa nossa - e iniciativa tem hora.
     // Mandar menu depois de "Estou bem, obrigada", ou no meio de uma conversa
@@ -639,7 +882,7 @@ export async function tratarConversa(opcoes: {
 
   // ---- Menu ----
   if (estadoAtual === 'menu') {
-    const escolhido = escolha(texto, 3)
+    const escolhido = escolha(texto, 4)
 
     if (escolhido === 0) {
       const informacoes = opcoes.textos.informacoes.trim()
@@ -656,15 +899,23 @@ export async function tratarConversa(opcoes: {
     }
 
     if (escolhido === 1) {
-      return await perguntarUnidade(admin, clinicId, conversationId)
+      return await iniciarAgendamento(
+        admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
+      )
     }
 
     if (escolhido === 2) {
       return await chamarEquipe(admin, conversationId)
     }
 
+    if (escolhido === 3) {
+      return await mostrarMinhaConsulta(admin, clinicId, conversationId, opcoes.consultas)
+    }
+
     if (pediuAgendamento(texto)) {
-      return await perguntarUnidade(admin, clinicId, conversationId)
+      return await iniciarAgendamento(
+        admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
+      )
     }
 
     return await mostrarMenu(
@@ -675,6 +926,128 @@ export async function tratarConversa(opcoes: {
     )
   }
 
+  // ---- Minha consulta ----
+  if (estadoAtual === 'minha_consulta') {
+    const ids = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
+    const t = normalizar(texto)
+    const querRemarcar = t === 'remarcar' || t === 'trocar' || t === 'mudar'
+    const querCancelar = t === 'cancelar' || t === 'desmarcar'
+
+    // Com uma consulta so, CANCELAR e REMARCAR ja apontam para ela.
+    if (opcoes.consultas.length === 1 && (querCancelar || querRemarcar)) {
+      return await pedirConfirmacaoCancelamento(
+        admin, clinicId, conversationId, opcoes.consultas[0], querRemarcar,
+      )
+    }
+
+    const indice = escolha(texto, ids.length)
+    const alvo = indice === null ? null : opcoes.consultas.find((c) => c.id === ids[indice])
+    if (alvo) {
+      await salvarEstado(admin, conversationId, { booking_options: [alvo.id] })
+      const timezone = await fusoDaClinica(admin, clinicId)
+      return {
+        resposta:
+          `${descreverConsulta(alvo, timezone)}\n\n` +
+          'Digite CANCELAR para desmarcar, REMARCAR para trocar a data, ou MENU para voltar.',
+      }
+    }
+
+    return {
+      resposta:
+        'Não entendi. Digite CANCELAR para desmarcar, REMARCAR para trocar a data, ' +
+        'ou MENU para voltar ao início.',
+    }
+  }
+
+  // ---- Confirmacao do cancelamento ----
+  if (estadoAtual === 'confirmar_cancelamento') {
+    const t = normalizar(texto)
+    if (t !== 'sim' && t !== 'confirmar' && t !== 'confirmo' && t !== 'pode cancelar') {
+      return await mostrarMenu(
+        admin, conversationId, saudacao,
+        'Tudo bem, sua consulta continua marcada. Posso ajudar em mais alguma coisa?',
+      )
+    }
+
+    const ids = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
+    const alvo = opcoes.consultas.find((c) => c.id === ids[0]) ?? opcoes.consultas[0]
+    if (!alvo) {
+      return await mostrarMenu(admin, conversationId, saudacao, 'Não encontrei mais essa consulta.')
+    }
+
+    // Remarcar nao cancela agora: primeiro escolhe a nova data, e a antiga cai
+    // so quando a nova estiver garantida.
+    if (opcoes.consultaASubstituir === alvo.id) {
+      return await iniciarAgendamento(
+        admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas, true,
+      )
+    }
+
+    const ok = await cancelarConsulta(admin, alvo.id)
+    await limparEstado(admin, conversationId)
+    if (!ok) {
+      return {
+        resposta:
+          'Não consegui cancelar agora. Já avisei a nossa equipe, que resolve isso por aqui.\n\n' + VOLTA,
+        atencao: 'falha',
+      }
+    }
+    return {
+      // A vaga que abriu interessa a recepcao: por isso a conversa acende.
+      resposta:
+        'Consulta cancelada. Obrigado por avisar!\n\n' +
+        'Se quiser marcar outra data, digite 2. ' + VOLTA,
+      atencao: 'cancelou_sozinho',
+    }
+  }
+
+  // ---- Ja tem consulta marcada ----
+  if (estadoAtual === 'ja_tem_consulta') {
+    const escolhido = escolha(texto, 2)
+    if (escolhido === 0) {
+      const alvo = opcoes.consultas[0]
+      if (!alvo) return await mostrarMenu(admin, conversationId, saudacao)
+      return await pedirConfirmacaoCancelamento(admin, clinicId, conversationId, alvo, true)
+    }
+    if (escolhido === 1) {
+      return await iniciarAgendamento(
+        admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas, true,
+      )
+    }
+    return {
+      resposta:
+        'Não entendi. Responda 1 para remarcar, 2 para marcar mais uma consulta, ' +
+        'ou MENU para voltar ao início.',
+    }
+  }
+
+  // ---- Escolha do paciente ----
+  if (estadoAtual === 'aguardando_paciente') {
+    if (pediuVoltar(texto)) return await mostrarMenu(admin, conversationId, saudacao)
+
+    const ids = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
+    const indice = escolha(texto, ids.length)
+    if (indice === null) {
+      return {
+        resposta:
+          'Não entendi. Responda com o número do paciente da lista acima.\n\n' + VOLTA,
+      }
+    }
+
+    const escolhido = opcoes.pacientes.find((p) => p.id === ids[indice])
+    if (!escolhido) {
+      return await mostrarMenu(
+        admin,
+        conversationId,
+        saudacao,
+        'Esse paciente não está mais disponível. Vamos recomeçar:',
+      )
+    }
+
+    await salvarEstado(admin, conversationId, { booking_patient_id: escolhido.id })
+    return await perguntarUnidade(admin, clinicId, conversationId)
+  }
+
   // ---- Escolha da unidade ----
   if (estadoAtual === 'aguardando_unidade') {
     const ids = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
@@ -683,7 +1056,11 @@ export async function tratarConversa(opcoes: {
     // A lista manda, porque foi ela que a pessoa acabou de ler.
     const indice = escolha(texto, ids.length)
     if (indice === null) {
-      if (pediuVoltar(texto)) return await mostrarMenu(admin, conversationId, saudacao)
+      if (pediuVoltar(texto)) {
+        return opcoes.pacientes.length > 1
+          ? await perguntarPaciente(admin, conversationId, opcoes.pacientes)
+          : await mostrarMenu(admin, conversationId, saudacao)
+      }
       return {
         resposta:
           'Não entendi. Responda com o número da unidade da lista acima.\n\n' + VOLTA,
@@ -710,7 +1087,18 @@ export async function tratarConversa(opcoes: {
     }
 
     const dias = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
-    const indice = escolha(texto, dias.length)
+
+    // "31/08" e uma resposta natural. Aqui nao ha o risco do horario - uma data
+    // nunca cai dentro da faixa de indices - mas entender custa pouco.
+    const data = dataEscrita(texto)
+    const porData = data
+      ? dias.findIndex((chave) => {
+          const [, mes, dia] = chave.split('-').map(Number)
+          return dia === data.dia && mes === data.mes
+        })
+      : -1
+
+    const indice = porData >= 0 ? porData : escolha(texto, dias.length)
     if (indice === null) {
       return {
         resposta:
@@ -751,6 +1139,50 @@ export async function tratarConversa(opcoes: {
     }
 
     const lista = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as Horario[]) : []
+
+    // Hora escrita vem antes do indice, e nao depois: num dia com dez ou mais
+    // horarios, "10h" tambem e um indice valido - e apontaria para outra hora.
+    const pedida = horaEscrita(texto)
+    if (pedida) {
+      const timezone = await fusoDaClinica(admin, clinicId)
+      const daHora = lista.filter((h) => {
+        const [hh, mm] = formatarHora(h.inicio, timezone).split(':').map(Number)
+        return hh === pedida.hora && (pedida.minuto === null || mm === pedida.minuto)
+      })
+
+      if (daHora.length === 1) {
+        if (!opcoes.unidadeEmAndamento) {
+          return await mostrarMenu(admin, conversationId, saudacao, 'Perdi o fio da conversa, desculpe. Vamos recomeçar:')
+        }
+        return await marcar(
+          admin, clinicId, conversationId, opcoes.unidadeEmAndamento,
+          pacienteDaConsulta, opcoes.telefone, opcoes.nomeDoPerfil, daHora[0],
+          opcoes.consultaASubstituir,
+        )
+      }
+
+      // Ambiguidade de "10h" e entre 10:00 e 10:40, e nao entre os quinze do
+      // dia. Repetir a lista inteira aqui empurraria de volta o trabalho que a
+      // pessoa ja tinha feito.
+      if (daHora.length > 1) {
+        const opcoesHora = daHora.map((h) => formatarHora(h.inicio, timezone))
+        return {
+          resposta:
+            `Nesse horário temos ${opcoesHora.slice(0, -1).join(', ')} e ${opcoesHora.at(-1)}.\n\n` +
+            'Responda com o horário exato, ou com o número da lista acima.',
+        }
+      }
+
+      const linhas = lista
+        .map((h, i) => `${i + 1} - ${formatarHora(h.inicio, timezone)}`)
+        .join('\n')
+      return {
+        resposta:
+          `Esse horário não está entre os livres deste dia. Os disponíveis são:\n\n${linhas}\n\n` +
+          'Responda com o número, ou digite VOLTAR para escolher outro dia.',
+      }
+    }
+
     const indice = escolha(texto, lista.length)
     if (indice === null) {
       return {
@@ -772,10 +1204,11 @@ export async function tratarConversa(opcoes: {
       clinicId,
       conversationId,
       opcoes.unidadeEmAndamento,
-      opcoes.paciente,
+      pacienteDaConsulta,
       opcoes.telefone,
       opcoes.nomeDoPerfil,
       lista[indice],
+      opcoes.consultaASubstituir,
     )
   }
 

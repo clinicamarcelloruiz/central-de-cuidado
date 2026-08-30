@@ -655,6 +655,60 @@ export async function updateAppointmentDetails(
   if (error) fail(error)
 }
 
+/**
+ * Avisa pelo WhatsApp que a equipe confirmou a solicitacao.
+ *
+ * Sem isto a pessoa recebia "confirmamos em ate 24 horas" e nunca mais ouvia
+ * falar: a proxima noticia era o lembrete da vespera. Falhar aqui nao desfaz a
+ * confirmacao - a consulta ja esta valida, so o aviso nao saiu.
+ */
+export async function notifyAppointmentConfirmed(
+  clinicId: string,
+  appointmentId: string,
+): Promise<{ avisou: boolean; motivo?: string }> {
+  const { data: consulta, error } = await supabase
+    .from('appointments')
+    .select('starts_at,contact_phone,unit_id')
+    .eq('id', appointmentId)
+    .maybeSingle()
+  if (error) fail(error)
+  const digitos = (consulta?.contact_phone ?? '').replace(/\D/g, '')
+  if (!digitos) return { avisou: false, motivo: 'sem telefone' }
+
+  // O wa_id chega com 55 na frente; o cadastro pode ter so o DDD.
+  const variantes = [digitos, `55${digitos}`, digitos.replace(/^55/, '')]
+  const { data: conversa } = await supabase
+    .from('whatsapp_conversations')
+    .select('id')
+    .eq('clinic_id', clinicId)
+    .in('wa_id', variantes)
+    .limit(1)
+    .maybeSingle()
+  if (!conversa) return { avisou: false, motivo: 'sem conversa' }
+
+  const { data: unidade } = await supabase
+    .from('clinic_units')
+    .select('name,address')
+    .eq('id', consulta!.unit_id)
+    .maybeSingle()
+
+  const quando = new Intl.DateTimeFormat('pt-BR', {
+    weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(consulta!.starts_at))
+
+  const texto =
+    `Consulta confirmada!\n\n${quando}\n${unidade?.name ?? ''}` +
+    `${unidade?.address ? `\n${unidade.address}` : ''}\n\n` +
+    'Um dia antes enviamos um lembrete. Digite MENU se precisar de alguma coisa.'
+
+  try {
+    await sendConversationReply(conversa.id, texto, true)
+    return { avisou: true }
+  } catch (causa) {
+    return { avisou: false, motivo: causa instanceof Error ? causa.message : 'falha no envio' }
+  }
+}
+
 /** A recepcao aceita a solicitacao feita pelo WhatsApp por quem nao tem cadastro. */
 export async function confirmAppointment(appointmentId: string) {
   const { error } = await supabase
@@ -934,9 +988,14 @@ export async function getReplyWindow(conversationId: string): Promise<string | n
 }
 
 /** Envia uma resposta escrita pela equipe. O servidor revalida a janela de 24h. */
-export async function sendConversationReply(conversationId: string, text: string) {
+export async function sendConversationReply(
+  conversationId: string,
+  text: string,
+  /** Verdadeiro para aviso do sistema; falso para o que a equipe digitou. */
+  automatico = false,
+) {
   const { data, error } = await supabase.functions.invoke('whatsapp-reply', {
-    body: { conversationId, text },
+    body: { conversationId, text, automatico },
   })
   if (error) {
     // O corpo da resposta traz a mensagem em portugues; o error do invoke traz

@@ -23,6 +23,7 @@ import {
   getCurrentMembership,
   getSchedulePreferences,
   confirmAppointment,
+  notifyAppointmentConfirmed,
   listAppointments,
   listAvailabilityRules,
   listAvailableSlots,
@@ -233,6 +234,28 @@ export default function Agenda({
     )
   }, [patients, buscaPaciente])
 
+  /**
+   * Confirma a solicitacao e conta ao paciente.
+   *
+   * O aviso e melhor-esforco: se a janela de 24h da Meta ja fechou, a consulta
+   * segue confirmada do mesmo jeito e a tela diz que o aviso nao saiu. Deixar
+   * a confirmacao presa a um envio seria pior.
+   */
+  async function confirmarEAvisar(appointmentId: string) {
+    if (!clinicId) return
+    await acao(
+      () => confirmAppointment(appointmentId),
+      'Consulta confirmada. A vaga deixou de ser provisória.',
+    )
+    onSolicitacoesMudaram?.()
+    const aviso = await notifyAppointmentConfirmed(clinicId, appointmentId)
+    setAviso(
+      aviso.avisou
+        ? 'Consulta confirmada e paciente avisado pelo WhatsApp.'
+        : 'Consulta confirmada. Não consegui avisar pelo WhatsApp — responda pela tela de Respostas.',
+    )
+  }
+
   async function salvarConsulta() {
     if (!emEdicao) return
     setSalvandoConsulta(true)
@@ -434,10 +457,7 @@ export default function Agenda({
                               type="button"
                               title="Confirmar solicitação"
                               onClick={() =>
-                                void acao(
-                                  () => confirmAppointment(item.id),
-                                  'Consulta confirmada. A vaga deixou de ser provisória.',
-                                ).then(() => onSolicitacoesMudaram?.())
+                                void confirmarEAvisar(item.id)
                               }
                               className="shrink-0 rounded-lg bg-white/15 px-2.5 py-1 text-[9px] font-extrabold text-white transition hover:bg-white/25"
                             >
@@ -1050,10 +1070,7 @@ export default function Agenda({
                     onClick={() => {
                       const id = emEdicao.id
                       setEmEdicao(null)
-                      void acao(
-                        () => confirmAppointment(id),
-                        'Consulta confirmada. A vaga deixou de ser provisória.',
-                      ).then(() => onSolicitacoesMudaram?.())
+                      void confirmarEAvisar(id)
                     }}
                     className="rounded-xl bg-[#557f75] px-4 py-2.5 text-[11px] font-extrabold text-white transition hover:bg-[#456a61]"
                   >

@@ -14,6 +14,12 @@ const LIMITE_CARACTERES = 4096
 
 type ReplyRequest = {
   conversationId?: string
+  /**
+   * Verdadeiro quando quem escreve e o sistema, e nao alguem da equipe. Muda
+   * so a marca da mensagem: o menu automatico usa isso para saber se ha gente
+   * de carne e osso na conversa.
+   */
+  automatico?: boolean
   text?: string
 }
 
@@ -126,6 +132,7 @@ Deno.serve(async (req) => {
         conversation_id: visivel.id,
         patient_id: visivel.patient_id,
         direction: 'outbound',
+        automatic: body.automatico === true,
         message_type: 'text',
         body: texto,
         status: 'failed',
@@ -143,6 +150,7 @@ Deno.serve(async (req) => {
         patient_id: visivel.patient_id,
         external_message_id: corpo?.messages?.[0]?.id ?? null,
         direction: 'outbound',
+        automatic: body.automatico === true,
         message_type: 'text',
         body: texto,
         status: 'accepted',
