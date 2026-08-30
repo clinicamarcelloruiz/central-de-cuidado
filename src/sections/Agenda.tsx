@@ -22,6 +22,7 @@ import {
   deleteScheduleException,
   getCurrentMembership,
   getSchedulePreferences,
+  confirmAppointment,
   listAppointments,
   listAvailabilityRules,
   listAvailableSlots,
@@ -288,18 +289,52 @@ export default function Agenda({ patients }: { patients: Patient[] }) {
                       {marcados.map((item) => (
                         <div
                           key={item.id}
-                          className="flex items-center justify-between gap-2 rounded-xl bg-[#081b2c] px-3 py-2"
+                          className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 ${
+                            item.confirmedByClinic
+                              ? 'bg-[#081b2c]'
+                              : 'border border-[#dc8e5f] bg-[#8a4b1d]'
+                          }`}
                         >
                           <div className="min-w-0">
                             <p className="truncate text-[11px] font-bold text-white">
                               {hora(item.startsAt)} · {item.patientName}
+                              {!item.confirmedByClinic && ' · AGUARDANDO CONFIRMAÇÃO'}
                             </p>
-                            <p className="text-[9px] font-bold text-white/50">
-                              {item.source === 'whatsapp'
-                                ? 'marcado pelo paciente no WhatsApp'
-                                : 'marcado pela equipe'}
+                            <p className="text-[9px] font-bold text-white/60">
+                              {item.confirmedByClinic
+                                ? item.source === 'whatsapp'
+                                  ? 'marcado pelo paciente no WhatsApp'
+                                  : 'marcado pela equipe'
+                                : `sem cadastro · ${item.contactPhone || 'telefone não informado'} · ` +
+                                  `vaga reservada até ${
+                                    item.holdExpiresAt
+                                      ? new Date(item.holdExpiresAt).toLocaleString('pt-BR', {
+                                          day: '2-digit',
+                                          month: '2-digit',
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                        })
+                                      : '-'
+                                  }`}
                             </p>
                           </div>
+                          {/* Solicitacao de quem nao tem cadastro: a recepcao
+                              precisa aceitar, senao a vaga se libera sozinha. */}
+                          {!item.confirmedByClinic && (
+                            <button
+                              type="button"
+                              title="Confirmar solicitação"
+                              onClick={() =>
+                                void acao(
+                                  () => confirmAppointment(item.id),
+                                  'Consulta confirmada. A vaga deixou de ser provisória.',
+                                )
+                              }
+                              className="shrink-0 rounded-lg bg-white/15 px-2.5 py-1 text-[9px] font-extrabold text-white transition hover:bg-white/25"
+                            >
+                              Confirmar
+                            </button>
+                          )}
                           <button
                             type="button"
                             title="Cancelar"

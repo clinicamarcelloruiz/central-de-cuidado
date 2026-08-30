@@ -378,6 +378,13 @@ export interface Appointment {
   status: 'scheduled' | 'attended' | 'cancelled' | 'no_show'
   source: 'clinic' | 'whatsapp'
   staffNote: string
+  /** Nome e telefone de quem marcou pelo WhatsApp sem ter cadastro. */
+  contactName: string
+  contactPhone: string
+  /** Falso enquanto for solicitacao de pessoa sem cadastro aguardando a equipe. */
+  confirmedByClinic: boolean
+  /** Ate quando a vaga fica reservada para essa solicitacao. */
+  holdExpiresAt: string | null
 }
 
 export const WEEKDAY_LABEL = [
@@ -536,7 +543,7 @@ export async function listAvailableSlots(unitId: string): Promise<string[]> {
 export async function listAppointments(clinicId: string, unitId: string): Promise<Appointment[]> {
   const { data, error } = await supabase
     .from('appointments')
-    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note')
+    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at')
     .eq('clinic_id', clinicId)
     .eq('unit_id', unitId)
     .neq('status', 'cancelled')
@@ -555,13 +562,29 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
     id: row.id,
     unitId: row.unit_id,
     patientId: row.patient_id,
-    patientName: (row.patient_id && nameById.get(row.patient_id)) || 'Sem paciente vinculado',
+    patientName:
+      (row.patient_id && nameById.get(row.patient_id)) ||
+      row.contact_name ||
+      'Sem paciente vinculado',
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     status: row.status,
     source: row.source,
     staffNote: row.staff_note,
+    contactName: row.contact_name,
+    contactPhone: row.contact_phone,
+    confirmedByClinic: row.confirmed_by_clinic,
+    holdExpiresAt: row.hold_expires_at,
   }))
+}
+
+/** A recepcao aceita a solicitacao feita pelo WhatsApp por quem nao tem cadastro. */
+export async function confirmAppointment(appointmentId: string) {
+  const { error } = await supabase
+    .from('appointments')
+    .update({ confirmed_by_clinic: true, hold_expires_at: null })
+    .eq('id', appointmentId)
+  if (error) fail(error)
 }
 
 export async function createAppointment(

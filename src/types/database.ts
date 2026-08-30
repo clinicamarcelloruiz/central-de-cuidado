@@ -556,6 +556,10 @@ export type Database = {
         Row: {
           cancelled_at: string | null
           confirmed_at: string | null
+          contact_name: string
+          contact_phone: string
+          confirmed_by_clinic: boolean
+          hold_expires_at: string | null
           reminder_sent_at: string | null
           reminder_failed_at: string | null
           reminder_failure_reason: string | null
@@ -577,6 +581,10 @@ export type Database = {
         Insert: {
           cancelled_at?: string | null
           confirmed_at?: string | null
+          contact_name?: string
+          contact_phone?: string
+          confirmed_by_clinic?: boolean
+          hold_expires_at?: string | null
           reminder_sent_at?: string | null
           reminder_failed_at?: string | null
           reminder_failure_reason?: string | null
@@ -598,6 +606,10 @@ export type Database = {
         Update: {
           cancelled_at?: string | null
           confirmed_at?: string | null
+          contact_name?: string
+          contact_phone?: string
+          confirmed_by_clinic?: boolean
+          hold_expires_at?: string | null
           reminder_sent_at?: string | null
           reminder_failed_at?: string | null
           reminder_failure_reason?: string | null
@@ -627,6 +639,10 @@ export type Database = {
           last_message_at: string | null
           needs_attention: boolean
           autoreply_sent_at: string | null
+          booking_state: string | null
+          booking_options: Json | null
+          booking_unit_id: string | null
+          booking_updated_at: string | null
           patient_id: string | null
           status: string
           unread_count: number
@@ -641,6 +657,10 @@ export type Database = {
           last_message_at?: string | null
           needs_attention?: boolean
           autoreply_sent_at?: string | null
+          booking_state?: string | null
+          booking_options?: Json | null
+          booking_unit_id?: string | null
+          booking_updated_at?: string | null
           patient_id?: string | null
           status?: string
           unread_count?: number
@@ -655,6 +675,10 @@ export type Database = {
           last_message_at?: string | null
           needs_attention?: boolean
           autoreply_sent_at?: string | null
+          booking_state?: string | null
+          booking_options?: Json | null
+          booking_unit_id?: string | null
+          booking_updated_at?: string | null
           patient_id?: string | null
           status?: string
           unread_count?: number
