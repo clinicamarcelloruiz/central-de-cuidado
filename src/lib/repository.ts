@@ -572,7 +572,9 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
     source: row.source,
     staffNote: row.staff_note,
     contactName: row.contact_name,
-    contactPhone: row.contact_phone,
+    // Formatado ja aqui: quem le a agenda precisa conferir um numero, e
+    // "5513988481114" nao se confere de bater o olho.
+    contactPhone: formatarTelefone(row.contact_phone || ''),
     confirmedByClinic: row.confirmed_by_clinic,
     holdExpiresAt: row.hold_expires_at,
   }))

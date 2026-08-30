@@ -434,9 +434,20 @@ export default function Agenda({
                             </p>
                             <p className="text-[9px] font-bold text-white/60">
                               {item.confirmedByClinic
-                                ? item.source === 'whatsapp'
-                                  ? 'marcado pelo paciente no WhatsApp'
-                                  : 'marcado pela equipe'
+                                ? [
+                                    item.source === 'whatsapp'
+                                      ? 'marcado pelo paciente no WhatsApp'
+                                      : 'marcado pela equipe',
+                                    // Sem vinculo, o telefone e a unica pista de
+                                    // quem vem - e o aviso lembra que falta
+                                    // cadastrar para virar prontuario.
+                                    ...(item.patientId
+                                      ? []
+                                      : [
+                                          item.contactPhone || 'telefone não informado',
+                                          'sem cadastro',
+                                        ]),
+                                  ].join(' · ')
                                 : `sem cadastro · ${item.contactPhone || 'telefone não informado'} · ` +
                                   `vaga reservada até ${
                                     item.holdExpiresAt
