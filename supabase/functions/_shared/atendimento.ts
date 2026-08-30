@@ -235,6 +235,24 @@ async function salvarEstado(
     .eq('id', conversationId)
 }
 
+/**
+ * Encerra a etapa mas deixa o menu no ar.
+ *
+ * Serve para toda mensagem que termina oferecendo um numero ("digite 2 para
+ * ..."). Com o estado zerado, esse numero caia na regra de silencio quando a
+ * conversa estava marcada para a equipe - foi o que aconteceu depois de um
+ * cancelamento em 30/08/2026: o robo prometeu "digite 2" e emudeceu.
+ */
+async function voltarAoMenuAtivo(admin: Admin, conversationId: string) {
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'menu',
+    booking_options: null,
+    booking_unit_id: null,
+    booking_patient_id: null,
+    booking_replaces_id: null,
+  })
+}
+
 async function limparEstado(admin: Admin, conversationId: string) {
   await salvarEstado(admin, conversationId, {
     booking_state: null,
@@ -726,7 +744,9 @@ async function marcar(
       : new Date(agora.getTime() + HORAS_RESERVA * 3600 * 1000).toISOString(),
   })
 
-  await limparEstado(admin, conversationId)
+  // Tambem termina oferecendo numero quando da errado, entao o menu fica ativo.
+  if (error) await voltarAoMenuAtivo(admin, conversationId)
+  else await limparEstado(admin, conversationId)
 
   if (error) {
     // 23505 = alguem pegou o mesmo horario entre a listagem e a escolha.
@@ -984,7 +1004,8 @@ export async function tratarConversa(opcoes: {
     }
 
     const ok = await cancelarConsulta(admin, alvo.id)
-    await limparEstado(admin, conversationId)
+    // Menu ativo, e nao estado zerado: a resposta abaixo oferece "digite 2".
+    await voltarAoMenuAtivo(admin, conversationId)
     if (!ok) {
       return {
         resposta:
