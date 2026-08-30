@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "build:standalone": "npm run build && node scripts/build-standalone.mjs",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:bot": "esbuild supabase/functions/_shared/atendimento.ts --format=esm --outfile=tests/atendimento.build.mjs && node tests/atendimento.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

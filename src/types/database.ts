@@ -645,6 +645,8 @@ export type Database = {
           booking_state: string | null
           booking_options: Json | null
           booking_unit_id: string | null
+          booking_patient_id: string | null
+          booking_replaces_id: string | null
           booking_updated_at: string | null
           menu_sent_at: string | null
           profile_name: string
@@ -666,6 +668,8 @@ export type Database = {
           booking_state?: string | null
           booking_options?: Json | null
           booking_unit_id?: string | null
+          booking_patient_id?: string | null
+          booking_replaces_id?: string | null
           booking_updated_at?: string | null
           menu_sent_at?: string | null
           profile_name?: string
@@ -687,6 +691,8 @@ export type Database = {
           booking_state?: string | null
           booking_options?: Json | null
           booking_unit_id?: string | null
+          booking_patient_id?: string | null
+          booking_replaces_id?: string | null
           booking_updated_at?: string | null
           menu_sent_at?: string | null
           profile_name?: string

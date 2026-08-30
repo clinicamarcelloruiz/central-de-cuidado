@@ -107,21 +107,66 @@ Deno.serve(async (req) => {
 
           const waId = digits(String(message.from ?? ''))
           const localDigits = waId.startsWith('55') ? waId.slice(2) : waId
-          const { data: patient } = await admin
+          // Todos os pacientes deste telefone, e nao o primeiro que aparecer.
+          // Numa gastropediatria a mae cadastra os dois filhos com o proprio
+          // celular; escolher sozinho marcava consulta no nome do irmao errado.
+          const { data: patientRows } = await admin
             .from('patients')
             .select('id,name')
             .eq('clinic_id', clinicId)
             .is('archived_at', null)
             .or(`phone_digits.eq.${waId},phone_digits.eq.${localDigits}`)
-            .limit(1)
-            .maybeSingle()
+            .order('name')
+
+          const pacientes = (patientRows ?? []).map((p) => ({
+            id: p.id as string,
+            name: (p.name as string) ?? '',
+          }))
+          // Para ligar a conversa e as mensagens basta um: sao da familia toda.
+          // Quem precisa de precisao e a consulta, e essa o robo pergunta.
+          const patient = pacientes[0] ?? null
+
+          // Consultas futuras deste telefone. Alimentam a opcao 4 do menu e o
+          // aviso de "voce ja tem uma marcada" antes de criar uma segunda.
+          const { data: futurasRows } = await admin
+            .from('appointments')
+            .select('id,starts_at,unit_id,contact_name,patient_id,confirmed_by_clinic')
+            .eq('clinic_id', clinicId)
+            .eq('status', 'scheduled')
+            .gte('starts_at', new Date().toISOString())
+            .or(`contact_phone.eq.${waId},contact_phone.eq.${localDigits}`)
+            .order('starts_at')
+
+          const idsUnidades = [...new Set((futurasRows ?? []).map((a) => a.unit_id))]
+          const unidadesPorId = new Map<string, { name: string; address: string }>()
+          if (idsUnidades.length > 0) {
+            const { data: us } = await admin
+              .from('clinic_units')
+              .select('id,name,address')
+              .in('id', idsUnidades)
+            for (const u of us ?? []) unidadesPorId.set(u.id, { name: u.name, address: u.address })
+          }
+
+          const nomePorPacienteId = new Map(pacientes.map((p) => [p.id, p.name]))
+          const consultas = (futurasRows ?? []).map((a) => ({
+            id: a.id as string,
+            inicio: a.starts_at as string,
+            unidade: unidadesPorId.get(a.unit_id)?.name ?? 'nossa unidade',
+            endereco: unidadesPorId.get(a.unit_id)?.address ?? '',
+            paciente:
+              (a.patient_id ? nomePorPacienteId.get(a.patient_id) : null) ??
+              (a.contact_name as string) ??
+              '',
+            confirmada: Boolean(a.confirmed_by_clinic),
+          }))
 
           // Estado da conversa ANTES de gravar esta mensagem. E o que diz se a
           // pessoa e nova: depois do upsert a linha ja existe sempre.
           const { data: conversaAnterior } = await admin
             .from('whatsapp_conversations')
             .select(
-              'id,booking_state,booking_options,booking_unit_id,needs_attention,profile_name',
+              'id,booking_state,booking_options,booking_unit_id,booking_patient_id,' +
+                'booking_replaces_id,needs_attention,profile_name',
             )
             .eq('clinic_id', clinicId)
             .eq('wa_id', waId)
@@ -331,7 +376,10 @@ Deno.serve(async (req) => {
               aguardandoEquipe,
               texto: body,
               telefone: waId,
-              paciente: patient?.id ? { id: patient.id, name: patient.name ?? '' } : null,
+              pacientes,
+              pacienteEmAndamento: conversaAnterior?.booking_patient_id ?? null,
+              consultas,
+              consultaASubstituir: conversaAnterior?.booking_replaces_id ?? null,
               nomeDoPerfil: nomeDoPerfil || conversaAnterior?.profile_name || '',
               textos: {
                 saudacao: settings.whatsapp_autoreply_text ?? '',
