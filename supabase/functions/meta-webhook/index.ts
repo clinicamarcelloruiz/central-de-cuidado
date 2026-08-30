@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
 
         const { data: settings } = await admin
           .from('clinic_settings')
-          .select('clinic_id,whatsapp_autoreply_enabled,whatsapp_autoreply_text')
+          .select('clinic_id,whatsapp_autoreply_enabled,whatsapp_autoreply_text,whatsapp_autoreply_known_text')
           .eq('whatsapp_phone_number_id', phoneNumberId)
           .maybeSingle()
         if (!settings?.clinic_id) continue
@@ -96,7 +96,7 @@ Deno.serve(async (req) => {
           const localDigits = waId.startsWith('55') ? waId.slice(2) : waId
           const { data: patient } = await admin
             .from('patients')
-            .select('id')
+            .select('id,name')
             .eq('clinic_id', clinicId)
             .is('archived_at', null)
             .or(`phone_digits.eq.${waId},phone_digits.eq.${localDigits}`)
@@ -177,12 +177,16 @@ Deno.serve(async (req) => {
           //    porque receber tabela de precos depois de "Estou bem" e pessimo;
           //  - nunca para quem pediu para sair.
           const jaFalamosAntes = Boolean(conversaAnterior?.autoreply_sent_at)
-          if (
-            settings.whatsapp_autoreply_enabled &&
-            settings.whatsapp_autoreply_text?.trim() &&
-            !jaFalamosAntes &&
-            !optedOut
-          ) {
+
+          // Dois textos. Quem o sistema reconhece pelo telefone recebe um aceno
+          // curto com o nome; quem nao esta cadastrado recebe valores e
+          // telefones. Mandar tabela de precos para paciente antigo e ruim.
+          const primeiroNome = (patient?.name ?? '').trim().split(/\s+/)[0] ?? ''
+          const textoAutomatico = patient?.id
+            ? (settings.whatsapp_autoreply_known_text ?? '').replace(/\{nome\}/g, primeiroNome).trim()
+            : (settings.whatsapp_autoreply_text ?? '').trim()
+
+          if (settings.whatsapp_autoreply_enabled && textoAutomatico && !jaFalamosAntes && !optedOut) {
             const { count: enviosAnteriores } = await admin
               .from('whatsapp_messages')
               .select('id', { count: 'exact', head: true })
@@ -195,7 +199,7 @@ Deno.serve(async (req) => {
               const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
               if (token) {
                 const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
-                const texto = settings.whatsapp_autoreply_text.trim()
+                const texto = textoAutomatico
                 const enviadoEm = new Date().toISOString()
 
                 // Texto livre e permitido: a mensagem que acabou de chegar abriu

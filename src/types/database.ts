@@ -102,6 +102,7 @@ export type Database = {
           schedule_slot_minutes: number
           appointment_reminder_enabled: boolean
           whatsapp_autoreply_enabled: boolean
+          whatsapp_autoreply_known_text: string
           whatsapp_autoreply_text: string
           appointment_reminder_days: number
           whatsapp_reminder_template_name: string
@@ -121,6 +122,7 @@ export type Database = {
           schedule_slot_minutes?: number
           appointment_reminder_enabled?: boolean
           whatsapp_autoreply_enabled?: boolean
+          whatsapp_autoreply_known_text?: string
           whatsapp_autoreply_text?: string
           appointment_reminder_days?: number
           whatsapp_reminder_template_name?: string
@@ -140,6 +142,7 @@ export type Database = {
           schedule_slot_minutes?: number
           appointment_reminder_enabled?: boolean
           whatsapp_autoreply_enabled?: boolean
+          whatsapp_autoreply_known_text?: string
           whatsapp_autoreply_text?: string
           appointment_reminder_days?: number
           whatsapp_reminder_template_name?: string

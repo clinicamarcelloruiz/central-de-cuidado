@@ -60,7 +60,7 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
   // Recalculado a cada minuto: sem isso a caixa continuaria habilitada depois
   // de a janela vencer com a tela aberta.
   const [agora, setAgora] = useState(() => Date.now())
-  const [autoReply, setAutoReply] = useState<AutoReplySettings>({ enabled: false, text: '' })
+  const [autoReply, setAutoReply] = useState<AutoReplySettings>({ enabled: false, text: '', knownText: '' })
   const [autoReplyAberto, setAutoReplyAberto] = useState(false)
   const [salvandoAuto, setSalvandoAuto] = useState(false)
   const [avisoAuto, setAvisoAuto] = useState('')
@@ -298,16 +298,33 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
                 Responder automaticamente contatos novos
               </span>
             </label>
+            <p className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+              Para quem não é paciente cadastrado
+            </p>
             <textarea
               value={autoReply.text}
               onChange={(e) => setAutoReply({ ...autoReply, text: e.target.value })}
               rows={12}
-              className="mt-2 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
+              className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
+            />
+
+            <p className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+              Para quem já é paciente
+            </p>
+            <textarea
+              value={autoReply.knownText}
+              onChange={(e) => setAutoReply({ ...autoReply, knownText: e.target.value })}
+              rows={5}
+              className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
             />
             <p className="mt-2 text-[10px] text-slate-500">
+              O sistema identifica o paciente pelo telefone. Escreva <strong>{'{nome}'}</strong> onde
+              quiser o primeiro nome dele. Deixe vazio para não responder a pacientes cadastrados.
+            </p>
+            <p className="mt-1 text-[10px] text-slate-500">
               Enviada uma única vez por contato, e apenas para quem nunca recebeu nada da
               clínica. Quem está respondendo acompanhamento ou lembrete de consulta não
-              recebe este texto.
+              recebe nenhum dos dois textos.
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <button

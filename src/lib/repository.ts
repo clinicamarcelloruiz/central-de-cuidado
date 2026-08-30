@@ -708,20 +708,24 @@ export async function markConversationSeen(conversationId: string) {
 
 export interface AutoReplySettings {
   enabled: boolean
+  /** Texto para quem nao esta cadastrado como paciente. */
   text: string
+  /** Texto para quem o sistema reconhece pelo telefone. Aceita {nome}. */
+  knownText: string
 }
 
 /** Resposta automatica enviada a quem escreve pela primeira vez. */
 export async function getAutoReply(clinicId: string): Promise<AutoReplySettings> {
   const { data, error } = await supabase
     .from('clinic_settings')
-    .select('whatsapp_autoreply_enabled,whatsapp_autoreply_text')
+    .select('whatsapp_autoreply_enabled,whatsapp_autoreply_text,whatsapp_autoreply_known_text')
     .eq('clinic_id', clinicId)
     .maybeSingle()
   if (error) fail(error)
   return {
     enabled: data?.whatsapp_autoreply_enabled ?? false,
     text: data?.whatsapp_autoreply_text ?? '',
+    knownText: data?.whatsapp_autoreply_known_text ?? '',
   }
 }
 
@@ -731,6 +735,7 @@ export async function saveAutoReply(clinicId: string, prefs: AutoReplySettings) 
     .update({
       whatsapp_autoreply_enabled: prefs.enabled,
       whatsapp_autoreply_text: prefs.text,
+      whatsapp_autoreply_known_text: prefs.knownText,
     })
     .eq('clinic_id', clinicId)
   if (error) fail(error)
