@@ -21,7 +21,10 @@
 import type { adminClient } from './whatsapp.ts'
 
 const HORAS_RESERVA = 24
-const MAX_HORARIOS = 8
+/** Dias oferecidos de uma vez. Cabe a quinzena inteira numa mensagem so. */
+const MAX_DIAS = 10
+/** Horarios de um dia. Um expediente de 8h as 18h em blocos de 40min da 15. */
+const MAX_HORARIOS_DIA = 15
 
 /**
  * O cliente com service_role que o webhook ja tem em maos. Tipar pelo retorno
@@ -30,7 +33,12 @@ const MAX_HORARIOS = 8
  */
 type Admin = ReturnType<typeof adminClient>
 
-export type Estado = 'menu' | 'aguardando_unidade' | 'aguardando_horario' | 'atendente'
+export type Estado =
+  | 'menu'
+  | 'aguardando_unidade'
+  | 'aguardando_dia'
+  | 'aguardando_horario'
+  | 'atendente'
 export type MotivoAtencao = 'atendente' | 'falha'
 
 export type Resultado = {
@@ -114,20 +122,48 @@ function escolha(texto: string, total: number): number | null {
   return numero - 1
 }
 
-function formatarData(iso: string, timezone: string) {
-  const data = new Date(iso)
-  const dia = data.toLocaleDateString('pt-BR', {
+function formatarDia(iso: string, timezone: string) {
+  return new Date(iso).toLocaleDateString('pt-BR', {
     timeZone: timezone,
     weekday: 'short',
     day: '2-digit',
     month: '2-digit',
   })
-  const hora = data.toLocaleTimeString('pt-BR', {
+}
+
+function formatarHora(iso: string, timezone: string) {
+  return new Date(iso).toLocaleTimeString('pt-BR', {
     timeZone: timezone,
     hour: '2-digit',
     minute: '2-digit',
   })
-  return `${dia} às ${hora}`
+}
+
+function formatarData(iso: string, timezone: string) {
+  return `${formatarDia(iso, timezone)} às ${formatarHora(iso, timezone)}`
+}
+
+/** Chave estavel do dia no fuso da clinica, no formato AAAA-MM-DD. */
+function chaveDoDia(iso: string, timezone: string) {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: timezone })
+}
+
+/**
+ * Agrupa os horarios livres por dia, preservando a ordem cronologica.
+ *
+ * O paciente pensa em dia antes de pensar em hora. Uma lista corrida de 42
+ * horarios so mostrava os 8 primeiros - dois dias - e dava a impressao de que a
+ * agenda acabava ali, escondendo os outros cinco dias abertos.
+ */
+function agruparPorDia(horarios: Horario[], timezone: string) {
+  const porDia = new Map<string, Horario[]>()
+  for (const h of horarios) {
+    const chave = chaveDoDia(h.inicio, timezone)
+    const lista = porDia.get(chave)
+    if (lista) lista.push(h)
+    else porDia.set(chave, [h])
+  }
+  return [...porDia.entries()].map(([chave, lista]) => ({ chave, horarios: lista }))
 }
 
 const OPCOES = [
@@ -200,9 +236,12 @@ async function horariosLivres(
     return { horarios: [], falhou: true }
   }
 
-  const lista = ((data ?? []) as { slot_start: string; slot_end: string }[])
-    .slice(0, MAX_HORARIOS)
-    .map((h) => ({ inicio: h.slot_start, fim: h.slot_end }))
+  // Sem corte aqui: quem decide quanto mostrar e a etapa (dias ou horarios do
+  // dia). Cortar na origem foi o que escondeu cinco dias de agenda.
+  const lista = ((data ?? []) as { slot_start: string; slot_end: string }[]).map((h) => ({
+    inicio: h.slot_start,
+    fim: h.slot_end,
+  }))
   return { horarios: lista, falhou: false }
 }
 
@@ -272,9 +311,9 @@ async function perguntarUnidade(
     }
   }
 
-  // Uma unidade so: nao faz sentido perguntar, ja mostra os horarios.
+  // Uma unidade so: nao faz sentido perguntar, ja mostra as datas.
   if (unidades.length === 1) {
-    return await perguntarHorario(admin, clinicId, conversationId, unidades[0], false)
+    return await perguntarDia(admin, clinicId, conversationId, unidades[0], false)
   }
 
   // Consulta a agenda de cada unidade antes de listar. Custa uma chamada por
@@ -320,7 +359,8 @@ async function perguntarUnidade(
   }
 }
 
-async function perguntarHorario(
+/** Primeira etapa da agenda: em que dia. */
+async function perguntarDia(
   admin: Admin,
   clinicId: string,
   conversationId: string,
@@ -354,21 +394,85 @@ async function perguntarHorario(
     }
   }
 
-  const linhas = horarios.map((h, i) => `${i + 1} - ${formatarData(h.inicio, timezone)}`).join('\n')
+  const dias = agruparPorDia(horarios, timezone)
+  const mostrados = dias.slice(0, MAX_DIAS)
+
+  const linhas = mostrados
+    .map((d, i) => {
+      const quantos = d.horarios.length
+      return `${i + 1} - ${formatarDia(d.horarios[0].inicio, timezone)} (${quantos} ${
+        quantos === 1 ? 'horário' : 'horários'
+      })`
+    })
+    .join('\n')
+
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'aguardando_dia',
+    booking_options: mostrados.map((d) => d.chave),
+    booking_unit_id: unidade.id,
+  })
+
+  // Sem agenda alem da quinzena nao adianta prometer: quem precisa de data
+  // distante fala com a equipe, que enxerga o calendario inteiro.
+  const rodape = podeTrocarUnidade
+    ? 'Digite VOLTAR para escolher outra unidade, ATENDENTE se precisar de uma data mais distante, ou MENU para o início.'
+    : 'Digite ATENDENTE se precisar de uma data mais distante, ou MENU para o início.'
+
+  return {
+    resposta:
+      `Datas disponíveis em ${unidade.name}:\n\n${linhas}\n\n` +
+      `Responda com o número do dia.\n${rodape}`,
+  }
+}
+
+/** Segunda etapa: a que horas, dentro do dia escolhido. */
+async function perguntarHorario(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+  unitId: string,
+  diaEscolhido: string,
+): Promise<Resultado> {
+  const timezone = await fusoDaClinica(admin, clinicId)
+  const { horarios, falhou } = await horariosLivres(admin, unitId)
+
+  if (falhou) {
+    await limparEstado(admin, conversationId)
+    return { resposta: AVISO_FALHA, atencao: 'falha' }
+  }
+
+  const doDia = horarios
+    .filter((h) => chaveDoDia(h.inicio, timezone) === diaEscolhido)
+    .slice(0, MAX_HORARIOS_DIA)
+
+  if (doDia.length === 0) {
+    // Alguem ocupou o dia inteiro entre a listagem e a escolha. Volta um passo
+    // em vez de encerrar.
+    const { data: unidade } = await admin
+      .from('clinic_units')
+      .select('id,name,address')
+      .eq('id', unitId)
+      .maybeSingle()
+    if (!unidade) {
+      await limparEstado(admin, conversationId)
+      return { resposta: AVISO_FALHA, atencao: 'falha' }
+    }
+    return await perguntarDia(admin, clinicId, conversationId, unidade as Unidade)
+  }
+
+  const linhas = doDia.map((h, i) => `${i + 1} - ${formatarHora(h.inicio, timezone)}`).join('\n')
 
   await salvarEstado(admin, conversationId, {
     booking_state: 'aguardando_horario',
-    booking_options: horarios,
-    booking_unit_id: unidade.id,
+    booking_options: doDia,
+    booking_unit_id: unitId,
   })
 
   return {
     resposta:
-      `Horários disponíveis em ${unidade.name}:\n\n${linhas}\n\n` +
-      'Responda com o número do horário desejado.\n' +
-      (podeTrocarUnidade
-        ? 'Digite VOLTAR para escolher outra unidade, ATENDENTE para falar com a nossa equipe, ou MENU para o início.'
-        : SAIDAS),
+      `Horários de ${formatarDia(doDia[0].inicio, timezone)}:\n\n${linhas}\n\n` +
+      'Responda com o número do horário.\n' +
+      'Digite VOLTAR para escolher outro dia, ATENDENTE para falar com a nossa equipe, ou MENU para o início.',
   }
 }
 
@@ -379,6 +483,7 @@ async function marcar(
   unitId: string,
   paciente: { id: string; name: string } | null,
   telefone: string,
+  nomeDoPerfil: string,
   slot: Horario,
 ): Promise<Resultado> {
   const { data: unidade } = await admin
@@ -399,7 +504,9 @@ async function marcar(
     ends_at: slot.fim,
     status: 'scheduled',
     source: 'whatsapp',
-    contact_name: paciente?.name ?? '',
+    // Sem cadastro, o nome do WhatsApp e tudo que a recepcao tem para saber
+    // quem esta esperando confirmacao. Melhor do que so um numero de telefone.
+    contact_name: paciente?.name || nomeDoPerfil || '',
     contact_phone: telefone,
     // Cadastrado marca direto. Pessoa nova fica reservada por 24h ate a
     // recepcao confirmar - foi a regra que a clinica escolheu.
@@ -474,6 +581,8 @@ export async function tratarConversa(opcoes: {
   texto: string
   telefone: string
   paciente: { id: string; name: string } | null
+  /** Nome que a pessoa usa no WhatsApp. Vazio quando o evento nao trouxe. */
+  nomeDoPerfil: string
   textos: { saudacao: string; saudacaoConhecida: string; informacoes: string }
 }): Promise<Resultado> {
   const { admin, clinicId, conversationId, estadoAtual, texto } = opcoes
@@ -591,13 +700,54 @@ export async function tratarConversa(opcoes: {
         'Essa unidade não está mais disponível. Vamos recomeçar:',
       )
     }
-    return await perguntarHorario(admin, clinicId, conversationId, escolhida)
+    return await perguntarDia(admin, clinicId, conversationId, escolhida)
+  }
+
+  // ---- Escolha do dia ----
+  if (estadoAtual === 'aguardando_dia') {
+    if (pediuVoltar(texto)) {
+      return await perguntarUnidade(admin, clinicId, conversationId)
+    }
+
+    const dias = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
+    const indice = escolha(texto, dias.length)
+    if (indice === null) {
+      return {
+        resposta:
+          'Não entendi. Responda com o número do dia da lista acima.\n' +
+          'Digite VOLTAR para escolher outra unidade, ou MENU para o início.',
+      }
+    }
+    if (!opcoes.unidadeEmAndamento) {
+      return await mostrarMenu(
+        admin,
+        conversationId,
+        saudacao,
+        'Perdi o fio da conversa, desculpe. Vamos recomeçar:',
+      )
+    }
+    return await perguntarHorario(
+      admin,
+      clinicId,
+      conversationId,
+      opcoes.unidadeEmAndamento,
+      dias[indice],
+    )
   }
 
   // ---- Escolha do horario ----
   if (estadoAtual === 'aguardando_horario') {
     if (pediuVoltar(texto)) {
-      return await perguntarUnidade(admin, clinicId, conversationId)
+      if (!opcoes.unidadeEmAndamento) {
+        return await perguntarUnidade(admin, clinicId, conversationId)
+      }
+      const { data: unidade } = await admin
+        .from('clinic_units')
+        .select('id,name,address')
+        .eq('id', opcoes.unidadeEmAndamento)
+        .maybeSingle()
+      if (!unidade) return await perguntarUnidade(admin, clinicId, conversationId)
+      return await perguntarDia(admin, clinicId, conversationId, unidade as Unidade)
     }
 
     const lista = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as Horario[]) : []
@@ -606,7 +756,7 @@ export async function tratarConversa(opcoes: {
       return {
         resposta:
           'Não entendi. Responda com o número do horário da lista acima.\n' +
-          'Digite VOLTAR para escolher outra unidade, ou MENU para o início.',
+          'Digite VOLTAR para escolher outro dia, ou MENU para o início.',
       }
     }
     if (!opcoes.unidadeEmAndamento) {
@@ -624,6 +774,7 @@ export async function tratarConversa(opcoes: {
       opcoes.unidadeEmAndamento,
       opcoes.paciente,
       opcoes.telefone,
+      opcoes.nomeDoPerfil,
       lista[indice],
     )
   }

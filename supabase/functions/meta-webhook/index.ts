@@ -121,7 +121,7 @@ Deno.serve(async (req) => {
           const { data: conversaAnterior } = await admin
             .from('whatsapp_conversations')
             .select(
-              'id,booking_state,booking_options,booking_unit_id,needs_attention',
+              'id,booking_state,booking_options,booking_unit_id,needs_attention,profile_name',
             )
             .eq('clinic_id', clinicId)
             .eq('wa_id', waId)
@@ -332,6 +332,7 @@ Deno.serve(async (req) => {
               texto: body,
               telefone: waId,
               paciente: patient?.id ? { id: patient.id, name: patient.name ?? '' } : null,
+              nomeDoPerfil: nomeDoPerfil || conversaAnterior?.profile_name || '',
               textos: {
                 saudacao: settings.whatsapp_autoreply_text ?? '',
                 saudacaoConhecida: settings.whatsapp_autoreply_known_text ?? '',

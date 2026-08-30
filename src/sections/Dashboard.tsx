@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   Activity,
   ArrowUpRight,
@@ -10,6 +11,7 @@ import {
   UsersRound,
 } from 'lucide-react'
 import type { Patient } from '@/types/patient'
+import type { PendingRequest } from '@/lib/repository'
 import { dueCount, idadeAnos, pendingFollowups } from '@/lib/followup'
 
 const NAVY = '#081b2c'
@@ -183,7 +185,95 @@ function Ranking({
   )
 }
 
-export default function Dashboard({ patients }: { patients: Patient[] }) {
+/**
+ * Aviso de solicitacoes do WhatsApp esperando confirmacao.
+ *
+ * Fica no topo da Visao geral e nao entre os indicadores: nao e um numero para
+ * acompanhar, e uma tarefa com prazo. A vaga fica reservada por 24h e depois
+ * volta para a fila - se ninguem confirmar, o paciente perde o horario.
+ */
+function AvisoSolicitacoes({
+  solicitacoes,
+  onAbrirAgenda,
+}: {
+  solicitacoes: PendingRequest[]
+  onAbrirAgenda?: () => void
+}) {
+  // Reavaliado a cada minuto: "vence em menos de 6 horas" nao pode envelhecer
+  // com a tela aberta.
+  const [agora, setAgora] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setAgora(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  if (solicitacoes.length === 0) return null
+
+  const vencendo = solicitacoes.filter((item) => {
+    if (!item.holdExpiresAt) return false
+    const restante = new Date(item.holdExpiresAt).getTime() - agora
+    return restante > 0 && restante < 6 * 3600 * 1000
+  }).length
+
+  const proxima = solicitacoes[0]
+  const quando = new Intl.DateTimeFormat('pt-BR', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(proxima.startsAt))
+
+  return (
+    <section className="rounded-[24px] border-2 border-[#8a4b1d] bg-[#8a4b1d] p-5 text-white sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-white/15">
+            <Clock3 className="h-5 w-5" />
+          </span>
+          <div>
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-white/60">
+              Aguardando a equipe
+            </p>
+            <h2 className="mt-1 text-lg font-extrabold tracking-[-0.02em]">
+              {solicitacoes.length === 1
+                ? '1 pessoa pediu horário pelo WhatsApp'
+                : `${solicitacoes.length} pessoas pediram horário pelo WhatsApp`}
+            </h2>
+            <p className="mt-1 text-[11px] leading-relaxed text-white/70">
+              {solicitacoes.length === 1
+                ? `${proxima.contactName || proxima.contactPhone} - ${quando}, ${proxima.unitName}.`
+                : `A mais próxima é ${quando}, em ${proxima.unitName}.`}{' '}
+              A vaga fica reservada por 24 horas.
+              {vencendo > 0 &&
+                ` ${vencendo === 1 ? 'Uma reserva vence' : `${vencendo} reservas vencem`} em menos de 6 horas.`}
+            </p>
+          </div>
+        </div>
+        {onAbrirAgenda && (
+          <button
+            type="button"
+            onClick={onAbrirAgenda}
+            className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-[11px] font-extrabold text-[#8a4b1d] transition hover:bg-white/90"
+          >
+            Ver na agenda
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+    </section>
+  )
+}
+
+export default function Dashboard({
+  patients,
+  solicitacoes = [],
+  onAbrirAgenda,
+}: {
+  patients: Patient[]
+  solicitacoes?: PendingRequest[]
+  onAbrirAgenda?: () => void
+}) {
   const currentMonth = new Date().toISOString().slice(0, 7)
   const appointmentsThisMonth = patients.filter((patient) => patient.dataConsulta.startsWith(currentMonth)).length
   const due = dueCount(patients)
@@ -227,6 +317,8 @@ export default function Dashboard({ patients }: { patients: Patient[] }) {
 
   return (
     <div className="space-y-5">
+      <AvisoSolicitacoes solicitacoes={solicitacoes} onAbrirAgenda={onAbrirAgenda} />
+
       <section className="soft-grid relative overflow-hidden rounded-[28px] bg-[#081b2c] p-5 text-white shadow-[0_20px_45px_rgba(8,27,44,.16)] sm:p-7">
         <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full bg-[#dc8e5f]/20 blur-3xl" />
         <div className="absolute bottom-0 right-[28%] h-28 w-28 rounded-full bg-[#6f9d91]/15 blur-2xl" />

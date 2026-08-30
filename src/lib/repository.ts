@@ -578,6 +578,54 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
   }))
 }
 
+export interface PendingRequest {
+  id: string
+  unitId: string
+  unitName: string
+  contactName: string
+  contactPhone: string
+  startsAt: string
+  /** Ate quando a vaga fica presa. Passou disso, a faxina horaria devolve. */
+  holdExpiresAt: string | null
+}
+
+/**
+ * Solicitacoes feitas pelo WhatsApp por quem nao tem cadastro, esperando a
+ * equipe confirmar.
+ *
+ * Consulta a clinica inteira, e nao uma unidade: o aviso precisa aparecer para
+ * quem abre o sistema, sem depender de a pessoa lembrar de olhar cada agenda.
+ */
+export async function listPendingRequests(clinicId: string): Promise<PendingRequest[]> {
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('id,unit_id,contact_name,contact_phone,starts_at,hold_expires_at')
+    .eq('clinic_id', clinicId)
+    .eq('status', 'scheduled')
+    .eq('confirmed_by_clinic', false)
+    .order('starts_at', { ascending: true })
+
+  if (error) fail(error)
+  const rows = data ?? []
+  if (rows.length === 0) return []
+
+  const { data: units } = await supabase
+    .from('clinic_units')
+    .select('id,name')
+    .eq('clinic_id', clinicId)
+  const nomePorUnidade = new Map((units ?? []).map((u) => [u.id, u.name]))
+
+  return rows.map((row) => ({
+    id: row.id,
+    unitId: row.unit_id,
+    unitName: nomePorUnidade.get(row.unit_id) ?? 'Unidade',
+    contactName: row.contact_name || '',
+    contactPhone: formatarTelefone(row.contact_phone || ''),
+    startsAt: row.starts_at,
+    holdExpiresAt: row.hold_expires_at,
+  }))
+}
+
 /** A recepcao aceita a solicitacao feita pelo WhatsApp por quem nao tem cadastro. */
 export async function confirmAppointment(appointmentId: string) {
   const { error } = await supabase
