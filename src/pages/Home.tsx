@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from 'react'
+import { useCallback, useEffect, useState, type ComponentType } from 'react'
 import {
   Bell,
   CalendarDays,
@@ -17,7 +17,12 @@ import {
   UsersRound,
 } from 'lucide-react'
 import { useDb } from '@/lib/store'
-import { PENDING_ACCESS_MESSAGE } from '@/lib/repository'
+import {
+  getCurrentMembership,
+  listPendingRequests,
+  PENDING_ACCESS_MESSAGE,
+  type PendingRequest,
+} from '@/lib/repository'
 import { dueCount } from '@/lib/followup'
 import Dashboard from '@/sections/Dashboard'
 import Patients from '@/sections/Patients'
@@ -114,6 +119,35 @@ export default function Home() {
   const [newPatientSignal, setNewPatientSignal] = useState(0)
   const [preCadastro, setPreCadastro] = useState<{ nome: string; telefone: string } | null>(null)
   const pendentes = dueCount(db.patients)
+  const [solicitacoes, setSolicitacoes] = useState<PendingRequest[]>([])
+
+  // Solicitacoes do WhatsApp esperando a equipe. Ficam aqui, e nao dentro da
+  // Agenda, porque o aviso precisa aparecer para quem abre o sistema em
+  // qualquer tela - a vaga so fica reservada por 24h.
+  const carregarSolicitacoes = useCallback(async () => {
+    try {
+      const membership = await getCurrentMembership()
+      if (!membership) return
+      setSolicitacoes(await listPendingRequests(membership.clinicId))
+    } catch (cause) {
+      console.error('Nao consegui carregar as solicitacoes pendentes', cause)
+    }
+  }, [])
+
+  useEffect(() => {
+    // A carga fica dentro de uma funcao assincrona de proposito: o estado so e
+    // tocado depois do await, e nao durante o corpo do efeito.
+    void (async () => {
+      await carregarSolicitacoes()
+    })()
+  }, [carregarSolicitacoes])
+
+  // Uma vaga confirmada em outra aba, ou uma solicitacao que venceu, some
+  // sozinha na proxima passada.
+  useEffect(() => {
+    const timer = window.setInterval(() => void carregarSolicitacoes(), 60_000)
+    return () => window.clearInterval(timer)
+  }, [carregarSolicitacoes])
   const meta = PAGE_META[tab]
   const tabs = role === 'owner' ? TABS : TABS.filter((item) => item.key !== 'admin')
 
@@ -218,7 +252,15 @@ export default function Home() {
                     <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
                   </span>
                   <span className="flex-1 text-left">{item.label}</span>
-                  {item.key === 'followups' && pendentes > 0 ? (
+                  {/* A Agenda usa vermelho porque a solicitacao tem prazo: a
+                      vaga fica reservada 24h e depois volta para a fila. */}
+                  {item.key === 'agenda' && solicitacoes.length > 0 ? (
+                    <span className={`min-w-6 rounded-full px-1.5 py-1 text-center text-[10px] font-extrabold ${
+                      active ? 'bg-[#081b2c] text-white' : 'bg-red-500 text-white'
+                    }`}>
+                      {solicitacoes.length}
+                    </span>
+                  ) : item.key === 'followups' && pendentes > 0 ? (
                     <span className={`min-w-6 rounded-full px-1.5 py-1 text-center text-[10px] font-extrabold ${
                       active ? 'bg-[#081b2c] text-white' : 'bg-[#df8e5f] text-white'
                     }`}>
@@ -321,7 +363,13 @@ export default function Home() {
           </div>
 
           <div key={tab} className="animate-enter">
-            {tab === 'dashboard' && <Dashboard patients={db.patients} />}
+            {tab === 'dashboard' && (
+              <Dashboard
+                patients={db.patients}
+                solicitacoes={solicitacoes}
+                onAbrirAgenda={() => setTab('agenda')}
+              />
+            )}
             {tab === 'followups' && (
               <Followups
                 patients={db.patients}
@@ -333,7 +381,9 @@ export default function Home() {
                 }}
               />
             )}
-            {tab === 'agenda' && <Agenda patients={db.patients} />}
+            {tab === 'agenda' && (
+              <Agenda patients={db.patients} onSolicitacoesMudaram={carregarSolicitacoes} />
+            )}
             {tab === 'conversas' && (
               <Conversations focoPatientId={conversaFoco} onCadastrarContato={cadastrarContato} />
             )}

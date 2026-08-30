@@ -66,7 +66,14 @@ function agruparPorDia(slots: string[], appointments: Appointment[]) {
   return [...dias.entries()].sort((a, b) => a[0].localeCompare(b[0]))
 }
 
-export default function Agenda({ patients }: { patients: Patient[] }) {
+export default function Agenda({
+  patients,
+  /** Avisa o Home para o contador do menu e o aviso da Visao geral acompanharem. */
+  onSolicitacoesMudaram,
+}: {
+  patients: Patient[]
+  onSolicitacoesMudaram?: () => void
+}) {
   const [aba, setAba] = useState<Aba>('calendario')
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [units, setUnits] = useState<Unit[]>([])
@@ -328,7 +335,7 @@ export default function Agenda({ patients }: { patients: Patient[] }) {
                                 void acao(
                                   () => confirmAppointment(item.id),
                                   'Consulta confirmada. A vaga deixou de ser provisória.',
-                                )
+                                ).then(() => onSolicitacoesMudaram?.())
                               }
                               className="shrink-0 rounded-lg bg-white/15 px-2.5 py-1 text-[9px] font-extrabold text-white transition hover:bg-white/25"
                             >
