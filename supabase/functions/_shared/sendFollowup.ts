@@ -200,6 +200,9 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
       patient_id: patient.id,
       followup_id: followup.id,
       direction: 'outbound',
+      // Envio do sistema, nao da equipe: o menu automatico usa esta marca
+      // para saber que ninguem de carne e osso esta na conversa.
+      automatic: true,
       message_type: 'template',
       template_name: settings.whatsapp_template_name,
       body: summary,
@@ -223,6 +226,9 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
       followup_id: followup.id,
       external_message_id: graphBody?.messages?.[0]?.id ?? null,
       direction: 'outbound',
+      // Envio do sistema, nao da equipe: o menu automatico usa esta marca
+      // para saber que ninguem de carne e osso esta na conversa.
+      automatic: true,
       message_type: 'template',
       template_name: settings.whatsapp_template_name,
       body: summary,

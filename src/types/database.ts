@@ -701,6 +701,7 @@ export type Database = {
       }
       whatsapp_messages: {
         Row: {
+          automatic: boolean
           body: string
           clinic_id: string
           conversation_id: string
@@ -721,6 +722,7 @@ export type Database = {
           template_name: string | null
         }
         Insert: {
+          automatic?: boolean
           body?: string
           clinic_id: string
           conversation_id: string
@@ -741,6 +743,7 @@ export type Database = {
           template_name?: string | null
         }
         Update: {
+          automatic?: boolean
           body?: string
           clinic_id?: string
           conversation_id?: string
