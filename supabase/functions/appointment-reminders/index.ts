@@ -112,13 +112,15 @@ Deno.serve(async (req) => {
 
       const { data: consultas, error: consultasError } = await admin
         .from('appointments')
-        .select('id,patient_id,starts_at,unit_id,clinic_units(name)')
+        .select('id,patient_id,starts_at,unit_id,contact_name,contact_phone,clinic_units(name)')
         .eq('clinic_id', clinica.clinic_id)
         .eq('status', 'scheduled')
         .is('reminder_sent_at', null)
         .gte('starts_at', inicio.toISOString())
         .lt('starts_at', fim.toISOString())
-        .not('patient_id', 'is', null)
+        // Consulta sem paciente vinculado tambem recebe lembrete: quem marcou
+        // sozinho pelo WhatsApp e justamente quem mais falta, e o telefone do
+        // contato basta para avisar.
         .order('starts_at', { ascending: true })
         .limit(200)
 
@@ -130,23 +132,54 @@ Deno.serve(async (req) => {
       resumo.candidatas += consultas?.length ?? 0
 
       for (const consulta of consultas ?? []) {
-        const { data: paciente } = await admin
-          .from('patients')
-          .select('id,name,phone,whatsapp_opt_in_at,whatsapp_opt_out_at')
-          .eq('id', consulta.patient_id)
-          .single()
+        const { data: paciente } = consulta.patient_id
+          ? await admin
+              .from('patients')
+              .select('id,name,phone,whatsapp_opt_out_at')
+              .eq('id', consulta.patient_id)
+              .maybeSingle()
+          : { data: null }
 
-        if (!paciente?.phone || paciente.whatsapp_opt_out_at || !paciente.whatsapp_opt_in_at) {
+        // Quem pediu para nao receber nada e respeitado sempre, e essa e a
+        // unica trava que sobrou. A exigencia de opt-in registrado saiu daqui:
+        // ela so era gravada no envio do acompanhamento de 30 dias, entao
+        // paciente novo com consulta na semana seguinte nunca recebia lembrete.
+        // Avisar alguem da propria consulta que ele marcou nao depende de
+        // consentimento de marketing.
+        if (paciente?.whatsapp_opt_out_at) {
           resumo.pulados += 1
-          detalhes.push({
-            appointmentId: consulta.id,
-            resultado: paciente?.whatsapp_opt_out_at ? 'opt-out' : 'sem consentimento',
-          })
+          detalhes.push({ appointmentId: consulta.id, resultado: 'opt-out' })
           continue
         }
 
-        const waId = toBrazilE164(paciente.phone)
+        const telefone = paciente?.phone || consulta.contact_phone || ''
+        const nomeParaMensagem =
+          paciente?.name || consulta.contact_name || 'paciente'
+
+        if (!telefone) {
+          resumo.pulados += 1
+          detalhes.push({ appointmentId: consulta.id, resultado: 'sem telefone' })
+          continue
+        }
+
+        const waId = toBrazilE164(telefone)
         const agora = new Date().toISOString()
+
+        // Quem nao tem cadastro tambem pode ter pedido para sair - nesse caso o
+        // "sair" fica gravado na conversa, e nao no paciente. Sem esta checagem
+        // o lembrete furaria justamente quem pediu silencio.
+        const { data: conversaAtual } = await admin
+          .from('whatsapp_conversations')
+          .select('status')
+          .eq('clinic_id', clinica.clinic_id)
+          .eq('wa_id', waId)
+          .maybeSingle()
+
+        if (conversaAtual?.status === 'opted_out') {
+          resumo.pulados += 1
+          detalhes.push({ appointmentId: consulta.id, resultado: 'opt-out' })
+          continue
+        }
         const { dataBR, hora } = formatarDataHora(consulta.starts_at, clinica.timezone)
         const unidade = (consulta.clinic_units as { name?: string } | null)?.name || 'a clínica'
 
@@ -155,10 +188,11 @@ Deno.serve(async (req) => {
           .upsert(
             {
               clinic_id: clinica.clinic_id,
-              patient_id: paciente.id,
+              patient_id: paciente?.id ?? null,
               wa_id: waId,
-              display_phone: paciente.phone,
-              status: 'open',
+              display_phone: telefone,
+              // status fica de fora: o padrao da coluna ja e 'open' para uma
+              // conversa nova, e forcar aqui reabriria quem estava resolvido.
               last_message_at: agora,
             },
             { onConflict: 'clinic_id,wa_id' },
@@ -190,7 +224,7 @@ Deno.serve(async (req) => {
                   {
                     type: 'body',
                     parameters: [
-                      { type: 'text', text: paciente.name },
+                      { type: 'text', text: nomeParaMensagem },
                       { type: 'text', text: dataBR },
                       { type: 'text', text: hora },
                       { type: 'text', text: unidade },
@@ -203,14 +237,14 @@ Deno.serve(async (req) => {
         )
 
         const corpo = await resposta.json()
-        const resumoTexto = `Lembrete de consulta em ${dataBR} às ${hora} (${unidade}) enviado para ${paciente.name}.`
+        const resumoTexto = `Lembrete de consulta em ${dataBR} às ${hora} (${unidade}) enviado para ${nomeParaMensagem}.`
 
         if (!resposta.ok) {
           const motivo = corpo?.error?.message || 'Meta recusou o envio.'
           await admin.from('whatsapp_messages').insert({
             clinic_id: clinica.clinic_id,
             conversation_id: conversa.id,
-            patient_id: paciente.id,
+            patient_id: paciente?.id ?? null,
             appointment_id: consulta.id,
             direction: 'outbound',
             automatic: true,
@@ -233,7 +267,7 @@ Deno.serve(async (req) => {
         await admin.from('whatsapp_messages').insert({
           clinic_id: clinica.clinic_id,
           conversation_id: conversa.id,
-          patient_id: paciente.id,
+          patient_id: paciente?.id ?? null,
           appointment_id: consulta.id,
           external_message_id: corpo?.messages?.[0]?.id ?? null,
           direction: 'outbound',
