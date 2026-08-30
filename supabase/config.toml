@@ -12,6 +12,10 @@ project_id = "central-cuidado-dev"
 # Disparo manual pela tela: exige sessao de usuario e checa RLS. Mantem o JWT.
 verify_jwt = true
 
+[functions.whatsapp-reply]
+# Resposta livre da equipe pela tela. Exige sessao de usuario e checa RLS.
+verify_jwt = true
+
 [functions.meta-webhook]
 # A Meta nao envia JWT. A funcao valida a assinatura com META_APP_SECRET.
 verify_jwt = false

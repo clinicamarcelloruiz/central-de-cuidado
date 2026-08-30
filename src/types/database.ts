@@ -101,6 +101,8 @@ export type Database = {
           schedule_min_notice_hours: number
           schedule_slot_minutes: number
           appointment_reminder_enabled: boolean
+          whatsapp_autoreply_enabled: boolean
+          whatsapp_autoreply_text: string
           appointment_reminder_days: number
           whatsapp_reminder_template_name: string
           template_d30: string
@@ -118,6 +120,8 @@ export type Database = {
           schedule_min_notice_hours?: number
           schedule_slot_minutes?: number
           appointment_reminder_enabled?: boolean
+          whatsapp_autoreply_enabled?: boolean
+          whatsapp_autoreply_text?: string
           appointment_reminder_days?: number
           whatsapp_reminder_template_name?: string
           template_d30?: string
@@ -135,6 +139,8 @@ export type Database = {
           schedule_min_notice_hours?: number
           schedule_slot_minutes?: number
           appointment_reminder_enabled?: boolean
+          whatsapp_autoreply_enabled?: boolean
+          whatsapp_autoreply_text?: string
           appointment_reminder_days?: number
           whatsapp_reminder_template_name?: string
           template_d30?: string
@@ -617,6 +623,7 @@ export type Database = {
           id: string
           last_message_at: string | null
           needs_attention: boolean
+          autoreply_sent_at: string | null
           patient_id: string | null
           status: string
           unread_count: number
@@ -630,6 +637,7 @@ export type Database = {
           id?: string
           last_message_at?: string | null
           needs_attention?: boolean
+          autoreply_sent_at?: string | null
           patient_id?: string | null
           status?: string
           unread_count?: number
@@ -643,6 +651,7 @@ export type Database = {
           id?: string
           last_message_at?: string | null
           needs_attention?: boolean
+          autoreply_sent_at?: string | null
           patient_id?: string | null
           status?: string
           unread_count?: number

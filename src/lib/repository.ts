@@ -706,6 +706,74 @@ export async function markConversationSeen(conversationId: string) {
   if (error) fail(error)
 }
 
+export interface AutoReplySettings {
+  enabled: boolean
+  text: string
+}
+
+/** Resposta automatica enviada a quem escreve pela primeira vez. */
+export async function getAutoReply(clinicId: string): Promise<AutoReplySettings> {
+  const { data, error } = await supabase
+    .from('clinic_settings')
+    .select('whatsapp_autoreply_enabled,whatsapp_autoreply_text')
+    .eq('clinic_id', clinicId)
+    .maybeSingle()
+  if (error) fail(error)
+  return {
+    enabled: data?.whatsapp_autoreply_enabled ?? false,
+    text: data?.whatsapp_autoreply_text ?? '',
+  }
+}
+
+export async function saveAutoReply(clinicId: string, prefs: AutoReplySettings) {
+  const { error } = await supabase
+    .from('clinic_settings')
+    .update({
+      whatsapp_autoreply_enabled: prefs.enabled,
+      whatsapp_autoreply_text: prefs.text,
+    })
+    .eq('clinic_id', clinicId)
+  if (error) fail(error)
+}
+
+/**
+ * Ate quando a equipe pode responder em texto livre nesta conversa.
+ * A Meta so permite isso por 24h depois da ultima mensagem do paciente; depois
+ * disso, apenas modelo aprovado. Devolve null quando o paciente nunca escreveu.
+ */
+export async function getReplyWindow(conversationId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('whatsapp_messages')
+    .select('created_at')
+    .eq('conversation_id', conversationId)
+    .eq('direction', 'inbound')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) fail(error)
+  if (!data) return null
+  return new Date(new Date(data.created_at).getTime() + 24 * 3600 * 1000).toISOString()
+}
+
+/** Envia uma resposta escrita pela equipe. O servidor revalida a janela de 24h. */
+export async function sendConversationReply(conversationId: string, text: string) {
+  const { data, error } = await supabase.functions.invoke('whatsapp-reply', {
+    body: { conversationId, text },
+  })
+  if (error) {
+    // O corpo da resposta traz a mensagem em portugues; o error do invoke traz
+    // so "non-2xx status code", que nao ajuda ninguem na tela.
+    const detalhe =
+      (error as { context?: { body?: { error?: string } } }).context?.body?.error ??
+      (data as { error?: string } | null)?.error
+    throw new Error(detalhe || 'Não foi possível enviar a mensagem.')
+  }
+  if ((data as { error?: string } | null)?.error) {
+    throw new Error((data as { error: string }).error)
+  }
+}
+
 /** Marca a conversa como resolvida sem apagar o historico. */
 export async function resolveConversation(conversationId: string) {
   const { error } = await supabase

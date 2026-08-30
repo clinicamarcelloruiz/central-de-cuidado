@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
 
         const { data: settings } = await admin
           .from('clinic_settings')
-          .select('clinic_id')
+          .select('clinic_id,whatsapp_autoreply_enabled,whatsapp_autoreply_text')
           .eq('whatsapp_phone_number_id', phoneNumberId)
           .maybeSingle()
         if (!settings?.clinic_id) continue
@@ -112,12 +112,24 @@ Deno.serve(async (req) => {
           const confirma = reply === 'confirmar' || reply === 'confirmo' || reply === '1'
           const remarca =
             reply === 'reagendar' || reply === 'remarcar' || reply === 'reagendar consulta' || reply === '2'
-          // Remarcar exige alguem da equipe: o paciente pediu, mas ninguem
-          // escolheu o novo horario ainda.
-          const needsAttention = reply === 'preciso de ajuda' || remarca
+          const cancela =
+            reply === 'cancelar' || reply === 'cancelo' || reply === 'cancelar consulta' || reply === '3'
+          // Remarcar e cancelar exigem alguem da equipe: no primeiro caso
+          // ninguem escolheu o novo horario ainda; no segundo a agenda abriu um
+          // buraco que a recepcao pode querer preencher.
+          const needsAttention = reply === 'preciso de ajuda' || remarca || cancela
           const receivedAt = message.timestamp
             ? new Date(Number(message.timestamp) * 1000).toISOString()
             : new Date().toISOString()
+
+          // Estado da conversa ANTES de gravar esta mensagem. E o que diz se a
+          // pessoa e nova: depois do upsert a linha ja existe sempre.
+          const { data: conversaAnterior } = await admin
+            .from('whatsapp_conversations')
+            .select('id,autoreply_sent_at')
+            .eq('clinic_id', clinicId)
+            .eq('wa_id', waId)
+            .maybeSingle()
 
           const { data: conversation, error: conversationError } = await admin
             .from('whatsapp_conversations')
@@ -157,9 +169,80 @@ Deno.serve(async (req) => {
             await admin.from('patients').update({ whatsapp_opt_out_at: receivedAt }).eq('id', patient.id)
           }
 
-          // Confirmacao ou pedido de remarcacao referem-se sempre a ultima
-          // consulta sobre a qual mandamos lembrete nesta conversa.
-          if (patient?.id && (confirma || remarca)) {
+          // ---- Resposta automatica de primeiro contato ----
+          //
+          // Tres travas, e todas importam:
+          //  - so para quem a clinica nunca respondeu nesta conversa;
+          //  - nunca para quem esta respondendo acompanhamento ou lembrete,
+          //    porque receber tabela de precos depois de "Estou bem" e pessimo;
+          //  - nunca para quem pediu para sair.
+          const jaFalamosAntes = Boolean(conversaAnterior?.autoreply_sent_at)
+          if (
+            settings.whatsapp_autoreply_enabled &&
+            settings.whatsapp_autoreply_text?.trim() &&
+            !jaFalamosAntes &&
+            !optedOut
+          ) {
+            const { count: enviosAnteriores } = await admin
+              .from('whatsapp_messages')
+              .select('id', { count: 'exact', head: true })
+              .eq('conversation_id', conversation.id)
+              .eq('direction', 'outbound')
+
+            // Qualquer envio anterior nossa (acompanhamento, lembrete, resposta
+            // da equipe) significa que a pessoa nao esta chegando do zero.
+            if (!enviosAnteriores) {
+              const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
+              if (token) {
+                const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
+                const texto = settings.whatsapp_autoreply_text.trim()
+                const enviadoEm = new Date().toISOString()
+
+                // Texto livre e permitido: a mensagem que acabou de chegar abriu
+                // a janela de 24h, entao nao precisa de modelo aprovado.
+                const envio = await fetch(
+                  `https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`,
+                  {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      messaging_product: 'whatsapp',
+                      recipient_type: 'individual',
+                      to: waId,
+                      type: 'text',
+                      text: { preview_url: false, body: texto },
+                    }),
+                  },
+                )
+                const corpoEnvio = await envio.json()
+
+                await admin.from('whatsapp_messages').insert({
+                  clinic_id: clinicId,
+                  conversation_id: conversation.id,
+                  patient_id: patient?.id ?? null,
+                  external_message_id: envio.ok ? corpoEnvio?.messages?.[0]?.id ?? null : null,
+                  direction: 'outbound',
+                  message_type: 'text',
+                  body: texto,
+                  status: envio.ok ? 'accepted' : 'failed',
+                  sent_at: envio.ok ? enviadoEm : null,
+                  failed_at: envio.ok ? null : enviadoEm,
+                  failure_reason: envio.ok ? null : corpoEnvio?.error?.message ?? 'Meta recusou o envio.',
+                })
+
+                if (envio.ok) {
+                  await admin
+                    .from('whatsapp_conversations')
+                    .update({ autoreply_sent_at: enviadoEm })
+                    .eq('id', conversation.id)
+                }
+              }
+            }
+          }
+
+          // Confirmar, remarcar ou cancelar referem-se sempre a ultima consulta
+          // sobre a qual mandamos lembrete nesta conversa.
+          if (patient?.id && (confirma || remarca || cancela)) {
             const { data: ultimoLembrete } = await admin
               .from('whatsapp_messages')
               .select('appointment_id')
@@ -171,13 +254,17 @@ Deno.serve(async (req) => {
               .maybeSingle()
 
             if (ultimoLembrete?.appointment_id) {
+              // Cancelar muda o status: o indice unico de horario ignora
+              // canceladas, entao a vaga volta a aparecer como livre na hora.
+              const mudanca = confirma
+                ? { confirmed_at: receivedAt, reschedule_requested_at: null }
+                : cancela
+                  ? { status: 'cancelled', cancelled_at: receivedAt, confirmed_at: null }
+                  : { reschedule_requested_at: receivedAt, confirmed_at: null }
+
               await admin
                 .from('appointments')
-                .update(
-                  confirma
-                    ? { confirmed_at: receivedAt, reschedule_requested_at: null }
-                    : { reschedule_requested_at: receivedAt, confirmed_at: null },
-                )
+                .update(mudanca)
                 .eq('id', ultimoLembrete.appointment_id)
                 .eq('status', 'scheduled')
             }

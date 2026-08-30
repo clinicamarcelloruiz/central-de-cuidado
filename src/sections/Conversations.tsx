@@ -6,14 +6,20 @@ import {
   MessageSquareText,
   RefreshCw,
   Send,
+  Sparkles,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import {
+  getAutoReply,
   getCurrentMembership,
   listConversationMessages,
   listConversations,
+  getReplyWindow,
   markConversationSeen,
   resolveConversation,
+  saveAutoReply,
+  sendConversationReply,
+  type AutoReplySettings,
   type Conversation,
   type ConversationMessage,
 } from '@/lib/repository'
@@ -47,6 +53,24 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
   const [error, setError] = useState('')
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [aoVivo, setAoVivo] = useState(false)
+  const [resposta, setResposta] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  // Instante em que a janela de 24h da Meta fecha para a conversa aberta.
+  const [janelaAte, setJanelaAte] = useState<string | null>(null)
+  // Recalculado a cada minuto: sem isso a caixa continuaria habilitada depois
+  // de a janela vencer com a tela aberta.
+  const [agora, setAgora] = useState(() => Date.now())
+  const [autoReply, setAutoReply] = useState<AutoReplySettings>({ enabled: false, text: '' })
+  const [autoReplyAberto, setAutoReplyAberto] = useState(false)
+  const [salvandoAuto, setSalvandoAuto] = useState(false)
+  const [avisoAuto, setAvisoAuto] = useState('')
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setAgora(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const janelaAberta = janelaAte !== null && new Date(janelaAte).getTime() > agora
 
   // A assinatura de tempo real e criada uma vez so. Sem estas refs ela ficaria
   // presa ao valor de selectedId do primeiro render e nunca saberia qual
@@ -61,7 +85,12 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
       const membership = await getCurrentMembership()
       if (!membership) throw new Error('Não foi possível identificar a clínica do seu usuário.')
       setClinicId(membership.clinicId)
-      setConversations(await listConversations(membership.clinicId))
+      const [lista, automatica] = await Promise.all([
+        listConversations(membership.clinicId),
+        getAutoReply(membership.clinicId),
+      ])
+      setConversations(lista)
+      setAutoReply(automatica)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Não foi possível carregar as conversas.')
     } finally {
@@ -106,6 +135,9 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
           const aberta = selectedIdRef.current
           if (aberta) {
             void listConversationMessages(aberta).then(setMessages).catch(() => {})
+            // Se quem escreveu foi o paciente, a janela de 24h reabriu: sem
+            // isto a caixa continuaria bloqueada ate alguem trocar de conversa.
+            void getReplyWindow(aberta).then(setJanelaAte).catch(() => {})
           }
           // A lista lateral sempre reflete a ultima mensagem e o contador.
           void load(true)
@@ -126,8 +158,15 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
   async function openConversation(conversation: Conversation) {
     setSelectedId(conversation.id)
     setLoadingMessages(true)
+    setResposta('')
+    setJanelaAte(null)
     try {
-      setMessages(await listConversationMessages(conversation.id))
+      const [historico, janela] = await Promise.all([
+        listConversationMessages(conversation.id),
+        getReplyWindow(conversation.id),
+      ])
+      setMessages(historico)
+      setJanelaAte(janela)
       if (conversation.unreadCount > 0 || conversation.needsAttention) {
         await markConversationSeen(conversation.id)
         setConversations((current) =>
@@ -140,6 +179,41 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
       setError(cause instanceof Error ? cause.message : 'Não foi possível abrir a conversa.')
     } finally {
       setLoadingMessages(false)
+    }
+  }
+
+  async function enviarResposta() {
+    const texto = resposta.trim()
+    if (!selectedId || !texto || enviando) return
+    setEnviando(true)
+    setError('')
+    try {
+      await sendConversationReply(selectedId, texto)
+      setResposta('')
+      // O tempo real ja traz a mensagem nova, mas recarregar aqui evita a
+      // sensacao de "sumiu" caso a assinatura esteja fora do ar.
+      setMessages(await listConversationMessages(selectedId))
+      void load(true)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível enviar a mensagem.')
+      // Se a recusa foi por janela fechada, a tela precisa refletir isso.
+      setJanelaAte(await getReplyWindow(selectedId).catch(() => null))
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  async function salvarAutoReply() {
+    if (!clinicId || salvandoAuto) return
+    setSalvandoAuto(true)
+    setAvisoAuto('')
+    try {
+      await saveAutoReply(clinicId, autoReply)
+      setAvisoAuto('Resposta automática salva.')
+    } catch (cause) {
+      setAvisoAuto(cause instanceof Error ? cause.message : 'Não foi possível salvar.')
+    } finally {
+      setSalvandoAuto(false)
     }
   }
 
@@ -186,6 +260,71 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
             : `${attention.length} pacientes responderam e estão aguardando retorno da equipe.`}
         </div>
       )}
+
+      {/* Resposta automatica de primeiro contato. Fica aqui, e nao numa tela de
+          configuracao escondida, porque quem cuida das conversas e quem sabe se
+          o texto esta certo. */}
+      <div className="surface-card rounded-[18px] p-3">
+        <button
+          type="button"
+          onClick={() => setAutoReplyAberto((v) => !v)}
+          className="flex w-full items-center justify-between gap-2 text-left"
+        >
+          <span className="flex items-center gap-2 text-[11px] font-extrabold text-[#081b2c]">
+            <Sparkles className="h-3.5 w-3.5 text-[#dc8e5f]" />
+            Resposta automática para quem escreve pela primeira vez
+          </span>
+          <span
+            className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
+              autoReply.enabled
+                ? 'bg-[#eef3f2] text-[#557f75]'
+                : 'bg-slate-100 text-slate-500'
+            }`}
+          >
+            {autoReply.enabled ? 'Ligada' : 'Desligada'}
+          </span>
+        </button>
+
+        {autoReplyAberto && (
+          <div className="mt-3 border-t border-[#081b2c]/[0.07] pt-3">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={autoReply.enabled}
+                onChange={(e) => setAutoReply({ ...autoReply, enabled: e.target.checked })}
+                className="h-3.5 w-3.5 accent-[#dc8e5f]"
+              />
+              <span className="text-[11px] font-bold text-[#081b2c]">
+                Responder automaticamente contatos novos
+              </span>
+            </label>
+            <textarea
+              value={autoReply.text}
+              onChange={(e) => setAutoReply({ ...autoReply, text: e.target.value })}
+              rows={12}
+              className="mt-2 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
+            />
+            <p className="mt-2 text-[10px] text-slate-500">
+              Enviada uma única vez por contato, e apenas para quem nunca recebeu nada da
+              clínica. Quem está respondendo acompanhamento ou lembrete de consulta não
+              recebe este texto.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void salvarAutoReply()}
+                disabled={salvandoAuto}
+                className="rounded-xl bg-[#081b2c] px-4 py-2 text-[10px] font-extrabold text-white transition hover:bg-[#102d47] disabled:opacity-40"
+              >
+                {salvandoAuto ? 'Salvando...' : 'Salvar resposta automática'}
+              </button>
+              {avisoAuto && (
+                <span className="text-[10px] font-bold text-[#557f75]">{avisoAuto}</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="flex items-center justify-between">
         <p className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
@@ -344,6 +483,66 @@ export default function Conversations({ focoPatientId }: { focoPatientId?: strin
                     })}
                   </div>
                 )}
+
+                {/* Caixa de resposta. A Meta so aceita texto livre por 24h
+                    depois da ultima mensagem do paciente, entao o prazo fica a
+                    vista e a caixa se desliga sozinha quando fecha - senao a
+                    equipe digita, envia e a mensagem falha sem explicacao. */}
+                <div className="mt-4 border-t border-[#081b2c]/[0.07] pt-3">
+                  {janelaAberta ? (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-[10px] font-bold text-[#557f75]">
+                          Pode responder livremente até {formatWhen(janelaAte)}
+                        </p>
+                        <p className="text-[10px] font-semibold text-slate-400">
+                          {resposta.length}/4096
+                        </p>
+                      </div>
+                      <textarea
+                        value={resposta}
+                        onChange={(e) => setResposta(e.target.value)}
+                        onKeyDown={(e) => {
+                          // Enter envia, Shift+Enter quebra linha.
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            void enviarResposta()
+                          }
+                        }}
+                        rows={3}
+                        maxLength={4096}
+                        placeholder="Escreva sua resposta..."
+                        className="mt-2 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[12px] leading-relaxed outline-none focus:border-[#dc8e5f]"
+                      />
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-[9px] font-semibold text-slate-400">
+                          Enter envia · Shift+Enter quebra linha
+                        </p>
+                        <button
+                          type="button"
+                          disabled={enviando || !resposta.trim()}
+                          onClick={() => void enviarResposta()}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-[#081b2c] px-4 py-2 text-[10px] font-extrabold text-white transition hover:bg-[#102d47] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          {enviando ? 'Enviando...' : 'Enviar'}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-[14px] border border-[#dc8e5f]/30 bg-[#fdf5ef] px-4 py-3">
+                      <p className="text-[11px] font-extrabold text-[#8a4b1d]">
+                        {janelaAte
+                          ? `A janela de resposta fechou em ${formatWhen(janelaAte)}`
+                          : 'Este contato ainda não escreveu para a clínica'}
+                      </p>
+                      <p className="mt-1 text-[10px] font-semibold text-[#8a4b1d]/80">
+                        A Meta só permite texto livre nas 24 horas seguintes à mensagem do
+                        paciente. Para retomar agora, é preciso enviar um modelo aprovado.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>
