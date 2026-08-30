@@ -135,20 +135,36 @@ Deno.serve(async (req) => {
           // que deixava o numero ambiguo em toda conversa parada. Amarrar a
           // leitura ao que acabamos de perguntar acaba com a duvida.
           let respondendoEnvioNosso = false
-          // Alguem escreveu para esta pessoa ha pouco. Sem etapa aberta, isso
-          // quase sempre significa conversa humana em andamento - e o robo nao
-          // pode entrar no meio dela oferecendo menu.
-          let falamosRecentemente = false
+          // Alguem da EQUIPE escreveu para esta pessoa ha pouco: conversa humana
+          // em andamento, e o robo nao entra no meio dela oferecendo menu.
+          //
+          // A pergunta precisa ser sobre gente. Ate 30/08/2026 ela era so "saiu
+          // alguma mensagem daqui?", e o robo se calava por causa da propria
+          // voz: respondeu 11:36, a pessoa escreveu "Oi" as 14:28 e nao recebeu
+          // nada.
+          let equipeFalouRecentemente = false
           if (conversaAnterior?.id) {
-            const { data: ultimoNosso } = await admin
-              .from('whatsapp_messages')
-              .select('followup_id,appointment_id,created_at')
-              .eq('conversation_id', conversaAnterior.id)
-              .eq('direction', 'outbound')
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle()
+            const [ultimoNossoResult, ultimoHumanoResult] = await Promise.all([
+              admin
+                .from('whatsapp_messages')
+                .select('followup_id,appointment_id,created_at')
+                .eq('conversation_id', conversaAnterior.id)
+                .eq('direction', 'outbound')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle(),
+              admin
+                .from('whatsapp_messages')
+                .select('created_at')
+                .eq('conversation_id', conversaAnterior.id)
+                .eq('direction', 'outbound')
+                .eq('automatic', false)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle(),
+            ])
 
+            const ultimoNosso = ultimoNossoResult.data
             const desdeOUltimo = ultimoNosso?.created_at
               ? Date.now() - new Date(ultimoNosso.created_at).getTime()
               : Number.POSITIVE_INFINITY
@@ -157,7 +173,11 @@ Deno.serve(async (req) => {
               desdeOUltimo < 48 * 3600 * 1000 &&
                 (ultimoNosso?.followup_id || ultimoNosso?.appointment_id),
             )
-            falamosRecentemente = desdeOUltimo < 12 * 3600 * 1000
+
+            const humanoEm = ultimoHumanoResult.data?.created_at
+            equipeFalouRecentemente = Boolean(
+              humanoEm && Date.now() - new Date(humanoEm).getTime() < 12 * 3600 * 1000,
+            )
           }
 
           const body = messageBody(message)
@@ -280,6 +300,9 @@ Deno.serve(async (req) => {
               direction: 'outbound',
               message_type: 'text',
               body: texto,
+              // Quem falou foi o robo. E o que impede ele de se confundir com a
+              // secretaria e ficar mudo depois da propria mensagem.
+              automatic: true,
               status: envio.ok ? 'accepted' : 'failed',
               sent_at: envio.ok ? enviadoEm : null,
               failed_at: envio.ok ? null : enviadoEm,
@@ -304,7 +327,7 @@ Deno.serve(async (req) => {
               estadoAtual: (conversaAnterior?.booking_state ?? null) as Estado | null,
               opcoesAtuais: conversaAnterior?.booking_options ?? null,
               unidadeEmAndamento: conversaAnterior?.booking_unit_id ?? null,
-              podeIniciarMenu: !respondendoEnvioNosso && !falamosRecentemente,
+              podeIniciarMenu: !respondendoEnvioNosso && !equipeFalouRecentemente,
               aguardandoEquipe,
               texto: body,
               telefone: waId,
