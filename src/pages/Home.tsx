@@ -117,7 +117,9 @@ export default function Home() {
   // Paciente cuja conversa deve abrir ao entrar em Respostas pelo atalho.
   const [conversaFoco, setConversaFoco] = useState<string | null>(null)
   const [newPatientSignal, setNewPatientSignal] = useState(0)
-  const [preCadastro, setPreCadastro] = useState<{ nome: string; telefone: string } | null>(null)
+  const [preCadastro, setPreCadastro] = useState<
+    { nome: string; telefone: string; voltarPara?: Tab } | null
+  >(null)
   const pendentes = dueCount(db.patients)
   const [solicitacoes, setSolicitacoes] = useState<PendingRequest[]>([])
 
@@ -158,11 +160,14 @@ export default function Home() {
   }
 
   /**
-   * Cadastro que comeca de uma conversa do WhatsApp. Leva nome e telefone
-   * prontos para a tela de pacientes - a equipe so confere e completa.
+   * Cadastro que comeca de uma conversa ou de uma consulta. Leva nome e
+   * telefone prontos para a tela de pacientes - a equipe so confere e completa.
+   *
+   * `voltarPara` diz de onde a pessoa veio: quem cadastra a partir da agenda
+   * quer seguir organizando a agenda, e nao cair no prontuario.
    */
-  function cadastrarContato(dados: { nome: string; telefone: string }) {
-    setPreCadastro(dados)
+  function cadastrarContato(dados: { nome: string; telefone: string }, voltarPara?: Tab) {
+    setPreCadastro({ ...dados, voltarPara })
     setTab('pacientes')
     setNewPatientSignal((value) => value + 1)
   }
@@ -382,7 +387,11 @@ export default function Home() {
               />
             )}
             {tab === 'agenda' && (
-              <Agenda patients={db.patients} onSolicitacoesMudaram={carregarSolicitacoes} />
+              <Agenda
+                patients={db.patients}
+                onSolicitacoesMudaram={carregarSolicitacoes}
+                onCadastrarContato={(dados) => cadastrarContato(dados, 'agenda')}
+              />
             )}
             {tab === 'conversas' && (
               <Conversations focoPatientId={conversaFoco} onCadastrarContato={cadastrarContato} />
@@ -398,6 +407,14 @@ export default function Home() {
                 updateConsultation={updateConsultation}
                 openCreateSignal={newPatientSignal}
                 preCadastro={preCadastro}
+                onPacienteCriado={() => {
+                  const destino = preCadastro?.voltarPara
+                  setPreCadastro(null)
+                  if (destino) {
+                    setTab(destino)
+                    void carregarSolicitacoes()
+                  }
+                }}
               />
             )}
             {tab === 'config' && (
