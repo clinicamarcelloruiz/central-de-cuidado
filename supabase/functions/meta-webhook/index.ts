@@ -402,7 +402,13 @@ Deno.serve(async (req) => {
 
           // Confirmar, remarcar ou cancelar referem-se sempre a ultima consulta
           // sobre a qual mandamos lembrete nesta conversa.
-          if (patient?.id && respondeuLembrete) {
+          //
+          // Nao exige paciente cadastrado. Quem manda aqui e a consulta: o
+          // lembrete passou a sair tambem para quem marcou sem cadastro, e
+          // exigir cadastro para LER a resposta fazia a confirmacao sumir em
+          // silencio. Foi o que aconteceu em 31/08/2026 - o paciente confirmou
+          // as 10:00 e so foi cadastrado depois.
+          if (respondeuLembrete) {
             const { data: ultimoLembrete } = await admin
               .from('whatsapp_messages')
               .select('appointment_id')

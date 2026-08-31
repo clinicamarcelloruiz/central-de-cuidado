@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   Building2,
+  Check,
   CalendarOff,
   CalendarPlus,
   Clock,
@@ -437,6 +438,25 @@ export default function Agenda({
                               {hora(item.startsAt)} · {item.patientName}
                               {!item.confirmedByClinic && ' · AGUARDANDO CONFIRMAÇÃO'}
                             </p>
+                            {/* O paciente respondeu ao lembrete. Ate 31/08/2026
+                                isso ficava so no banco: a recepcao nao tinha
+                                como saber quem tinha confirmado presenca. */}
+                            {item.confirmedAt && (
+                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#3fa88a] px-2 py-0.5 text-[9px] font-extrabold text-white">
+                                <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                                Paciente confirmou presença
+                              </span>
+                            )}
+                            {item.rescheduleRequestedAt && !item.confirmedAt && (
+                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#dc8e5f] px-2 py-0.5 text-[9px] font-extrabold text-white">
+                                Pediu para remarcar
+                              </span>
+                            )}
+                            {!item.confirmedAt && !item.rescheduleRequestedAt && item.reminderSentAt && (
+                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-extrabold text-white/70">
+                                Lembrete enviado, sem resposta
+                              </span>
+                            )}
                             <p className="text-[9px] font-bold text-white/60">
                               {item.confirmedByClinic
                                 ? [
