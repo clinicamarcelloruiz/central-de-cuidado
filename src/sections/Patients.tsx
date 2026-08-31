@@ -28,6 +28,64 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 
+/**
+ * Sugere o sexo pelo primeiro nome.
+ *
+ * Regra de terminacao, que da conta da maioria dos nomes brasileiros, mais uma
+ * lista curta para o que a regra erraria ou nao alcancaria.
+ *
+ * Devolve null quando nao ha confianca, e nesse caso o campo fica como estava.
+ * Chutar aqui e pior do que deixar a pessoa escolher: sexo entra no calculo de
+ * percentil de crescimento, que e metade de uma consulta de gastropediatria.
+ */
+const NOME_FEMININO = new Set([
+  'beatriz', 'iris', 'isis', 'ester', 'esther', 'raquel', 'rachel', 'isabel', 'ingrid',
+  'karen', 'karin', 'carmen', 'ruth', 'miriam', 'noemi', 'ellen', 'helen', 'nicole',
+  'alice', 'denise', 'thais', 'tais', 'lais', 'ines', 'mercedes', 'jasmim', 'yasmin',
+  'esther', 'lorena', 'agnes', 'sol',
+])
+const NOME_MASCULINO = new Set([
+  'luca', 'nicola', 'noa', 'gabriel', 'rafael', 'miguel', 'daniel', 'samuel', 'ismael',
+  'israel', 'joel', 'emanuel', 'manuel', 'matheus', 'mateus', 'lucas', 'nicolas', 'davi',
+  'david', 'levi', 'vinicius', 'anderson', 'jefferson', 'wesley', 'kaique', 'felipe',
+  'alexandre', 'andre', 'vicente', 'henrique', 'jorge', 'enzo', 'ravi', 'yuri', 'igor',
+  'heitor', 'arthur', 'artur', 'benjamin', 'bernardo', 'joao', 'luiz', 'luis', 'thomas',
+])
+
+function sexoPeloNome(nomeCompleto: string): 'F' | 'M' | null {
+  const primeiro = nomeCompleto
+    .trim()
+    .split(/\s+/)[0]
+    ?.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+  if (!primeiro || primeiro.length < 3) return null
+
+  if (NOME_FEMININO.has(primeiro)) return 'F'
+  if (NOME_MASCULINO.has(primeiro)) return 'M'
+
+  const fim = primeiro.at(-1)
+  if (fim === 'a') return 'F'
+  if (fim === 'o') return 'M'
+  return null
+}
+
+/**
+ * Casa o nome da unidade da agenda com a opcao do cadastro.
+ *
+ * Desde 31/08/2026 as duas listas usam a mesma grafia, entao a comparacao
+ * exata bastaria. A tolerancia a acento e pontuacao fica como rede: unidade
+ * cadastrada a mao na agenda pode sair com hifen ou sem acento, e e melhor
+ * casar mesmo assim do que deixar o campo em branco sem explicar por que.
+ */
+function unidadeEquivalente(nomeDaAgenda: string): string | null {
+  const limpar = (v: string) =>
+    v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/gi, ' ').trim().toLowerCase()
+  const alvo = limpar(nomeDaAgenda)
+  if (!alvo) return null
+  return UNIDADES.find((opcao) => limpar(opcao) === alvo) ?? null
+}
+
 function emptyDraft(): PatientDraft {
   return {
     nome: '',
@@ -106,7 +164,14 @@ interface Props {
   updateConsultation: (patientId: string, consultationId: string, draft: ConsultationDraft) => Promise<void>
   openCreateSignal?: number
   /** Nome e telefone trazidos de uma conversa ou consulta, para adiantar o cadastro. */
-  preCadastro?: { nome: string; telefone: string } | null
+  preCadastro?: {
+    nome: string
+    telefone: string
+    /** Data da consulta que originou o cadastro, quando veio da agenda. */
+    dataConsulta?: string
+    /** Nome da unidade da consulta, como aparece na agenda. */
+    unidade?: string
+  } | null
   /**
    * Chamado depois de salvar um cadastro que veio de outra tela. Quando existe,
    * o prontuario NAO abre sozinho: quem veio da agenda quer voltar para a
@@ -142,15 +207,28 @@ export default function Patients({
   const [saving, setSaving] = useState(false)
   const [recordPatientId, setRecordPatientId] = useState<string | null>(null)
   const [startConsultationPatientId, setStartConsultationPatientId] = useState<string | null>(null)
+  // Verdadeiro quando o sexo veio de palpite pelo nome, e nao de escolha da
+  // equipe. So serve para avisar na tela que aquilo precisa de conferencia.
+  const [sexoSugerido, setSexoSugerido] = useState(false)
 
   useEffect(() => {
     if (openCreateSignal <= 0) return
     setEditingId(null)
-    // preCadastro so preenche nome e telefone; o resto do formulario continua
-    // em branco de proposito, para ninguem sair salvando dado presumido.
-    setForm({ ...emptyDraft(), ...(preCadastro
-      ? { nome: preCadastro.nome, telefone: preCadastro.telefone }
-      : {}) })
+    // O que vem da conversa ou da consulta e preenchido; o resto do formulario
+    // continua em branco de proposito, para ninguem salvar dado presumido.
+    const sugerido = preCadastro
+      ? {
+          nome: preCadastro.nome,
+          telefone: preCadastro.telefone,
+          ...(preCadastro.dataConsulta ? { dataConsulta: preCadastro.dataConsulta } : {}),
+          ...(preCadastro.unidade && unidadeEquivalente(preCadastro.unidade)
+            ? { unidade: unidadeEquivalente(preCadastro.unidade)! }
+            : {}),
+          ...((sexoPeloNome(preCadastro.nome) && { sexo: sexoPeloNome(preCadastro.nome)! }) || {}),
+        }
+      : {}
+    setForm({ ...emptyDraft(), ...sugerido })
+    setSexoSugerido(Boolean(preCadastro?.nome && sexoPeloNome(preCadastro.nome)))
     setError('')
     setFormOpen(true)
     // preCadastro fica fora das dependencias: quem manda abrir o formulario e o
@@ -211,6 +289,7 @@ export default function Patients({
 
   function createNew() {
     setEditingId(null)
+    setSexoSugerido(false)
     setForm(emptyDraft())
     setError('')
     setFormOpen(true)
@@ -218,6 +297,7 @@ export default function Patients({
 
   function editRegistration(patient: Patient) {
     setEditingId(patient.id)
+    setSexoSugerido(false)
     setForm({
       nome: patient.nome,
       responsavel: patient.responsavel,
@@ -640,11 +720,24 @@ export default function Patients({
                 <input type="date" className={inputClass} value={form.nascimento} onChange={(event) => set('nascimento', event.target.value)} />
               </Field>
               <Field label="Sexo">
-                <select className={inputClass} value={form.sexo} onChange={(event) => set('sexo', event.target.value as PatientDraft['sexo'])}>
+                <select
+                  className={inputClass}
+                  value={form.sexo}
+                  onChange={(event) => {
+                    // Escolha da equipe manda: some o aviso de sugestao.
+                    setSexoSugerido(false)
+                    set('sexo', event.target.value as PatientDraft['sexo'])
+                  }}
+                >
                   <option value="F">Feminino</option>
                   <option value="M">Masculino</option>
                   <option value="O">Outro / não informado</option>
                 </select>
+                {sexoSugerido && (
+                  <span className="mt-1 block text-[10px] font-semibold text-[#8a4b1d]">
+                    Sugerido pelo nome — confira antes de salvar.
+                  </span>
+                )}
               </Field>
             </div>
 

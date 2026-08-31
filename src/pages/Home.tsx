@@ -118,7 +118,13 @@ export default function Home() {
   const [conversaFoco, setConversaFoco] = useState<string | null>(null)
   const [newPatientSignal, setNewPatientSignal] = useState(0)
   const [preCadastro, setPreCadastro] = useState<
-    { nome: string; telefone: string; voltarPara?: Tab } | null
+    {
+      nome: string
+      telefone: string
+      dataConsulta?: string
+      unidade?: string
+      voltarPara?: Tab
+    } | null
   >(null)
   const pendentes = dueCount(db.patients)
   const [solicitacoes, setSolicitacoes] = useState<PendingRequest[]>([])
@@ -166,7 +172,10 @@ export default function Home() {
    * `voltarPara` diz de onde a pessoa veio: quem cadastra a partir da agenda
    * quer seguir organizando a agenda, e nao cair no prontuario.
    */
-  function cadastrarContato(dados: { nome: string; telefone: string }, voltarPara?: Tab) {
+  function cadastrarContato(
+    dados: { nome: string; telefone: string; dataConsulta?: string; unidade?: string },
+    voltarPara?: Tab,
+  ) {
     setPreCadastro({ ...dados, voltarPara })
     setTab('pacientes')
     setNewPatientSignal((value) => value + 1)

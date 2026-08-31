@@ -62,10 +62,16 @@ export interface Db {
   templates: Record<FollowupKey, string>
 }
 
+/**
+ * Unidades escritas exatamente como no site, que e o que o paciente le antes de
+ * escrever para a clinica. Mesma grafia na agenda, no cadastro e no prontuario:
+ * tres jeitos de escrever o mesmo lugar obrigavam o sistema a adivinhar que
+ * eram a mesma coisa.
+ */
 export const UNIDADES = [
-  'Livance Vila Mariana',
-  'Livance Santo André',
-  'Liferty Santos',
+  'Liferty · Santos',
+  'Livance · Santo André',
+  'Livance · Vila Mariana',
   'Outra',
 ] as const
 
