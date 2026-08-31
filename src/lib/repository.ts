@@ -833,10 +833,10 @@ export interface ConversationMessage {
 export async function listConversations(clinicId: string): Promise<Conversation[]> {
   const { data, error } = await supabase
     .from('whatsapp_conversations')
-    .select(
-      'id,patient_id,display_phone,wa_id,profile_name,status,needs_attention,attention_reason,' +
-        'booking_state,unread_count,last_message_at',
-    )
+    // Uma linha so, por mais longa que fique: o supabase-js le esta string em
+    // tempo de compilacao para saber o tipo do resultado, e concatenar com +
+    // faz ele desistir e devolver GenericStringError em todos os campos.
+    .select('id,patient_id,display_phone,wa_id,profile_name,status,needs_attention,attention_reason,booking_state,unread_count,last_message_at')
     .eq('clinic_id', clinicId)
     .order('last_message_at', { ascending: false, nullsFirst: false })
 
