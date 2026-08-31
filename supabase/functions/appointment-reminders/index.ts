@@ -24,33 +24,36 @@ type Settings = {
   enabled: boolean
 }
 
+/** Nao mandar lembrete de madrugada. Fora desta faixa, espera a proxima hora. */
+const HORA_INICIAL = 8
+const HORA_FINAL = 20
+/** Perto demais da consulta o lembrete perde a serventia e vira susto. */
+const ANTECEDENCIA_MINIMA_HORAS = 2
+
 /**
- * Diferenca, em minutos, entre o fuso da clinica e o UTC naquele instante.
- * A Edge Function roda em UTC: sem isso, perto da meia-noite o lembrete sairia
- * com um dia de diferenca.
+ * Consultas que entram na conta de lembretes agora.
+ *
+ * Antes a funcao mirava um dia inteiro do calendario e rodava uma vez por dia,
+ * as 10h. Quem marcasse depois das 10h para o dia seguinte ficava sem lembrete
+ * nenhum: a unica passada do dia ja tinha acontecido. Em 31/08/2026 um paciente
+ * marcou as 08:56 e so recebeu porque faltava uma hora para a passada.
+ *
+ * Agora a janela e continua - de daqui a duas horas ate `dias` a frente - e a
+ * funcao roda de hora em hora. Cada consulta recebe uma vez so, garantido pelo
+ * reminder_sent_at.
  */
-function offsetMinutos(timezone: string, referencia: Date) {
-  const emUtc = new Date(referencia.toLocaleString('en-US', { timeZone: 'UTC' }))
-  const noFuso = new Date(referencia.toLocaleString('en-US', { timeZone: timezone }))
-  return Math.round((noFuso.getTime() - emUtc.getTime()) / 60000)
+function janelaDeLembrete(dias: number) {
+  const agora = new Date()
+  const inicio = new Date(agora.getTime() + ANTECEDENCIA_MINIMA_HORAS * 3600 * 1000)
+  const fim = new Date(agora.getTime() + dias * 24 * 3600 * 1000)
+  return { inicio, fim }
 }
 
-/**
- * Janela [inicio, fim) em UTC correspondente ao dia da consulta, contado no
- * calendario da clinica: hoje + `dias`.
- */
-function janelaDoDia(timezone: string, dias: number) {
-  const agora = new Date()
-  const local = new Date(agora.toLocaleString('en-US', { timeZone: timezone }))
-  local.setDate(local.getDate() + dias)
-
-  const meiaNoiteIngenua = Date.UTC(local.getFullYear(), local.getMonth(), local.getDate())
-  const offset = offsetMinutos(timezone, agora) * 60000
-  const inicio = new Date(meiaNoiteIngenua - offset)
-  const fim = new Date(inicio.getTime() + 24 * 60 * 60 * 1000)
-
-  const rotulo = new Date(meiaNoiteIngenua).toISOString().slice(0, 10)
-  return { inicio, fim, rotulo }
+/** Hora local da clinica, para nao acordar ninguem com lembrete. */
+function horaLocal(timezone: string) {
+  return Number(
+    new Date().toLocaleString('en-US', { timeZone: timezone, hour: '2-digit', hour12: false }),
+  )
 }
 
 function formatarDataHora(iso: string, timezone: string) {
@@ -108,7 +111,13 @@ Deno.serve(async (req) => {
     const detalhes: { appointmentId: string; resultado: string }[] = []
 
     for (const clinica of clinicas) {
-      const { inicio, fim } = janelaDoDia(clinica.timezone, clinica.reminderDays)
+      const hora = horaLocal(clinica.timezone)
+      if (hora < HORA_INICIAL || hora >= HORA_FINAL) {
+        detalhes.push({ appointmentId: '-', resultado: `fora do horario (${hora}h)` })
+        continue
+      }
+
+      const { inicio, fim } = janelaDeLembrete(clinica.reminderDays)
 
       const { data: consultas, error: consultasError } = await admin
         .from('appointments')
