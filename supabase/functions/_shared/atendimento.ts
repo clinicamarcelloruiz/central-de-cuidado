@@ -814,7 +814,6 @@ export async function tratarConversa(opcoes: {
    * humana. Quem calcula e o webhook, que tem o historico em maos.
    */
   podeIniciarMenu: boolean
-  aguardandoEquipe: boolean
   texto: string
   telefone: string
   /**
@@ -859,11 +858,16 @@ export async function tratarConversa(opcoes: {
   // pessoa que esta atendendo e pior do que nao responder.
   if (estadoAtual === 'atendente') return null
 
-  // A bandeira de "esperando a equipe" so silencia quem esta parado. Quem
-  // digitou MENU e escolheu uma opcao esta conversando com o sistema agora, e
-  // deixar essa pessoa sem resposta seria justamente o vacuo que o menu veio
-  // eliminar.
-  if (!estadoAtual && opcoes.aguardandoEquipe) return null
+  // Nao existe mais silencio por causa da bandeira de atencao.
+  //
+  // A bandeira acumulava dois papeis: avisar a equipe e calar o robo. Sao
+  // coisas diferentes. Quem cancelou a consulta sozinho acende a bandeira
+  // porque a vaga interessa a recepcao - mas nao esta esperando ninguem falar
+  // com ele, e ficava mudo ate alguem abrir a conversa na tela.
+  //
+  // Quem realmente pediu gente cai no estado 'atendente' logo acima, e quem
+  // esta em conversa humana e barrado por equipeFalouRecentemente, calculado no
+  // webhook. Esses dois bastam, e nao criam becos sem saida.
 
   // Pedir gente vale de qualquer etapa, e nao so da opcao 3 do menu.
   if (pediuAtendente(texto)) {

@@ -799,7 +799,16 @@ export interface Conversation {
    * para falar com gente; 'falha' e o sistema admitindo que travou. Os dois
    * merecem destaque diferente de uma resposta comum.
    */
-  attentionReason: 'atendente' | 'remarcacao' | 'cancelamento' | 'ajuda' | 'falha' | null
+  attentionReason:
+    | 'atendente'
+    | 'remarcacao'
+    | 'cancelamento'
+    | 'ajuda'
+    | 'falha'
+    | 'cancelou_sozinho'
+    | null
+  /** Etapa em que o robo parou nesta conversa. Nulo quando nao ha nada aberto. */
+  bookingState: string | null
   unreadCount: number
   lastMessageAt: string | null
   lastMessage: string
@@ -825,7 +834,8 @@ export async function listConversations(clinicId: string): Promise<Conversation[
   const { data, error } = await supabase
     .from('whatsapp_conversations')
     .select(
-      'id,patient_id,display_phone,wa_id,profile_name,status,needs_attention,attention_reason,unread_count,last_message_at',
+      'id,patient_id,display_phone,wa_id,profile_name,status,needs_attention,attention_reason,' +
+        'booking_state,unread_count,last_message_at',
     )
     .eq('clinic_id', clinicId)
     .order('last_message_at', { ascending: false, nullsFirst: false })
@@ -872,6 +882,7 @@ export async function listConversations(clinicId: string): Promise<Conversation[
     status: row.status as Conversation['status'],
     needsAttention: row.needs_attention,
     attentionReason: (row.attention_reason ?? null) as Conversation['attentionReason'],
+    bookingState: row.booking_state ?? null,
     unreadCount: row.unread_count,
     lastMessageAt: row.last_message_at,
     lastMessage: lastBodyByConversation.get(row.id) ?? '',
@@ -924,6 +935,33 @@ export async function markConversationSeen(conversationId: string) {
   const { error } = await supabase
     .from('whatsapp_conversations')
     .update({ unread_count: 0, needs_attention: false, attention_reason: null })
+    .eq('id', conversationId)
+  if (error) fail(error)
+}
+
+/**
+ * Solta o robo numa conversa.
+ *
+ * Zera a etapa em que ele parou e apaga a bandeira de atencao, para a proxima
+ * mensagem do paciente comecar do menu. Nao apaga mensagem, consulta nem
+ * cadastro: so o rascunho do atendimento automatico.
+ */
+export async function resetConversationBot(conversationId: string) {
+  const { error } = await supabase
+    .from('whatsapp_conversations')
+    .update({
+      booking_state: null,
+      booking_options: null,
+      booking_unit_id: null,
+      booking_patient_id: null,
+      booking_replaces_id: null,
+      booking_updated_at: new Date().toISOString(),
+      // Zerar tambem o menu_sent_at faz o robo poder recomecar na hora, sem
+      // esperar o intervalo que evita repetir o menu.
+      menu_sent_at: null,
+      needs_attention: false,
+      attention_reason: null,
+    })
     .eq('id', conversationId)
   if (error) fail(error)
 }

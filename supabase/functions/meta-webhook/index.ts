@@ -260,8 +260,10 @@ Deno.serve(async (req) => {
           // equipe, abrindo a conversa na tela. Antes cada nova mensagem do
           // paciente apagava o pedido anterior - quem escrevia duas vezes
           // sumia da lista de quem esperava retorno.
-          const aguardandoEquipe = Boolean(conversaAnterior?.needs_attention)
-          const marcarAtencao = aguardandoEquipe || Boolean(motivoAtencao)
+          // A bandeira so sobe, nunca desce por mensagem do paciente: quem
+          // baixa e a equipe, abrindo a conversa na tela.
+          const marcarAtencao =
+            Boolean(conversaAnterior?.needs_attention) || Boolean(motivoAtencao)
 
           // Sem nome novo no evento, mantem o que ja estava gravado em vez de
           // apagar: nem todo evento traz o bloco `contacts`.
@@ -373,7 +375,6 @@ Deno.serve(async (req) => {
               opcoesAtuais: conversaAnterior?.booking_options ?? null,
               unidadeEmAndamento: conversaAnterior?.booking_unit_id ?? null,
               podeIniciarMenu: !respondendoEnvioNosso && !equipeFalouRecentemente,
-              aguardandoEquipe,
               texto: body,
               telefone: waId,
               pacientes,
