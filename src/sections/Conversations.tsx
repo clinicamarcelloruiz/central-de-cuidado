@@ -5,6 +5,7 @@ import {
   CircleSlash,
   MessageSquareText,
   RefreshCw,
+  RotateCcw,
   Search,
   Send,
   Sparkles,
@@ -19,6 +20,7 @@ import {
   listConversations,
   getReplyWindow,
   markConversationSeen,
+  resetConversationBot,
   resolveConversation,
   saveAutoReply,
   sendConversationReply,
@@ -31,6 +33,24 @@ const STATUS_LABEL: Record<Conversation['status'], string> = {
   open: 'Em aberto',
   resolved: 'Resolvida',
   opted_out: 'Pediu para não receber',
+}
+
+/**
+ * Em que etapa o robo parou nesta conversa.
+ *
+ * Aparece no cartao para a equipe entender por que a pessoa esta recebendo (ou
+ * nao recebendo) resposta, e para o botao de destravar fazer sentido.
+ */
+const ETAPA_DO_ROBO: Record<string, string> = {
+  menu: 'no menu',
+  minha_consulta: 'vendo a consulta',
+  confirmar_cancelamento: 'confirmando cancelamento',
+  ja_tem_consulta: 'avisado de consulta existente',
+  aguardando_paciente: 'escolhendo o paciente',
+  aguardando_unidade: 'escolhendo a unidade',
+  aguardando_dia: 'escolhendo o dia',
+  aguardando_horario: 'escolhendo o horário',
+  atendente: 'aguardando a equipe',
 }
 
 /**
@@ -59,6 +79,11 @@ const MOTIVO_ATENCAO: Record<
   },
   ajuda: {
     rotulo: 'Pediu ajuda',
+    classe: 'bg-[#fdf3ec] text-[#8a4b1d]',
+    borda: 'border-[#dc8e5f]',
+  },
+  cancelou_sozinho: {
+    rotulo: 'Cancelou pelo WhatsApp',
     classe: 'bg-[#fdf3ec] text-[#8a4b1d]',
     borda: 'border-[#dc8e5f]',
   },
@@ -120,6 +145,7 @@ export default function Conversations({
   const [autoReplyAberto, setAutoReplyAberto] = useState(false)
   const [salvandoAuto, setSalvandoAuto] = useState(false)
   const [avisoAuto, setAvisoAuto] = useState('')
+  const [destravando, setDestravando] = useState<string | null>(null)
 
   useEffect(() => {
     const timer = window.setInterval(() => setAgora(Date.now()), 60_000)
@@ -317,6 +343,31 @@ export default function Conversations({
   }, [conversations, busca, de, ate])
 
   const filtrando = Boolean(busca.trim() || de || ate)
+  /**
+   * Solta o robo numa conversa travada, sem depender de ninguem mexer no banco.
+   *
+   * Nao apaga mensagem, consulta nem cadastro: so o rascunho do atendimento
+   * automatico. A proxima mensagem do paciente recomeca do menu.
+   */
+  async function destravar(conversationId: string) {
+    setDestravando(conversationId)
+    setError('')
+    try {
+      await resetConversationBot(conversationId)
+      setConversations((atual) =>
+        atual.map((item) =>
+          item.id === conversationId
+            ? { ...item, bookingState: null, needsAttention: false, attentionReason: null }
+            : item,
+        ),
+      )
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível destravar o robô.')
+    } finally {
+      setDestravando(null)
+    }
+  }
+
   const attention = conversations.filter((item) => item.needsAttention)
   const querAtendente = attention.filter(
     (item) => item.attentionReason === 'atendente' || item.attentionReason === 'falha',
@@ -648,6 +699,26 @@ export default function Conversations({
                     )}
                   </div>
                   </button>
+
+                  {/* Etapa do robo + botao de soltar. Aparece so quando ha
+                      algo preso: sem etapa aberta, nao ha o que destravar. */}
+                  {conversation.bookingState && (
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded-[12px] bg-[#f6f4f1] px-2.5 py-1.5">
+                      <span className="truncate text-[9px] font-bold text-slate-500">
+                        Robô: {ETAPA_DO_ROBO[conversation.bookingState] ?? conversation.bookingState}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void destravar(conversation.id)}
+                        disabled={destravando === conversation.id}
+                        title="Zera a etapa do robô. Não apaga mensagens nem consultas."
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white px-2 py-1 text-[9px] font-extrabold text-[#081b2c] transition hover:bg-[#081b2c] hover:text-white disabled:opacity-40"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        {destravando === conversation.id ? 'Soltando...' : 'Destravar'}
+                      </button>
+                    </div>
+                  )}
 
                   {semCadastro && onCadastrarContato && (
                     <button
