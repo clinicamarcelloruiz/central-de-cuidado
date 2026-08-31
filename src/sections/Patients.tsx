@@ -316,7 +316,14 @@ export default function Patients({
     setFormOpen(true)
   }
 
-  async function save() {
+  /**
+   * `abrirProntuario` decide o que acontece depois de gravar.
+   *
+   * Quem cadastra nem sempre e quem atende: a secretaria organiza a fila e nao
+   * precisa do registro clinico. Antes esse destino era adivinhado pela tela de
+   * onde a pessoa veio; agora e escolha explicita, no botao.
+   */
+  async function save(abrirProntuario = false) {
     if (!form.nome.trim()) {
       setError('Informe o nome do paciente.')
       return
@@ -336,13 +343,13 @@ export default function Patients({
         await updatePatient(editingId, form)
       } else {
         const patient = await addPatient(form)
-        // Cadastro iniciado na agenda ou nas conversas: a pessoa tinha outro
-        // objetivo em mao. Abrir o prontuario aqui seria tira-la do lugar.
-        if (preCadastro && onPacienteCriado) {
-          onPacienteCriado()
-        } else {
+        if (abrirProntuario) {
           setRecordPatientId(patient.id)
           setStartConsultationPatientId(patient.id)
+        } else if (preCadastro && onPacienteCriado) {
+          // Veio da agenda ou das conversas e nao pediu prontuario: devolve a
+          // pessoa para onde ela estava trabalhando.
+          onPacienteCriado()
         }
       }
       setFormOpen(false)
@@ -693,7 +700,7 @@ export default function Patients({
                 <SheetDescription className="mt-1 text-left text-[11px]">
                   {editingId
                     ? 'Atualize os dados de identificação e contato do paciente.'
-                    : 'Etapa 1 de 2: cadastre os dados básicos. Em seguida, o prontuário abre para registrar a primeira consulta.'}
+                    : 'Dados básicos de identificação e contato. O prontuário só abre se você escolher, no botão do rodapé.'}
                 </SheetDescription>
               </div>
             </div>
@@ -789,8 +796,21 @@ export default function Patients({
               className="flex flex-1 items-center justify-center gap-2 rounded-[14px] bg-[#081b2c] px-5 py-3 text-xs font-extrabold text-white shadow-[0_10px_22px_rgba(8,27,44,.16)] transition hover:bg-[#102d47]"
             >
               <Check className="h-4 w-4 text-[#e3a078]" strokeWidth={3} />
-              {saving ? 'Salvando...' : editingId ? 'Salvar alterações' : 'Cadastrar e abrir prontuário'}
+              {saving ? 'Salvando...' : editingId ? 'Salvar alterações' : 'Cadastrar'}
             </button>
+            {/* Segundo caminho, para quem vai atender agora. Fica ao lado e nao
+                no lugar: cadastrar sem abrir prontuario e o caso mais comum. */}
+            {!editingId && (
+              <button
+                type="button"
+                onClick={() => void save(true)}
+                disabled={saving}
+                className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/15 bg-white px-4 py-3 text-xs font-bold text-[#081b2c] transition hover:border-[#dc8e5f] hover:text-[#8a4b1d] disabled:opacity-40"
+              >
+                <Stethoscope className="h-4 w-4" />
+                Cadastrar e abrir prontuário
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setFormOpen(false)}
