@@ -93,7 +93,12 @@ export default function Agenda({
   patients: Patient[]
   onSolicitacoesMudaram?: () => void
   /** Abre a tela de pacientes com nome e telefone da consulta ja preenchidos. */
-  onCadastrarContato?: (dados: { nome: string; telefone: string }) => void
+  onCadastrarContato?: (dados: {
+    nome: string
+    telefone: string
+    dataConsulta?: string
+    unidade?: string
+  }) => void
 }) {
   const [aba, setAba] = useState<Aba>('calendario')
   const [clinicId, setClinicId] = useState<string | null>(null)
@@ -1016,6 +1021,11 @@ export default function Agenda({
                             onCadastrarContato({
                               nome: formConsulta.contactName,
                               telefone: formConsulta.contactPhone,
+                              // A consulta ja sabe quando e onde: repetir isso a
+                              // mao e onde nasce divergencia entre agenda e
+                              // cadastro.
+                              dataConsulta: emEdicao.startsAt.slice(0, 10),
+                              unidade: unidadeAtual?.name,
                             })
                           }
                           className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-[#081b2c]/15 bg-white px-3 py-2.5 text-[10px] font-extrabold text-[#081b2c] transition hover:border-[#dc8e5f] hover:text-[#8a4b1d]"
