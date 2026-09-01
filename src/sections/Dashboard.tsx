@@ -8,6 +8,7 @@ import {
   HeartPulse,
   MapPinned,
   Stethoscope,
+  Building2,
   UsersRound,
 } from 'lucide-react'
 import type { Patient } from '@/types/patient'
@@ -301,6 +302,10 @@ export default function Dashboard({
 
   const cids = topN(countBy(patients, (patient) => patient.cid.toUpperCase()), 5)
   const cities = topN(countBy(patients, (patient) => patient.cidade), 5)
+  // Bairro e unidade ja chegavam aqui dentro de cada paciente; so nunca tinham
+  // sido lidos. Nao precisou de nada no banco.
+  const neighborhoods = topN(countBy(patients, (patient) => patient.bairro), 5)
+  const units = topN(countBy(patients, (patient) => patient.unidade), 5)
   const healthPlans = topN(countBy(patients, (patient) => patient.convenio), 5)
 
   const months: { label: string; value: number }[] = []
@@ -405,12 +410,34 @@ export default function Dashboard({
             </div>
           </Panel>
 
-          <Panel title="Leitura da base clínica" subtitle="Principais recortes para apoiar decisões da rotina" icon={MapPinned}>
+          {/* Dois paineis em vez de um: cinco recortes espremidos em tres
+              colunas viram sopa. Geografia de um lado, clinica do outro - e a
+              divisao ajuda a ler, nao so a caber. */}
+          <Panel
+            title="De onde vem quem atendemos"
+            subtitle="Para decidir horário, unidade e alcance da divulgação"
+            icon={MapPinned}
+          >
             <div className="grid gap-7 lg:grid-cols-3 lg:divide-x lg:divide-[#081b2c]/[0.07]">
-              <Ranking title="Cidades" items={cities} color={SAGE} />
+              {/* "do paciente" no rotulo de proposito: sem isso, cidade e
+                  bairro se confundem com o endereco da unidade. */}
+              <Ranking title="Cidade do paciente" items={cities} color={SAGE} />
               <div className="lg:pl-7">
-                <Ranking title="CID-10 mais frequentes" items={cids} color={PEACH} />
+                <Ranking title="Bairro / região do paciente" items={neighborhoods} color={PEACH} />
               </div>
+              <div className="lg:pl-7">
+                <Ranking title="Unidade de atendimento" items={units} color={NAVY} />
+              </div>
+            </div>
+            <div className="mt-6 flex items-center gap-2 border-t border-[#081b2c]/[0.06] pt-4 text-[10px] font-semibold text-slate-400">
+              <Building2 className="h-3.5 w-3.5 text-[#6f9d91]" />
+              A unidade é a do último atendimento de cada paciente.
+            </div>
+          </Panel>
+
+          <Panel title="Leitura da base clínica" subtitle="Principais recortes para apoiar decisões da rotina" icon={Stethoscope}>
+            <div className="grid gap-7 lg:grid-cols-2 lg:divide-x lg:divide-[#081b2c]/[0.07]">
+              <Ranking title="CID-10 mais frequentes" items={cids} color={PEACH} />
               <div className="lg:pl-7">
                 <Ranking title="Convênios" items={healthPlans} color={NAVY} />
               </div>

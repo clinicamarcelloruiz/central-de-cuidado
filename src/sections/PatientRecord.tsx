@@ -3,6 +3,7 @@ import { invokeWithFormData } from '@/lib/supabase'
 import {
   AlertTriangle,
   ArrowLeft,
+  BookmarkPlus,
   Bold,
   Building2,
   CalendarDays,
@@ -28,6 +29,7 @@ import {
   Underline,
   UserRound,
   Video,
+  X,
 } from 'lucide-react'
 import {
   Accordion,
@@ -43,6 +45,13 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { fmtBR, idade, todayISO } from '@/lib/followup'
+import {
+  archiveNoteTemplate,
+  createNoteTemplate,
+  getCurrentMembership,
+  listNoteTemplates,
+  type NoteTemplate,
+} from '@/lib/repository'
 import type {
   Consultation,
   ConsultationDraft,
@@ -246,7 +255,7 @@ function imprimirProntuario(patient: Patient, consultas: Consultation[]) {
     ['Conduta', 'conduta'],
     ['Prescrição', 'prescricao'],
     ['Retorno', 'retorno'],
-    ['Observações', 'observacoes'],
+    ['Observações clínicas', 'observacoes'],
   ]
 
   const cabecalhoPaciente = [
@@ -425,6 +434,10 @@ function RichTextField({
   placeholder,
   required,
   className = '',
+  campo,
+  modelos,
+  onSalvarModelo,
+  onApagarModelo,
 }: {
   label: string
   value: string
@@ -432,6 +445,11 @@ function RichTextField({
   placeholder?: string
   required?: boolean
   className?: string
+  /** Chave do campo. Sem ela o botao de modelos nem aparece. */
+  campo?: string
+  modelos?: NoteTemplate[]
+  onSalvarModelo?: (campo: string, titulo: string, texto: string) => Promise<void>
+  onApagarModelo?: (id: string) => Promise<void>
 }) {
   const editorRef = useRef<HTMLDivElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
@@ -445,6 +463,39 @@ function RichTextField({
   const [listening, setListening] = useState(false)
   const [transcrevendo, setTranscrevendo] = useState(false)
   const [speechError, setSpeechError] = useState('')
+  const [painelModelos, setPainelModelos] = useState(false)
+  const [novoModelo, setNovoModelo] = useState('')
+  const [salvandoModelo, setSalvandoModelo] = useState(false)
+
+  const doCampo = campo ? (modelos ?? []).filter((m) => m.campo === campo) : []
+
+  /**
+   * Insere o modelo no fim do que ja existe, em vez de substituir.
+   *
+   * Mesmo caminho do ditado, e pelo mesmo motivo: campo "vazio" no
+   * contenteditable costuma conter <br>, e sem a checagem o texto entraria
+   * depois desse resto, nascendo com linha em branco na frente.
+   */
+  function inserirModelo(texto: string) {
+    const atual = sanitizeRichText(editorRef.current?.innerHTML || '')
+    const proximo = temTexto(atual) ? `${atual}<br>${texto}` : texto
+    if (editorRef.current) editorRef.current.innerHTML = proximo
+    onChange(sanitizeRichText(proximo))
+    setPainelModelos(false)
+  }
+
+  async function salvarComoModelo() {
+    const titulo = novoModelo.trim()
+    const texto = sanitizeRichText(editorRef.current?.innerHTML || '')
+    if (!titulo || !campo || !onSalvarModelo || !temTexto(texto)) return
+    setSalvandoModelo(true)
+    try {
+      await onSalvarModelo(campo, titulo, texto)
+      setNovoModelo('')
+    } finally {
+      setSalvandoModelo(false)
+    }
+  }
 
   useEffect(() => {
     const editor = editorRef.current
@@ -861,6 +912,24 @@ function RichTextField({
           <span className="mx-0.5 h-4 w-px bg-[#081b2c]/10" />
           {editorColors.map((color) => <button key={color.value} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('foreColor', color.value)} className="h-5 w-5 rounded-full border-2 border-white shadow-sm ring-1 ring-[#081b2c]/10" style={{ backgroundColor: color.value }} aria-label={`Cor ${color.label}`} title={`Cor ${color.label}`} />)}
           <span className="flex-1" />
+          {/* So aparece onde ha campo declarado: um botao de modelos num campo
+              que nao guarda modelo seria botao que nao faz nada. */}
+          {campo && onSalvarModelo && (
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setPainelModelos((aberto) => !aberto)}
+              className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[9px] font-extrabold transition ${
+                painelModelos
+                  ? 'bg-[#081b2c] text-white'
+                  : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'
+              }`}
+              title="Textos prontos para reusar neste campo"
+            >
+              <BookmarkPlus className="h-3.5 w-3.5" />
+              Modelos{doCampo.length ? ` (${doCampo.length})` : ''}
+            </button>
+          )}
           <button
             type="button"
             onMouseDown={(event) => event.preventDefault()}
@@ -907,6 +976,74 @@ function RichTextField({
             </span>
           )}
         </div>
+        {painelModelos && campo && (
+          <div className="border-b border-[#081b2c]/[0.07] bg-[#fbfaf8] px-3 py-2.5">
+            {doCampo.length === 0 ? (
+              <p className="text-[10px] font-semibold text-slate-400">
+                Nenhum modelo salvo para {label.toLowerCase()} ainda. Escreva o texto no campo e
+                salve abaixo — ele fica disponível para as próximas consultas.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {doCampo.map((modelo) => (
+                  <span
+                    key={modelo.id}
+                    className="inline-flex items-center overflow-hidden rounded-lg border border-[#081b2c]/10 bg-white"
+                  >
+                    <button
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => inserirModelo(modelo.texto)}
+                      className="px-2.5 py-1.5 text-[10px] font-bold text-[#081b2c] transition hover:bg-[#eef3f2]"
+                      title="Inserir no fim do texto"
+                    >
+                      {modelo.titulo}
+                    </button>
+                    {onApagarModelo && (
+                      <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => void onApagarModelo(modelo.id)}
+                        className="border-l border-[#081b2c]/10 px-1.5 py-1.5 text-slate-300 transition hover:bg-red-50 hover:text-red-500"
+                        aria-label={`Aposentar o modelo ${modelo.titulo}`}
+                        title="Aposentar este modelo"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+            {/* Criar o modelo a partir do que ja esta escrito, e nao numa tela
+                separada de configuracao: o texto bom aparece durante a consulta,
+                e e ali que ele precisa poder ser guardado. */}
+            <div className="mt-2 flex items-center gap-1.5 border-t border-[#081b2c]/[0.07] pt-2">
+              <input
+                value={novoModelo}
+                onChange={(event) => setNovoModelo(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    void salvarComoModelo()
+                  }
+                }}
+                maxLength={80}
+                placeholder="Salvar o texto atual como modelo. Dê um nome..."
+                className="min-w-0 flex-1 rounded-lg border border-[#081b2c]/10 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-[#081b2c] outline-none placeholder:text-slate-300 focus:border-[#dc8e5f]"
+              />
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => void salvarComoModelo()}
+                disabled={!novoModelo.trim() || salvandoModelo}
+                className="shrink-0 rounded-lg bg-[#081b2c] px-3 py-1.5 text-[10px] font-extrabold text-white transition hover:bg-[#102d47] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+              >
+                {salvandoModelo ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        )}
         <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder={placeholder} onInput={syncEditor} onPaste={pasteAsText} className="min-h-[92px] px-3.5 py-2.5 text-[14px] font-medium leading-[1.6] text-[#081b2c] outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)] [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5" />
       </div>
       {speechError && (
@@ -1114,7 +1251,7 @@ function ConsultationCard({
           <Detail label="Conduta" value={consultation.conduta} />
           <Detail label="Prescrição" value={consultation.prescricao} />
           <Detail label="Retorno" value={consultation.retorno} />
-          <Detail label="Observações" value={consultation.observacoes} />
+          <Detail label="Observações clínicas" value={consultation.observacoes} />
         </div>
       </AccordionContent>
     </AccordionItem>
@@ -1133,7 +1270,42 @@ export default function PatientRecord({
 }: PatientRecordProps) {
   const [mode, setMode] = useState<'history' | 'form'>('history')
   const [consultations, setConsultations] = useState<Consultation[]>([])
+  // Os modelos sao da clinica, entao sao carregados uma vez por abertura do
+  // prontuario e compartilhados por todos os campos - e nao um pedido por campo.
+  const [clinicId, setClinicId] = useState<string | null>(null)
+  const [modelos, setModelos] = useState<NoteTemplate[]>([])
   const [buscaConsulta, setBuscaConsulta] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    let vivo = true
+    void (async () => {
+      try {
+        const membership = await getCurrentMembership()
+        if (!membership || !vivo) return
+        setClinicId(membership.clinicId)
+        const lista = await listNoteTemplates(membership.clinicId)
+        if (vivo) setModelos(lista)
+      } catch {
+        // Modelo e conveniencia: se a lista falhar, o prontuario continua
+        // inteiro e o medico escreve como sempre escreveu.
+      }
+    })()
+    return () => {
+      vivo = false
+    }
+  }, [open])
+
+  async function salvarModelo(campo: string, titulo: string, texto: string) {
+    if (!clinicId) return
+    const criado = await createNoteTemplate(clinicId, campo, titulo, texto)
+    setModelos((atuais) => [...atuais, criado].sort((a, b) => a.titulo.localeCompare(b.titulo)))
+  }
+
+  async function apagarModelo(id: string) {
+    await archiveNoteTemplate(id)
+    setModelos((atuais) => atuais.filter((m) => m.id !== id))
+  }
 
   // Busca em todos os campos de texto da consulta, sem acento e sem marcacao,
   // para "sinusite" achar tanto "Sinusite" quanto "<b>sinusite</b>".
@@ -1539,6 +1711,20 @@ export default function PatientRecord({
             <div className="scrollbar-subtle flex-1 overflow-y-auto px-5 py-6 sm:px-7">
               <div className="grid gap-4 sm:grid-cols-2">
                 <SectionTitle>Atendimento</SectionTitle>
+                {/* O recado da recepcao aparece aqui de proposito, e so para
+                    ler. Enquanto os dois textos eram a mesma coluna, escrever a
+                    observacao clinica apagava este aviso. Mostrar em vez de
+                    esconder tambem tira o motivo de alguem usar o campo errado. */}
+                {patient.observacoes.trim() && (
+                  <div className="sm:col-span-2 rounded-[14px] border border-[#dc8e5f]/25 bg-[#fdf6f1] px-4 py-3">
+                    <p className="text-[9px] font-extrabold uppercase tracking-[0.13em] text-[#c87543]">
+                      Recado da recepção
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-[11px] font-semibold leading-relaxed text-[#8a4b1d]">
+                      {patient.observacoes}
+                    </p>
+                  </div>
+                )}
                 <Field label="Data da consulta" required>
                   <input
                     type="date"
@@ -1587,12 +1773,20 @@ export default function PatientRecord({
                   label="Queixa principal"
                   value={form.queixa}
                   onChange={(value) => set('queixa', value)}
+                  campo="queixa"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
                   placeholder="Motivo principal desta consulta..."
                 />
                 <RichTextField
                   label="História / evolução"
                   value={form.historiaEvolucao}
                   onChange={(value) => set('historiaEvolucao', value)}
+                  campo="historiaEvolucao"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
                   placeholder="Início, duração, sintomas e evolução..."
                 />
 
@@ -1601,24 +1795,40 @@ export default function PatientRecord({
                   label="Antecedentes pessoais"
                   value={form.antecedentesPessoais}
                   onChange={(value) => set('antecedentesPessoais', value)}
+                  campo="antecedentesPessoais"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
                   placeholder="Condições, cirurgias e internações..."
                 />
                 <RichTextField
                   label="Antecedentes familiares"
                   value={form.antecedentesFamiliares}
                   onChange={(value) => set('antecedentesFamiliares', value)}
+                  campo="antecedentesFamiliares"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
                   placeholder="Histórico familiar relevante..."
                 />
                 <RichTextField
                   label="Alergias"
                   value={form.alergias}
                   onChange={(value) => set('alergias', value)}
+                  campo="alergias"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
                   placeholder="Medicamentos, alimentos ou outras alergias..."
                 />
                 <RichTextField
                   label="Medicamentos em uso"
                   value={form.medicamentos}
                   onChange={(value) => set('medicamentos', value)}
+                  campo="medicamentos"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
                   placeholder="Nome, dose e frequência..."
                 />
 
@@ -1627,12 +1837,20 @@ export default function PatientRecord({
                   label="Exame físico"
                   value={form.exameFisico}
                   onChange={(value) => set('exameFisico', value)}
+                  campo="exameFisico"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
                   placeholder="Achados do exame físico..."
                 />
                 <RichTextField
                   label="Avaliação / hipótese diagnóstica"
                   value={form.avaliacao}
                   onChange={(value) => set('avaliacao', value)}
+                  campo="avaliacao"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
                   placeholder="Impressão clínica e hipóteses..."
                 />
                 <Field label="CID-10" className="sm:col-span-2">
@@ -1649,25 +1867,41 @@ export default function PatientRecord({
                   label="Conduta"
                   value={form.conduta}
                   onChange={(value) => set('conduta', value)}
+                  campo="conduta"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
                   placeholder="Orientações, exames e encaminhamentos..."
                 />
                 <RichTextField
                   label="Prescrição"
                   value={form.prescricao}
                   onChange={(value) => set('prescricao', value)}
+                  campo="prescricao"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
                   placeholder="Medicamento, dose, via e duração..."
                 />
                 <RichTextField
                   label="Retorno"
                   value={form.retorno}
                   onChange={(value) => set('retorno', value)}
+                  campo="retorno"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
                   placeholder="Prazo e condições para retorno..."
                 />
                 <RichTextField
-                  label="Observações"
+                  label="Observações clínicas"
                   value={form.observacoes}
                   onChange={(value) => set('observacoes', value)}
-                  placeholder="Informações complementares..."
+                  campo="observacoes"
+                  modelos={modelos}
+                  onSalvarModelo={salvarModelo}
+                  onApagarModelo={apagarModelo}
+                  placeholder="Informações complementares deste atendimento..."
                 />
               </div>
 

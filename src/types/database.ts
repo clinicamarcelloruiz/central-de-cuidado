@@ -14,6 +14,34 @@ export type Database = {
   }
   public: {
     Tables: {
+      note_templates: {
+        Row: {
+          id: string
+          clinic_id: string
+          field: string
+          title: string
+          body: string
+          created_by: string | null
+          updated_by: string | null
+          created_at: string
+          updated_at: string
+          archived_at: string | null
+        }
+        Insert: {
+          id?: string
+          clinic_id: string
+          field?: string
+          title: string
+          body?: string
+        }
+        Update: {
+          field?: string
+          title?: string
+          body?: string
+          archived_at?: string | null
+        }
+        Relationships: []
+      }
       access_requests: {
         Row: {
           clinic_id: string
