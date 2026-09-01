@@ -816,6 +816,19 @@ async function marcar(
   const cadastrado = Boolean(paciente?.id)
   const agora = new Date()
 
+  // Lido antes de inserir, porque a antiga so e cancelada la embaixo - e depois
+  // de cancelada continuaria legivel, mas depender disso seria contar com uma
+  // ordem que pode mudar. A contagem da nova e a da antiga mais um.
+  let vezesRemarcada = 0
+  if (substitui) {
+    const { data: anterior } = await admin
+      .from('appointments')
+      .select('reschedule_count')
+      .eq('id', substitui)
+      .maybeSingle()
+    vezesRemarcada = (anterior?.reschedule_count ?? 0) + 1
+  }
+
   const { error } = await admin.from('appointments').insert({
     clinic_id: clinicId,
     unit_id: unitId,
@@ -834,6 +847,8 @@ async function marcar(
     hold_expires_at: cadastrado
       ? null
       : new Date(agora.getTime() + HORAS_RESERVA * 3600 * 1000).toISOString(),
+    reschedule_count: vezesRemarcada,
+    rescheduled_from: substitui,
   })
 
   // Tambem termina oferecendo numero quando da errado, entao o menu fica ativo.

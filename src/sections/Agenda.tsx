@@ -8,6 +8,7 @@ import {
   Clock,
   Plus,
   RefreshCw,
+  RotateCcw,
   Settings2,
   Trash2,
   X,
@@ -455,6 +456,22 @@ export default function Agenda({
                             {!item.confirmedAt && !item.rescheduleRequestedAt && item.reminderSentAt && (
                               <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-extrabold text-white/70">
                                 Lembrete enviado, sem resposta
+                              </span>
+                            )}
+                            {/* Uma remarcacao e rotina; tres viram padrao, e
+                                padrao merece ser visto antes da consulta e nao
+                                depois da falta. Por isso a partir da segunda a
+                                etiqueta acende, em vez de sempre sussurrar. */}
+                            {item.rescheduleCount > 0 && (
+                              <span
+                                className={`mt-1 ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
+                                  item.rescheduleCount >= 2
+                                    ? 'bg-[#dc8e5f] text-white'
+                                    : 'bg-white/15 text-white/70'
+                                }`}
+                              >
+                                <RotateCcw className="h-2.5 w-2.5" strokeWidth={3} />
+                                Remarcada {item.rescheduleCount}x
                               </span>
                             )}
                             <p className="text-[9px] font-bold text-white/60">
@@ -934,6 +951,8 @@ export default function Agenda({
                     ? 'Marcada pelo próprio paciente no WhatsApp.'
                     : 'Marcada pela equipe.'}
                   {!emEdicao.confirmedByClinic && ' Ainda aguardando confirmação.'}
+                  {emEdicao.rescheduleCount > 0 &&
+                    ` Já foi remarcada ${emEdicao.rescheduleCount}x.`}
                 </SheetDescription>
               </SheetHeader>
 

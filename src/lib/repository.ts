@@ -391,6 +391,8 @@ export interface Appointment {
   rescheduleRequestedAt: string | null
   /** Quando o lembrete da vespera saiu. Nulo enquanto nao foi enviado. */
   reminderSentAt: string | null
+  /** Quantas vezes esta consulta ja trocou de data. Zero na primeira. */
+  rescheduleCount: number
 }
 
 export const WEEKDAY_LABEL = [
@@ -549,7 +551,7 @@ export async function listAvailableSlots(unitId: string): Promise<string[]> {
 export async function listAppointments(clinicId: string, unitId: string): Promise<Appointment[]> {
   const { data, error } = await supabase
     .from('appointments')
-    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at,confirmed_at,reschedule_requested_at,reminder_sent_at')
+    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at,confirmed_at,reschedule_requested_at,reminder_sent_at,reschedule_count')
     .eq('clinic_id', clinicId)
     .eq('unit_id', unitId)
     .neq('status', 'cancelled')
@@ -586,6 +588,7 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
     confirmedAt: row.confirmed_at,
     rescheduleRequestedAt: row.reschedule_requested_at,
     reminderSentAt: row.reminder_sent_at,
+    rescheduleCount: row.reschedule_count ?? 0,
   }))
 }
 

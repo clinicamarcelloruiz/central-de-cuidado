@@ -564,6 +564,8 @@ export type Database = {
           confirmed_by_clinic: boolean
           hold_expires_at: string | null
           reminder_sent_at: string | null
+          reschedule_count: number
+          rescheduled_from: string | null
           reminder_failed_at: string | null
           reminder_failure_reason: string | null
           reschedule_requested_at: string | null
@@ -589,6 +591,8 @@ export type Database = {
           confirmed_by_clinic?: boolean
           hold_expires_at?: string | null
           reminder_sent_at?: string | null
+          reschedule_count?: number
+          rescheduled_from?: string | null
           reminder_failed_at?: string | null
           reminder_failure_reason?: string | null
           reschedule_requested_at?: string | null
@@ -614,6 +618,8 @@ export type Database = {
           confirmed_by_clinic?: boolean
           hold_expires_at?: string | null
           reminder_sent_at?: string | null
+          reschedule_count?: number
+          rescheduled_from?: string | null
           reminder_failed_at?: string | null
           reminder_failure_reason?: string | null
           reschedule_requested_at?: string | null
