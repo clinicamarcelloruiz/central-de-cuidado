@@ -1,6 +1,13 @@
 import '../_shared/whatsapp.ts'
 import { adminClient, digits, sha256HmacHex, safeEqual } from '../_shared/whatsapp.ts'
 import { type Estado, type Toque, tratarConversa } from '../_shared/atendimento.ts'
+import {
+  avisoDaResposta,
+  equipeFalouRecentemente as equipeFalouHaPouco,
+  interpretarResposta,
+  mudancaDaConsulta,
+  respondendoEnvioNosso as dentroDaJanelaDeResposta,
+} from '../_shared/lembrete.ts'
 
 function text(body: string, status = 200) {
   return new Response(body, { status, headers: { 'Content-Type': 'text/plain' } })
@@ -45,10 +52,6 @@ function messageBody(message: WebhookMessage) {
     return message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? ''
   }
   return `[${message.type || 'mensagem'}]`
-}
-
-function normalizedReply(value: string) {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
 }
 
 /**
@@ -297,52 +300,18 @@ Deno.serve(async (req) => {
                 .maybeSingle(),
             ])
 
-            const ultimoNosso = ultimoNossoResult.data
-            const desdeOUltimo = ultimoNosso?.created_at
-              ? Date.now() - new Date(ultimoNosso.created_at).getTime()
-              : Number.POSITIVE_INFINITY
-
-            respondendoEnvioNosso = Boolean(
-              desdeOUltimo < 48 * 3600 * 1000 &&
-                (ultimoNosso?.followup_id || ultimoNosso?.appointment_id),
-            )
-
-            const humanoEm = ultimoHumanoResult.data?.created_at
-            equipeFalouRecentemente = Boolean(
-              humanoEm && Date.now() - new Date(humanoEm).getTime() < 12 * 3600 * 1000,
-            )
+            respondendoEnvioNosso = dentroDaJanelaDeResposta(ultimoNossoResult.data)
+            equipeFalouRecentemente = equipeFalouHaPouco(ultimoHumanoResult.data)
           }
 
           const body = messageBody(message)
           // O que a pessoa quis dizer. Vindo de toque, e o id do botao; digitado,
           // e o proprio texto. O `body` segue sendo o que aparece no historico.
           const escolhido = idDoToque(message) || body
-          const reply = normalizedReply(escolhido)
-          const optedOut = reply === 'sair' || reply === 'nao quero receber'
-          const isWell = reply === 'estou bem'
-          // Respostas ao lembrete de consulta. Aceita a palavra sozinha ou o
-          // numero do botao, porque o paciente escreve dos dois jeitos.
-          const confirma =
-            respondendoEnvioNosso &&
-            (reply === 'confirmar' || reply === 'confirmo' || reply === '1')
-          const remarca =
-            respondendoEnvioNosso &&
-            (reply === 'reagendar' || reply === 'remarcar' || reply === 'reagendar consulta' || reply === '2')
-          const cancela =
-            respondendoEnvioNosso &&
-            (reply === 'cancelar' || reply === 'cancelo' || reply === 'cancelar consulta' || reply === '3')
-          const respondeuLembrete = confirma || remarca || cancela
-          // Remarcar e cancelar exigem alguem da equipe: no primeiro caso
-          // ninguem escolheu o novo horario ainda; no segundo a agenda abriu um
-          // buraco que a recepcao pode querer preencher.
-          const pediuAjuda = reply === 'preciso de ajuda'
-          const motivoAtencao = remarca
-            ? 'remarcacao'
-            : cancela
-              ? 'cancelamento'
-              : pediuAjuda
-                ? 'ajuda'
-                : null
+          // Uma chamada so, e a regra mora em _shared/lembrete.ts, coberta por
+          // testes. Aqui ficou apenas o desempacotar.
+          const resposta = interpretarResposta(escolhido, respondendoEnvioNosso)
+          const { respondeuLembrete, optedOut, isWell, pediuAjuda, motivoAtencao } = resposta
           const receivedAt = message.timestamp
             ? new Date(Number(message.timestamp) * 1000).toISOString()
             : new Date().toISOString()
@@ -519,11 +488,7 @@ Deno.serve(async (req) => {
             if (ultimoLembrete?.appointment_id) {
               // Cancelar muda o status: o indice unico de horario ignora
               // canceladas, entao a vaga volta a aparecer como livre na hora.
-              const mudanca = confirma
-                ? { confirmed_at: receivedAt, reschedule_requested_at: null }
-                : cancela
-                  ? { status: 'cancelled', cancelled_at: receivedAt, confirmed_at: null }
-                  : { reschedule_requested_at: receivedAt, confirmed_at: null }
+              const mudanca = mudancaDaConsulta(resposta, receivedAt)
 
               await admin
                 .from('appointments')
@@ -532,14 +497,7 @@ Deno.serve(async (req) => {
                 .eq('status', 'scheduled')
             }
 
-            // Ate aqui o sistema anotava a resposta e nao dizia nada de volta.
-            // Quem confirmava a consulta ficava sem saber se tinha dado certo.
-            const aviso = confirma
-              ? 'Consulta confirmada, obrigado! Até lá.'
-              : cancela
-                ? 'Consulta cancelada. Se quiser marcar outra data, responda AGENDAR.'
-                : 'Certo! Já avisei a nossa equipe para remarcar com você. Alguém retorna por aqui.'
-            await responder(`${aviso}\n\nDigite MENU se precisar de mais alguma coisa.`)
+            await responder(avisoDaResposta(resposta))
           }
 
           // "Preciso de ajuda" explicito, e nao qualquer coisa que acendeu a
