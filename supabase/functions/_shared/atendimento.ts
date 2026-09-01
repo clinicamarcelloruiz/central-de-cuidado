@@ -237,8 +237,21 @@ const OPCOES = [
   '4 - Ver ou cancelar minha consulta',
 ].join('\n')
 
-const VOLTA = 'Digite MENU a qualquer momento para voltar ao início.'
-const SAIDAS = 'Digite ATENDENTE para falar com a nossa equipe, ou MENU para voltar ao início.'
+// O "0" sempre funcionou - pediuMenu o aceita desde o inicio, e ele nunca
+// colide com a lista porque indice de opcao comeca em 1. So nao estava escrito
+// em lugar nenhum, e o que nao se anuncia nao existe para quem le.
+const VOLTA = 'Digite 0 a qualquer momento para voltar ao início.'
+const SAIDAS = 'Digite 0 para voltar ao início, ou ATENDENTE para falar com a nossa equipe.'
+
+/**
+ * Acrescenta a saida na propria lista tocavel.
+ *
+ * Quem toca nao deveria precisar digitar nada - nem "0", nem "MENU". A linha de
+ * volta ocupa uma das dez, entao o conteudo e cortado em nove.
+ */
+function comVoltar(linhas: Toque[]): Toque[] {
+  return [...linhas.slice(0, MAX_TOQUES - 1), { id: '0', titulo: 'Voltar ao menu' }]
+}
 
 async function salvarEstado(
   admin: Admin,
@@ -413,7 +426,7 @@ async function mostrarMinhaConsulta(
     return {
       resposta:
         'Não encontrei nenhuma consulta marcada para este número.\n\n' +
-        'Digite 2 para agendar, ou MENU para ver as opções.',
+        'Digite 2 para agendar, ou 0 para ver as opções.',
     }
   }
 
@@ -426,7 +439,7 @@ async function mostrarMinhaConsulta(
     return {
       resposta:
         `Sua consulta:\n\n${descreverConsulta(consultas[0], timezone)}\n\n` +
-        'Digite CANCELAR para desmarcar, REMARCAR para trocar a data, ou MENU para voltar.',
+        'Digite CANCELAR para desmarcar, REMARCAR para trocar a data, ou 0 para voltar.',
       botoes: [
         { id: 'REMARCAR', titulo: 'Remarcar' },
         { id: 'CANCELAR', titulo: 'Cancelar consulta' },
@@ -467,7 +480,7 @@ async function pedirConfirmacaoCancelamento(
       `${descreverConsulta(consulta, timezone)}\n\n` +
       (remarcar
         ? 'Responda SIM para escolher a nova data. A consulta atual só será cancelada depois que a nova estiver marcada.'
-        : 'Responda SIM para cancelar, ou MENU para deixar como está.'),
+        : 'Responda SIM para cancelar, ou 0 para deixar como está.'),
     botoes: [
       { id: 'SIM', titulo: remarcar ? 'Sim, escolher data' : 'Sim, cancelar' },
       { id: 'MENU', titulo: 'Não, manter' },
@@ -625,14 +638,14 @@ async function perguntarUnidade(
       `Responda com o número. ${SAIDAS}`,
     lista: {
       rotulo: 'Escolher unidade',
-      linhas: comAgenda.slice(0, MAX_TOQUES).map((u, i) => ({
+      linhas: comVoltar(comAgenda.map((u, i) => ({
         id: String(i + 1),
         titulo: u.unidade.name,
         descricao:
           u.horarios.length > 0
             ? `${u.horarios.length} horário${u.horarios.length === 1 ? '' : 's'} livre${u.horarios.length === 1 ? '' : 's'}`
             : 'sem horários no momento',
-      })),
+      }))),
     },
   }
 }
@@ -693,7 +706,7 @@ async function perguntarDia(
   // Sem agenda alem da quinzena nao adianta prometer: quem precisa de data
   // distante fala com a equipe, que enxerga o calendario inteiro.
   const rodape = podeTrocarUnidade
-    ? 'Digite VOLTAR para escolher outra unidade, ATENDENTE se precisar de uma data mais distante, ou MENU para o início.'
+    ? 'Digite VOLTAR para escolher outra unidade, ATENDENTE se precisar de uma data mais distante, ou 0 para o início.'
     : 'Digite ATENDENTE se precisar de uma data mais distante, ou MENU para o início.'
 
   return {
@@ -702,11 +715,13 @@ async function perguntarDia(
       `Responda com o número do dia.\n${rodape}`,
     lista: {
       rotulo: 'Escolher o dia',
-      linhas: mostrados.slice(0, MAX_TOQUES).map((d, i) => ({
-        id: String(i + 1),
-        titulo: formatarDia(d.horarios[0].inicio, timezone),
-        descricao: `${d.horarios.length} horário${d.horarios.length === 1 ? '' : 's'}`,
-      })),
+      linhas: comVoltar(
+        mostrados.map((d, i) => ({
+          id: String(i + 1),
+          titulo: formatarDia(d.horarios[0].inicio, timezone),
+          descricao: `${d.horarios.length} horário${d.horarios.length === 1 ? '' : 's'}`,
+        })),
+      ),
     },
   }
 }
@@ -757,14 +772,18 @@ async function perguntarHorario(
   return {
     // Acima de dez a lista tocavel nao cabe, e a mensagem numerada continua
     // valendo sozinha - por isso o `lista` sai condicional, e nao truncado.
-    ...(doDia.length <= MAX_TOQUES
+    // Uma das dez linhas fica para a volta, entao o dia so vira lista quando
+    // couberem nove horarios. Acima disso a mensagem numerada resolve sozinha.
+    ...(doDia.length <= MAX_TOQUES - 1
       ? {
           lista: {
             rotulo: 'Escolher horário',
-            linhas: doDia.map((h, i) => ({
-              id: String(i + 1),
-              titulo: formatarHora(h.inicio, timezone),
-            })),
+            linhas: comVoltar(
+              doDia.map((h, i) => ({
+                id: String(i + 1),
+                titulo: formatarHora(h.inicio, timezone),
+              })),
+            ),
           },
         }
       : {}),
@@ -991,7 +1010,7 @@ export async function tratarConversa(opcoes: {
       return {
         resposta:
           `${informacoes}\n\n` +
-          'Digite 2 para agendar, 3 para falar com a nossa equipe, ou MENU para ver as opções.',
+          'Digite 2 para agendar, 3 para falar com a nossa equipe, ou 0 para ver as opções.',
       }
     }
 
@@ -1201,7 +1220,7 @@ export async function tratarConversa(opcoes: {
       return {
         resposta:
           'Não entendi. Responda com o número do dia da lista acima.\n' +
-          'Digite VOLTAR para escolher outra unidade, ou MENU para o início.',
+          'Digite VOLTAR para escolher outra unidade, ou 0 para o início.',
       }
     }
     if (!opcoes.unidadeEmAndamento) {
@@ -1286,7 +1305,7 @@ export async function tratarConversa(opcoes: {
       return {
         resposta:
           'Não entendi. Responda com o número do horário da lista acima.\n' +
-          'Digite VOLTAR para escolher outro dia, ou MENU para o início.',
+          'Digite VOLTAR para escolher outro dia, ou 0 para o início.',
       }
     }
     if (!opcoes.unidadeEmAndamento) {
