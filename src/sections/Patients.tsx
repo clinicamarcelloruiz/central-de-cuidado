@@ -772,14 +772,22 @@ export default function Patients({
               <Field label="Convênio">
                 <input className={inputClass} value={form.convenio} onChange={(event) => set('convenio', event.target.value)} placeholder="Particular, Unimed..." />
               </Field>
-              <Field label="Nota administrativa" className="sm:col-span-2">
+              {/* Ate 31/08/2026 este texto e a "Observacoes" do prontuario eram
+                  a MESMA coluna, espelhada por gatilho: o medico escrevia a
+                  observacao clinica e apagava o recado da recepcao sem que
+                  ninguem visse. Agora sao dois campos de verdade, e o rotulo
+                  precisa deixar claro qual e qual. */}
+              <Field label="Recado da recepção" className="sm:col-span-2">
                 <textarea
                   className={`${inputClass} min-h-[84px] resize-y`}
                   value={form.observacoes}
                   onChange={(event) => set('observacoes', event.target.value)}
-                  placeholder="Ex.: preferência de contato, informação de recepção ou observação não clínica."
+                  placeholder="Ex.: prefere contato à tarde, vem sempre com a avó, reembolso pelo convênio."
                 />
-                <p className="mt-1.5 text-[9px] font-semibold text-slate-400">Queixa, CID, evolução e prescrição serão registrados no prontuário, na próxima etapa.</p>
+                <p className="mt-1.5 text-[9px] font-semibold text-slate-400">
+                  Fica na ficha da pessoa e acompanha todas as consultas. Observação clínica vai no
+                  prontuário, na próxima etapa.
+                </p>
               </Field>
             </div>
 

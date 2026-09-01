@@ -1303,3 +1303,67 @@ export async function importPatients(clinicId: string, data: Db) {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Modelos de texto do prontuario
+// ---------------------------------------------------------------------------
+
+export interface NoteTemplate {
+  id: string
+  /** Chave do campo do formulario. Vazio serve em qualquer campo. */
+  campo: string
+  titulo: string
+  texto: string
+}
+
+/**
+ * Todos os modelos ativos da clinica, de uma vez.
+ *
+ * Vem tudo junto e a tela filtra por campo: sao dezenas de linhas curtas, e uma
+ * consulta por campo aberto significaria doze idas ao banco para abrir um
+ * prontuario.
+ */
+export async function listNoteTemplates(clinicId: string): Promise<NoteTemplate[]> {
+  const { data, error } = await supabase
+    .from('note_templates')
+    .select('id,field,title,body')
+    .eq('clinic_id', clinicId)
+    .is('archived_at', null)
+    .order('title')
+  if (error) fail(error)
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    campo: row.field ?? '',
+    titulo: row.title,
+    texto: row.body ?? '',
+  }))
+}
+
+export async function createNoteTemplate(
+  clinicId: string,
+  campo: string,
+  titulo: string,
+  texto: string,
+): Promise<NoteTemplate> {
+  const { data, error } = await supabase
+    .from('note_templates')
+    .insert({
+      clinic_id: clinicId,
+      field: campo.slice(0, 40),
+      title: titulo.trim().slice(0, 80),
+      body: texto.slice(0, 8000),
+    })
+    .select('id,field,title,body')
+    .single()
+  if (error) fail(error)
+  return { id: data.id, campo: data.field ?? '', titulo: data.title, texto: data.body ?? '' }
+}
+
+/** Aposenta o modelo. Nao apaga: consulta antiga pode ter sido escrita com ele. */
+export async function archiveNoteTemplate(templateId: string) {
+  const { error } = await supabase
+    .from('note_templates')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', templateId)
+  if (error) fail(error)
+}
