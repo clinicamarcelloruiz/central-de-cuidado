@@ -25,6 +25,8 @@ const HORAS_RESERVA = 24
 const MAX_DIAS = 10
 /** Horarios de um dia. Um expediente de 8h as 18h em blocos de 40min da 15. */
 const MAX_HORARIOS_DIA = 15
+/** Teto do WhatsApp para linhas de uma lista tocavel. */
+const MAX_TOQUES = 10
 
 /**
  * O cliente com service_role que o webhook ja tem em maos. Tipar pelo retorno
@@ -45,10 +47,24 @@ export type Estado =
   | 'atendente'
 export type MotivoAtencao = 'atendente' | 'falha' | 'cancelou_sozinho'
 
+/**
+ * Botao ou linha de lista tocavel no WhatsApp.
+ *
+ * O `id` e o que volta quando a pessoa toca, e ele e escrito de proposito com
+ * exatamente o mesmo texto que o robo ja aceita digitado ("2", "CANCELAR",
+ * "SIM"). Assim tocar e digitar entram pelo mesmo caminho, e quem prefere
+ * escrever - ou usa um aparelho que nao mostra a lista - continua atendido.
+ */
+export type Toque = { id: string; titulo: string; descricao?: string }
+
 export type Resultado = {
   resposta: string
   /** Preenchido quando a conversa precisa de alguem da equipe. */
   atencao?: MotivoAtencao
+  /** Ate tres botoes lado a lado. Acima disso, use lista. */
+  botoes?: Toque[]
+  /** Lista tocavel: o rotulo abre o menu, as linhas sao as opcoes (max. 10). */
+  lista?: { rotulo: string; linhas: Toque[] }
 } | null
 
 type Unidade = { id: string; name: string; address: string }
@@ -338,7 +354,18 @@ async function mostrarMenu(
   // Com aviso, o aviso ja e a instrucao. Repetir "Como podemos ajudar?" logo
   // depois de "Nao entendi, responda com o numero" dava duas ordens seguidas.
   const cabecalho = aviso || `${saudacao}\n\nComo podemos ajudar? Responda com o número:`
-  return { resposta: `${cabecalho}\n\n${OPCOES}` }
+  return {
+    resposta: `${cabecalho}\n\n${OPCOES}`,
+    lista: {
+      rotulo: 'Ver opções',
+      linhas: [
+        { id: '1', titulo: 'Informações', descricao: 'Valores, contatos e orientações' },
+        { id: '2', titulo: 'Agendar consulta', descricao: 'Escolher unidade, dia e horário' },
+        { id: '3', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
+        { id: '4', titulo: 'Minha consulta', descricao: 'Ver, cancelar ou remarcar' },
+      ],
+    },
+  }
 }
 
 async function chamarEquipe(admin: Admin, conversationId: string): Promise<Resultado> {
@@ -400,6 +427,11 @@ async function mostrarMinhaConsulta(
       resposta:
         `Sua consulta:\n\n${descreverConsulta(consultas[0], timezone)}\n\n` +
         'Digite CANCELAR para desmarcar, REMARCAR para trocar a data, ou MENU para voltar.',
+      botoes: [
+        { id: 'REMARCAR', titulo: 'Remarcar' },
+        { id: 'CANCELAR', titulo: 'Cancelar consulta' },
+        { id: 'MENU', titulo: 'Voltar ao menu' },
+      ],
     }
   }
 
@@ -436,6 +468,10 @@ async function pedirConfirmacaoCancelamento(
       (remarcar
         ? 'Responda SIM para escolher a nova data. A consulta atual só será cancelada depois que a nova estiver marcada.'
         : 'Responda SIM para cancelar, ou MENU para deixar como está.'),
+    botoes: [
+      { id: 'SIM', titulo: remarcar ? 'Sim, escolher data' : 'Sim, cancelar' },
+      { id: 'MENU', titulo: 'Não, manter' },
+    ],
   }
 }
 
@@ -510,6 +546,11 @@ async function iniciarAgendamento(
         '1 - Remarcar (trocar por outra data)\n' +
         '2 - Marcar mais uma consulta, além dessa\n\n' +
         VOLTA,
+      botoes: [
+        { id: '1', titulo: 'Remarcar essa' },
+        { id: '2', titulo: 'Marcar mais uma' },
+        { id: 'MENU', titulo: 'Voltar ao menu' },
+      ],
     }
   }
 
@@ -582,6 +623,17 @@ async function perguntarUnidade(
     resposta:
       `Vamos agendar sua consulta.\n\nEm qual unidade você prefere ser atendido?\n\n${linhas}\n\n` +
       `Responda com o número. ${SAIDAS}`,
+    lista: {
+      rotulo: 'Escolher unidade',
+      linhas: comAgenda.slice(0, MAX_TOQUES).map((u, i) => ({
+        id: String(i + 1),
+        titulo: u.unidade.name,
+        descricao:
+          u.horarios.length > 0
+            ? `${u.horarios.length} horário${u.horarios.length === 1 ? '' : 's'} livre${u.horarios.length === 1 ? '' : 's'}`
+            : 'sem horários no momento',
+      })),
+    },
   }
 }
 
@@ -648,6 +700,14 @@ async function perguntarDia(
     resposta:
       `Datas disponíveis em ${unidade.name}:\n\n${linhas}\n\n` +
       `Responda com o número do dia.\n${rodape}`,
+    lista: {
+      rotulo: 'Escolher o dia',
+      linhas: mostrados.slice(0, MAX_TOQUES).map((d, i) => ({
+        id: String(i + 1),
+        titulo: formatarDia(d.horarios[0].inicio, timezone),
+        descricao: `${d.horarios.length} horário${d.horarios.length === 1 ? '' : 's'}`,
+      })),
+    },
   }
 }
 
@@ -695,6 +755,19 @@ async function perguntarHorario(
   })
 
   return {
+    // Acima de dez a lista tocavel nao cabe, e a mensagem numerada continua
+    // valendo sozinha - por isso o `lista` sai condicional, e nao truncado.
+    ...(doDia.length <= MAX_TOQUES
+      ? {
+          lista: {
+            rotulo: 'Escolher horário',
+            linhas: doDia.map((h, i) => ({
+              id: String(i + 1),
+              titulo: formatarHora(h.inicio, timezone),
+            })),
+          },
+        }
+      : {}),
     resposta:
       `Horários de ${formatarDia(doDia[0].inicio, timezone)}:\n\n${linhas}\n\n` +
       'Responda com o número do horário.\n' +
