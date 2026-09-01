@@ -9,7 +9,7 @@
     "build:standalone": "npm run build && node scripts/build-standalone.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:bot": "esbuild supabase/functions/_shared/atendimento.ts --format=esm --outfile=tests/atendimento.build.mjs && node tests/atendimento.test.mjs"
+    "test:bot": "esbuild supabase/functions/_shared/atendimento.ts --format=esm --outfile=tests/atendimento.build.mjs && esbuild supabase/functions/_shared/lembrete.ts --format=esm --outfile=tests/lembrete.build.mjs && node tests/atendimento.test.mjs && node tests/lembrete.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
