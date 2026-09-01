@@ -1,6 +1,6 @@
 import '../_shared/whatsapp.ts'
 import { adminClient, digits, sha256HmacHex, safeEqual } from '../_shared/whatsapp.ts'
-import { type Estado, tratarConversa } from '../_shared/atendimento.ts'
+import { type Estado, type Toque, tratarConversa } from '../_shared/atendimento.ts'
 
 function text(body: string, status = 200) {
   return new Response(body, { status, headers: { 'Content-Type': 'text/plain' } })
@@ -11,12 +11,32 @@ type WebhookMessage = {
   text?: { body?: string }
   button?: { text?: string; payload?: string }
   interactive?: {
-    button_reply?: { title?: string }
-    list_reply?: { title?: string }
+    button_reply?: { id?: string; title?: string }
+    list_reply?: { id?: string; title?: string }
   }
 }
 
 type DeliveryError = { title?: string; message?: string }
+
+/**
+ * Identificador do que a pessoa tocou, quando ela tocou em vez de digitar.
+ *
+ * Os ids sao escritos iguais ao que o robo ja aceita por escrito ("2", "SIM",
+ * "CANCELAR"), entao toque e digitacao entram pelo mesmo caminho e nenhuma
+ * regra precisou ser duplicada. O texto legivel continua indo para o historico.
+ */
+function idDoToque(message: WebhookMessage): string {
+  if (message.type === 'interactive') {
+    return (
+      message.interactive?.button_reply?.id ??
+      message.interactive?.list_reply?.id ??
+      ''
+    )
+  }
+  // Botao de modelo aprovado: a Meta manda o payload configurado no template.
+  if (message.type === 'button') return message.button?.payload ?? ''
+  return ''
+}
 
 function messageBody(message: WebhookMessage) {
   if (message.type === 'text') return message.text?.body ?? ''
@@ -29,6 +49,74 @@ function messageBody(message: WebhookMessage) {
 
 function normalizedReply(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+}
+
+/**
+ * Monta o conteudo da mensagem: texto simples, botoes ou lista tocavel.
+ *
+ * A Meta impoe limites duros - 3 botoes, 10 linhas, titulos curtos - e recusa a
+ * mensagem inteira quando algum estoura. Aqui, se o pedido nao couber, o envio
+ * cai para texto puro em vez de falhar: a mensagem numerada sozinha ja resolve,
+ * e uma resposta sem botao e infinitamente melhor do que resposta nenhuma.
+ */
+function montarConteudo(
+  texto: string,
+  toques?: { botoes?: Toque[]; lista?: { rotulo: string; linhas: Toque[] } },
+) {
+  const simples = { type: 'text', text: { preview_url: false, body: texto } }
+  if (!toques) return simples
+
+  const cabe = (valor: string, limite: number) => valor.length > 0 && valor.length <= limite
+
+  const botoes = toques.botoes ?? []
+  if (botoes.length > 0) {
+    if (botoes.length > 3 || texto.length > 1024) return simples
+    if (!botoes.every((b) => cabe(b.titulo, 20) && cabe(b.id, 256))) return simples
+    return {
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: texto },
+        action: {
+          buttons: botoes.map((b) => ({
+            type: 'reply',
+            reply: { id: b.id, title: b.titulo },
+          })),
+        },
+      },
+    }
+  }
+
+  const lista = toques.lista
+  if (lista && lista.linhas.length > 0) {
+    if (lista.linhas.length > 10 || texto.length > 1024) return simples
+    if (!cabe(lista.rotulo, 20)) return simples
+    if (!lista.linhas.every((l) => cabe(l.titulo, 24) && (!l.descricao || l.descricao.length <= 72))) {
+      return simples
+    }
+    return {
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        body: { text: texto },
+        action: {
+          button: lista.rotulo,
+          sections: [
+            {
+              title: 'Opções',
+              rows: lista.linhas.map((l) => ({
+                id: l.id,
+                title: l.titulo,
+                ...(l.descricao ? { description: l.descricao } : {}),
+              })),
+            },
+          ],
+        },
+      },
+    }
+  }
+
+  return simples
 }
 
 const statusRank: Record<string, number> = {
@@ -226,7 +314,10 @@ Deno.serve(async (req) => {
           }
 
           const body = messageBody(message)
-          const reply = normalizedReply(body)
+          // O que a pessoa quis dizer. Vindo de toque, e o id do botao; digitado,
+          // e o proprio texto. O `body` segue sendo o que aparece no historico.
+          const escolhido = idDoToque(message) || body
+          const reply = normalizedReply(escolhido)
           const optedOut = reply === 'sair' || reply === 'nao quero receber'
           const isWell = reply === 'estou bem'
           // Respostas ao lembrete de consulta. Aceita a palavra sozinha ou o
@@ -316,7 +407,11 @@ Deno.serve(async (req) => {
 
           /** Envia texto livre. Vale porque a mensagem que acabou de chegar
               abriu a janela de 24h - nao precisa de modelo aprovado. */
-          async function responder(texto: string, appointmentId: string | null = null) {
+          async function responder(
+            texto: string,
+            appointmentId: string | null = null,
+            toques?: { botoes?: Toque[]; lista?: { rotulo: string; linhas: Toque[] } },
+          ) {
             const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
             if (!token || !texto.trim()) return false
             const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
@@ -331,8 +426,7 @@ Deno.serve(async (req) => {
                   messaging_product: 'whatsapp',
                   recipient_type: 'individual',
                   to: waId,
-                  type: 'text',
-                  text: { preview_url: false, body: texto },
+                  ...montarConteudo(texto, toques),
                 }),
               },
             )
@@ -375,7 +469,7 @@ Deno.serve(async (req) => {
               opcoesAtuais: conversaAnterior?.booking_options ?? null,
               unidadeEmAndamento: conversaAnterior?.booking_unit_id ?? null,
               podeIniciarMenu: !respondendoEnvioNosso && !equipeFalouRecentemente,
-              texto: body,
+              texto: escolhido,
               telefone: waId,
               pacientes,
               pacienteEmAndamento: conversaAnterior?.booking_patient_id ?? null,
@@ -390,7 +484,10 @@ Deno.serve(async (req) => {
             })
 
             if (resultado) {
-              await responder(resultado.resposta)
+              await responder(resultado.resposta, null, {
+                botoes: resultado.botoes,
+                lista: resultado.lista,
+              })
               if (resultado.atencao) {
                 await admin
                   .from('whatsapp_conversations')
