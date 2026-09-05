@@ -25,6 +25,7 @@ import {
   Ruler,
   Scale,
   Search,
+  ShieldCheck,
   Stethoscope,
   Underline,
   UserRound,
@@ -47,9 +48,11 @@ import {
 import { fmtBR, idade, todayISO } from '@/lib/followup'
 import {
   archiveNoteTemplate,
+  conferirIntegridade,
   createNoteTemplate,
   getCurrentMembership,
   listNoteTemplates,
+  type Integridade,
   type NoteTemplate,
 } from '@/lib/repository'
 import type {
@@ -243,7 +246,18 @@ function formatarVariacao(atual: number | null, anterior: number | null) {
  * com rolagem propria, e mandar imprimir a pagina como esta cortaria o
  * conteudo. Aqui o documento nasce ja no formato de papel.
  */
-function imprimirProntuario(patient: Patient, consultas: Consultation[]) {
+/** SHA-256 em hexadecimal, com a criptografia que o proprio navegador oferece. */
+async function impressaoDigital(texto: string) {
+  const bytes = new TextEncoder().encode(texto)
+  const resumo = await crypto.subtle.digest('SHA-256', bytes)
+  return [...new Uint8Array(resumo)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function imprimirProntuario(
+  patient: Patient,
+  consultas: Consultation[],
+  integridade: Integridade | null,
+) {
   const campos: [string, keyof Consultation][] = [
     ['Queixa principal', 'queixa'],
     ['História / evolução', 'historiaEvolucao'],
@@ -272,6 +286,14 @@ function imprimirProntuario(patient: Patient, consultas: Consultation[]) {
     .join('')
 
   const corpo = consultas
+    // Consulta sem nada escrito nao vai para o papel: imprimiria um titulo e
+    // uma linha, ocupando espaco sem dizer nada a quem le.
+    .filter((consulta) =>
+      campos.some(([, chave]) => temTexto(String(consulta[chave] ?? ''))) ||
+      consulta.peso ||
+      consulta.altura ||
+      consulta.cid,
+    )
     .map((consulta) => {
       const imc = calcularIMC(consulta.peso, consulta.altura)
       const medidas = [
@@ -300,6 +322,28 @@ function imprimirProntuario(patient: Patient, consultas: Consultation[]) {
     })
     .join('')
 
+  // A impressao digital cobre exatamente o que esta escrito nesta folha. Quem
+  // receber o papel amanha pode conferir se ele corresponde ao que o sistema
+  // guarda - e nao apenas acreditar.
+  const digital = await impressaoDigital(`${cabecalhoPaciente}||${corpo}`)
+  const parVisivel = (v: string) => v.replace(/(.{8})/g, '$1 ').trim()
+
+  const selo = `
+    <div class="selo">
+      <div><span>Impressão digital deste documento</span><code>${parVisivel(digital)}</code></div>
+      ${
+        integridade?.selo
+          ? `<div><span>Selo do acervo neste instante</span><code>${parVisivel(integridade.selo.slice(0, 32))}…</code></div>
+             <div><span>Cadeia de auditoria</span><code>${
+               integridade.quebradoNoId
+                 ? `ADULTERAÇÃO DETECTADA no registro ${integridade.quebradoNoId}`
+                 : `${integridade.encadeados} registros conferidos, íntegra`
+             }</code></div>`
+          : ''
+      }
+      <p class="aviso">A impressão digital comprova que este documento não foi alterado depois de emitido. Não substitui assinatura digital ICP-Brasil.</p>
+    </div>`
+
   const documento = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
     <title>Prontuário - ${escapeHtml(patient.nome)}</title>
     <style>
@@ -311,13 +355,26 @@ function imprimirProntuario(patient: Patient, consultas: Consultation[]) {
       .paciente { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; margin-bottom: 22px; font-size: 11pt; }
       .paciente .r { display: inline-block; min-width: 105px; color: #55606b; }
       .paciente .v { font-weight: bold; }
-      .consulta { page-break-inside: avoid; border-top: 1px solid #d4d9de; padding-top: 14px; margin-top: 18px; }
-      .consulta h2 { font-size: 13pt; margin: 0 0 2px; }
-      .meta { margin: 0 0 12px; font-size: 10pt; color: #55606b; }
-      .bloco { margin-bottom: 11px; page-break-inside: avoid; }
+      /* A consulta PODE quebrar entre paginas. Ate 05/09/2026 ela nao podia, e
+         o resultado era pior do que o problema que a regra evitava: uma
+         consulta com doze campos nunca cabia no espaco restante, entao o bloco
+         inteiro pulava para a folha seguinte e a primeira saia quase em branco.
+         Quem nao pode quebrar e o pedaco pequeno - cada campo - e o titulo, que
+         nao pode ficar sozinho no rodape. */
+      .consulta { border-top: 1px solid #d4d9de; padding-top: 14px; margin-top: 18px; }
+      .consulta h2 { font-size: 13pt; margin: 0 0 2px; break-after: avoid; page-break-after: avoid; }
+      .meta { margin: 0 0 12px; font-size: 10pt; color: #55606b; break-after: avoid; page-break-after: avoid; }
+      .bloco { margin-bottom: 11px; page-break-inside: avoid; break-inside: avoid; }
+      .bloco h3 { break-after: avoid; page-break-after: avoid; }
       .bloco h3 { font-size: 10pt; text-transform: uppercase; letter-spacing: .04em; color: #55606b; margin: 0 0 3px; font-weight: bold; }
       .txt ul, .txt ol { margin: 4px 0; padding-left: 20px; }
       footer { margin-top: 32px; border-top: 1px solid #d4d9de; padding-top: 10px; font-size: 9pt; color: #7b858e; }
+      footer p { margin: 0 0 8px; }
+      .selo { border: 1px solid #d4d9de; border-radius: 4px; padding: 8px 10px; font-size: 8pt; break-inside: avoid; page-break-inside: avoid; }
+      .selo div { display: flex; gap: 8px; margin-bottom: 3px; }
+      .selo span { min-width: 175px; color: #7b858e; }
+      .selo code { font-family: 'Courier New', monospace; color: #14202c; letter-spacing: .02em; word-break: break-all; }
+      .selo .aviso { margin: 6px 0 0; font-size: 7.5pt; font-style: italic; }
       @page { margin: 16mm; }
     </style></head><body>
     <header>
@@ -326,7 +383,10 @@ function imprimirProntuario(patient: Patient, consultas: Consultation[]) {
     </header>
     <div class="paciente">${cabecalhoPaciente}</div>
     ${corpo || '<p>Nenhuma consulta registrada.</p>'}
-    <footer>Documento gerado pelo sistema em ${new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date())}. Documento sigiloso, de uso restrito conforme a legislação de proteção de dados.</footer>
+    <footer>
+      <p>Documento gerado pelo sistema em ${new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date())}. Documento sigiloso, de uso restrito conforme a legislação de proteção de dados.</p>
+      ${selo}
+    </footer>
     </body></html>`
 
   const janela = window.open('', '_blank', 'width=900,height=1000')
@@ -1275,6 +1335,8 @@ export default function PatientRecord({
   // prontuario e compartilhados por todos os campos - e nao um pedido por campo.
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [modelos, setModelos] = useState<NoteTemplate[]>([])
+  const [integridade, setIntegridade] = useState<Integridade | null>(null)
+  const [conferindo, setConferindo] = useState(false)
   const [buscaConsulta, setBuscaConsulta] = useState('')
   const unidadesDaClinica = useUnidades()
 
@@ -1288,6 +1350,10 @@ export default function PatientRecord({
         setClinicId(membership.clinicId)
         const lista = await listNoteTemplates(membership.clinicId)
         if (vivo) setModelos(lista)
+        // A integridade e carregada junto porque o documento impresso leva o
+        // selo dela: sem isso, imprimir logo depois de abrir sairia sem selo.
+        const estado = await conferirIntegridade(membership.clinicId)
+        if (vivo) setIntegridade(estado)
       } catch {
         // Modelo e conveniencia: se a lista falhar, o prontuario continua
         // inteiro e o medico escreve como sempre escreveu.
@@ -1302,6 +1368,16 @@ export default function PatientRecord({
     if (!clinicId) return
     const criado = await createNoteTemplate(clinicId, campo, titulo, texto)
     setModelos((atuais) => [...atuais, criado].sort((a, b) => a.titulo.localeCompare(b.titulo)))
+  }
+
+  async function reconferirIntegridade() {
+    if (!clinicId) return
+    setConferindo(true)
+    try {
+      setIntegridade(await conferirIntegridade(clinicId))
+    } finally {
+      setConferindo(false)
+    }
   }
 
   async function apagarModelo(id: string) {
@@ -1543,11 +1619,41 @@ export default function PatientRecord({
                 {consultations.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => imprimirProntuario(patient, consultasFiltradas)}
+                    onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade)}
                     className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/10 bg-white px-3.5 py-2.5 text-[11px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c]"
                     title="Abre a versão para impressão ou para salvar em PDF"
                   >
                     <Printer className="h-3.5 w-3.5" /> Imprimir
+                  </button>
+                )}
+                {/* A corrente de auditoria so vale se alguem puder conferi-la.
+                    Um selo que ninguem checa e enfeite. */}
+                {integridade && (
+                  <button
+                    type="button"
+                    onClick={() => void reconferirIntegridade()}
+                    disabled={conferindo}
+                    className={`flex items-center justify-center gap-2 rounded-[14px] border px-3.5 py-2.5 text-[11px] font-extrabold transition disabled:cursor-wait ${
+                      integridade.quebradoNoId
+                        ? 'border-[#b42318]/30 bg-[#fef3f2] text-[#b42318] hover:border-[#b42318]/60'
+                        : 'border-[#557f75]/25 bg-[#eef3f2] text-[#557f75] hover:border-[#557f75]/50'
+                    }`}
+                    title={
+                      integridade.quebradoNoId
+                        ? `A cadeia de auditoria quebra no registro ${integridade.quebradoNoId}. Algum registro foi alterado fora do sistema.`
+                        : `${integridade.encadeados} registros de auditoria conferidos, nenhum alterado. Clique para conferir de novo.`
+                    }
+                  >
+                    {integridade.quebradoNoId ? (
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                    ) : (
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                    )}
+                    {conferindo
+                      ? 'Conferindo...'
+                      : integridade.quebradoNoId
+                        ? 'Integridade violada'
+                        : 'Íntegro'}
                   </button>
                 )}
                 <button
