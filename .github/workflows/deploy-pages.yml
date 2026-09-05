@@ -95,6 +95,7 @@ jobs:
           supabase functions deploy meta-webhook --project-ref "$PROJECT_REF"
           supabase functions deploy whatsapp-dispatch --project-ref "$PROJECT_REF"
           supabase functions deploy whatsapp-reply --project-ref "$PROJECT_REF"
+          supabase functions deploy whatsapp-reopen --project-ref "$PROJECT_REF"
           supabase functions deploy appointment-reminders --project-ref "$PROJECT_REF"
           supabase functions deploy transcrever-audio --project-ref "$PROJECT_REF"
 

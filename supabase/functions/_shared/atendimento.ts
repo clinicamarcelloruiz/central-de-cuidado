@@ -20,7 +20,6 @@
 
 import type { adminClient } from './whatsapp.ts'
 
-const HORAS_RESERVA = 24
 /** Dias oferecidos de uma vez. Cabe a quinzena inteira numa mensagem so. */
 const MAX_DIAS = 10
 /** Horarios de um dia. Um expediente de 8h as 18h em blocos de 40min da 15. */
@@ -813,8 +812,6 @@ async function marcar(
     .maybeSingle()
   const timezone = await fusoDaClinica(admin, clinicId)
 
-  const cadastrado = Boolean(paciente?.id)
-  const agora = new Date()
 
   // Lido antes de inserir, porque a antiga so e cancelada la embaixo - e depois
   // de cancelada continuaria legivel, mas depender disso seria contar com uma
@@ -841,12 +838,15 @@ async function marcar(
     // quem esta esperando confirmacao. Melhor do que so um numero de telefone.
     contact_name: paciente?.name || nomeDoPerfil || '',
     contact_phone: telefone,
-    // Cadastrado marca direto. Pessoa nova fica reservada por 24h ate a
-    // recepcao confirmar - foi a regra que a clinica escolheu.
-    confirmed_by_clinic: cadastrado,
-    hold_expires_at: cadastrado
-      ? null
-      : new Date(agora.getTime() + HORAS_RESERVA * 3600 * 1000).toISOString(),
+    // Todo mundo sai daqui com consulta marcada, com ou sem cadastro.
+    //
+    // Antes quem nao tinha cadastro saia com uma reserva de 24h "aguardando
+    // confirmacao". Na pratica isso trocava a certeza de quem acabou de marcar
+    // por uma tarefa para a recepcao - e quem chegou pelo WhatsApp e
+    // exatamente quem ainda nao conhece a clinica e mais precisa sair seguro.
+    // O lembrete da vespera continua sendo a checagem de que a pessoa vem.
+    confirmed_by_clinic: true,
+    hold_expires_at: null,
     reschedule_count: vezesRemarcada,
     rescheduled_from: substitui,
   })
@@ -882,20 +882,14 @@ async function marcar(
   const onde = `${unidade?.name ?? 'nossa unidade'}${unidade?.address ? `\n${unidade.address}` : ''}`
   const aviso = remarcou ? 'Consulta remarcada!' : 'Consulta marcada!'
 
-  if (cadastrado) {
-    return {
-      resposta:
-        `${aviso}\n\n${quando}\n${onde}\n\n` +
-        'Um dia antes enviamos um lembrete para você confirmar.\n\n' + VOLTA,
-    }
-  }
-
+  // Asterisco simples e o negrito do WhatsApp. O aviso da vespera vem destacado
+  // porque e a unica coisa que ainda se espera da pessoa - o resto da mensagem
+  // ela so precisa conferir.
   return {
     resposta:
-      `${remarcou ? 'Remarcamos! ' : ''}Recebemos sua solicitação para ${quando}, ` +
-      `em ${unidade?.name ?? 'nossa unidade'}.\n\n` +
-      'O horário está reservado para você. Nossa equipe confirma em até 24 horas e ' +
-      'retorna por aqui.\n\n' + VOLTA,
+      `${aviso}\n\n${quando}\n${onde}\n\n` +
+      '*Um dia antes da consulta enviamos uma mensagem aqui pelo WhatsApp para ' +
+      'você confirmar sua presença.*\n\n' + VOLTA,
   }
 }
 

@@ -135,6 +135,7 @@ export type Database = {
           whatsapp_autoreply_text: string
           appointment_reminder_days: number
           whatsapp_reminder_template_name: string
+          whatsapp_reopen_template_name: string
           template_d30: string
           template_m90: string
           updated_at: string
@@ -156,6 +157,7 @@ export type Database = {
           whatsapp_autoreply_text?: string
           appointment_reminder_days?: number
           whatsapp_reminder_template_name?: string
+          whatsapp_reopen_template_name?: string
           template_d30?: string
           template_m90?: string
           updated_at?: string
@@ -177,6 +179,7 @@ export type Database = {
           whatsapp_autoreply_text?: string
           appointment_reminder_days?: number
           whatsapp_reminder_template_name?: string
+          whatsapp_reopen_template_name?: string
           template_d30?: string
           template_m90?: string
           updated_at?: string

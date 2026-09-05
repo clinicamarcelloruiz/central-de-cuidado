@@ -59,6 +59,7 @@ import type {
   Patient,
 } from '@/types/patient'
 import { UNIDADES } from '@/types/patient'
+import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
 
 interface PatientRecordProps {
   patient: Patient | null
@@ -1275,6 +1276,7 @@ export default function PatientRecord({
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [modelos, setModelos] = useState<NoteTemplate[]>([])
   const [buscaConsulta, setBuscaConsulta] = useState('')
+  const unidadesDaClinica = useUnidades()
 
   useEffect(() => {
     if (!open) return
@@ -1746,7 +1748,11 @@ export default function PatientRecord({
                 </Field>
                 <Field label="Unidade" className="sm:col-span-2">
                   <select className={inputClass} value={form.unidade} onChange={(event) => set('unidade', event.target.value)}>
-                    {UNIDADES.map((unidade) => <option key={unidade} value={unidade}>{unidade}</option>)}
+                    {opcoesDeUnidade(unidadesDaClinica, form.unidade).map((unidade) => (
+                      <option key={unidade} value={unidade}>
+                        {unidade}
+                      </option>
+                    ))}
                   </select>
                 </Field>
                 <Field label="Peso (kg)">
