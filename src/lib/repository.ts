@@ -1144,11 +1144,61 @@ export async function listConsultations(clinicId: string, patientId: string) {
   return ((data ?? []) as ConsultationRow[]).map(mapConsultation)
 }
 
+/**
+ * Campos clinicos de uma consulta. Se todos estiverem vazios, ela nunca foi
+ * escrita por ninguem - e so o esqueleto que o cadastro cria.
+ */
+const CAMPOS_CLINICOS = [
+  'chief_complaint',
+  'clinical_history',
+  'personal_history',
+  'family_history',
+  'allergies',
+  'current_medications',
+  'physical_exam',
+  'assessment',
+  'plan',
+  'prescription',
+  'return_plan',
+  'notes',
+  'cid',
+] as const
+
+function semConteudoClinico(linha: ConsultationRow) {
+  const texto = (v: unknown) => String(v ?? '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()
+  return (
+    CAMPOS_CLINICOS.every((campo) => !texto((linha as unknown as Record<string, unknown>)[campo])) &&
+    linha.weight_kg === null &&
+    linha.height_cm === null
+  )
+}
+
 export async function createConsultation(
   clinicId: string,
   patientId: string,
   draft: ConsultationDraft,
 ) {
+  // Cadastrar um paciente cria automaticamente uma consulta inicial vazia - e
+  // dela que penduram os acompanhamentos de 30 e 90 dias. Quando o medico
+  // finalmente escreve o primeiro atendimento, ele deve PREENCHER esse
+  // esqueleto, e nao criar um segundo ao lado.
+  //
+  // Sem isto o prontuario abria mostrando "2 consultas registradas", uma delas
+  // com a data do agendamento futuro e nenhum conteudo. Parecia erro de
+  // digitacao do medico, e era o sistema falando duas vezes da mesma coisa.
+  const { data: existentes } = await supabase
+    .from('consultations')
+    .select('*')
+    .eq('clinic_id', clinicId)
+    .eq('patient_id', patientId)
+    .is('archived_at', null)
+
+  const esqueleto = ((existentes ?? []) as ConsultationRow[]).find(semConteudoClinico)
+
+  if (esqueleto) {
+    return editConsultation(clinicId, patientId, esqueleto.id, draft)
+  }
+
   const { data, error } = await supabase
     .from('consultations')
     .insert(consultationPayload(clinicId, patientId, draft))
@@ -1383,5 +1433,45 @@ export async function reopenConversation(conversationId: string) {
       (error as { context?: { body?: { error?: string } } }).context?.body?.error ??
       'Não foi possível enviar a mensagem de retomada.'
     throw new Error(detalhe)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Integridade do prontuario
+// ---------------------------------------------------------------------------
+
+export interface Integridade {
+  /** Registros de auditoria da clinica, inclusive os anteriores a corrente. */
+  total: number
+  /** Quantos deles entram na conferencia. */
+  encadeados: number
+  /** Hash da ponta da corrente. Representa o acervo naquele instante. */
+  selo: string | null
+  /** Id do primeiro elo adulterado. Nulo quando a corrente fecha. */
+  quebradoNoId: number | null
+  quebradoEm: string | null
+}
+
+/**
+ * Percorre a corrente de auditoria e diz se ela fecha.
+ *
+ * Recalcula cada elo a partir do conteudo gravado. Se algum hash nao bater, a
+ * funcao devolve o id exato do registro adulterado - a quebra aparece no ponto
+ * em que aconteceu, e nao como um "algo esta errado" generico.
+ */
+export async function conferirIntegridade(clinicId: string): Promise<Integridade> {
+  const { data, error } = await supabase.rpc('conferir_integridade_prontuario', {
+    p_clinic_id: clinicId,
+  })
+  if (error) fail(error)
+  const linha = (data ?? [])[0]
+  return {
+    total: Number(linha?.total ?? 0),
+    encadeados: Number(linha?.registros_encadeados ?? 0),
+    selo: linha?.selo ?? null,
+    quebradoNoId: linha?.quebrado_no_id === null || linha?.quebrado_no_id === undefined
+      ? null
+      : Number(linha.quebrado_no_id),
+    quebradoEm: linha?.quebrado_em ?? null,
   }
 }

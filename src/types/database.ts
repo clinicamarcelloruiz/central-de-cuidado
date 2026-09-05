@@ -813,6 +813,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      conferir_integridade_prontuario: {
+        Args: { p_clinic_id: string }
+        Returns: {
+          total: number
+          registros_encadeados: number
+          selo: string | null
+          quebrado_no_id: number | null
+          quebrado_em: string | null
+        }[]
+      }
       approve_access_request: {
         Args: {
           assigned_role?: Database["public"]["Enums"]["clinic_role"]
