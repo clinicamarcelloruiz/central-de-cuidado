@@ -1367,3 +1367,21 @@ export async function archiveNoteTemplate(templateId: string) {
     .eq('id', templateId)
   if (error) fail(error)
 }
+
+/**
+ * Retoma uma conversa cuja janela de 24 horas ja fechou.
+ *
+ * Manda um modelo aprovado, que e a unica coisa que a Meta aceita fora da
+ * janela. Nao resolve o assunto: reabre a porta para a equipe escrever.
+ */
+export async function reopenConversation(conversationId: string) {
+  const { error } = await supabase.functions.invoke('whatsapp-reopen', {
+    body: { conversationId },
+  })
+  if (error) {
+    const detalhe =
+      (error as { context?: { body?: { error?: string } } }).context?.body?.error ??
+      'Não foi possível enviar a mensagem de retomada.'
+    throw new Error(detalhe)
+  }
+}

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Check,
+  CheckCheck,
   CircleSlash,
+  Clock3,
   MessageSquareText,
   RefreshCw,
   RotateCcw,
@@ -20,6 +22,7 @@ import {
   listConversations,
   getReplyWindow,
   markConversationSeen,
+  reopenConversation,
   resetConversationBot,
   resolveConversation,
   saveAutoReply,
@@ -94,6 +97,46 @@ const MOTIVO_ATENCAO: Record<
   },
 }
 
+/**
+ * O papel do WhatsApp: bege com o rabisco discreto por cima.
+ *
+ * O padrao vai inline como SVG porque nenhum arquivo externo carrega dentro do
+ * sistema, e porque um fundo liso perde a referencia visual - e justamente ela
+ * que faz a equipe reconhecer a tela como "a conversa do paciente".
+ */
+const FUNDO_WHATSAPP = {
+  backgroundColor: '#efeae2',
+  backgroundImage:
+    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='none' stroke='%23c4b8a8' stroke-width='1.1' stroke-linecap='round' opacity='.34'%3E%3Cpath d='M10 14h10M12 22c3-3 7-3 10 0'/%3E%3Ccircle cx='58' cy='16' r='5'/%3E%3Cpath d='M50 44l5 5 8-9M20 58h14M22 66h10'/%3E%3Cpath d='M64 62c0 3-3 5-6 5s-6-2-6-5 3-5 6-5 6 2 6 5z'/%3E%3Cpath d='M32 30l6 6 6-6'/%3E%3C/g%3E%3C/svg%3E\")",
+} as const
+
+/**
+ * Os tiquinhos de entrega, como no aplicativo.
+ *
+ * Antes esta informacao aparecia como a palavra crua do sistema ("delivered",
+ * "read") colada na hora. Quem le a tela ja conhece o simbolo de sempre; ler
+ * ingles tecnico ali era ruido.
+ */
+function Confirmacao({ status }: { status: string }) {
+  if (status === 'failed') {
+    return <span className="font-bold text-[#b42318]">falhou</span>
+  }
+  if (status === 'queued' || status === 'accepted') {
+    return <Clock3 className="h-3.5 w-3.5" aria-label="enviando" />
+  }
+  if (status === 'sent') {
+    return <Check className="h-3.5 w-3.5" aria-label="enviada" />
+  }
+  // Azul so quando o paciente abriu de fato - e a unica confirmacao que diz
+  // algo sobre a pessoa, e nao sobre o aparelho dela.
+  return (
+    <CheckCheck
+      className={`h-3.5 w-3.5 ${status === 'read' ? 'text-[#53bdeb]' : ''}`}
+      aria-label={status === 'read' ? 'lida' : 'entregue'}
+    />
+  )
+}
+
 function formatWhen(value: string | null) {
   if (!value) return '-'
   const date = new Date(value)
@@ -133,6 +176,8 @@ export default function Conversations({
   const [enviando, setEnviando] = useState(false)
   // Instante em que a janela de 24h da Meta fecha para a conversa aberta.
   const [janelaAte, setJanelaAte] = useState<string | null>(null)
+  const [reabrindo, setReabrindo] = useState(false)
+  const [avisoRetomada, setAvisoRetomada] = useState('')
   // Recalculado a cada minuto: sem isso a caixa continuaria habilitada depois
   // de a janela vencer com a tela aberta.
   const [agora, setAgora] = useState(() => Date.now())
@@ -284,6 +329,22 @@ export default function Conversations({
       setJanelaAte(await getReplyWindow(selectedId).catch(() => null))
     } finally {
       setEnviando(false)
+    }
+  }
+
+  async function reabrirConversa() {
+    if (!selectedId) return
+    setReabrindo(true)
+    setAvisoRetomada('')
+    try {
+      await reopenConversation(selectedId)
+      // A janela so reabre quando o PACIENTE responder, entao a caixa continua
+      // desligada de proposito. Recarregar as mensagens mostra o que saiu.
+      setMessages(await listConversationMessages(selectedId))
+    } catch (causa) {
+      setAvisoRetomada(causa instanceof Error ? causa.message : 'Não foi possível enviar.')
+    } finally {
+      setReabrindo(false)
     }
   }
 
@@ -773,45 +834,46 @@ export default function Conversations({
                     Carregando mensagens...
                   </p>
                 ) : (
-                  <div className="mt-3 space-y-2.5">
-                    {messages.map((message) => {
-                      const outbound = message.direction === 'outbound'
-                      return (
-                        <div
-                          key={message.id}
-                          className={`flex ${outbound ? 'justify-end' : 'justify-start'}`}
-                        >
+                  /* A conversa imita o WhatsApp de proposito: mesmo papel
+                     bege, verde nosso a direita, branco do paciente a
+                     esquerda, hora e confirmacao dentro do balao. Quem le esta
+                     tela precisa saber na hora o que o paciente esta vendo do
+                     outro lado, e o painel escuro do resto do sistema obrigava
+                     a traduzir mentalmente a cada mensagem. */
+                  <div className="mt-3 rounded-[14px] bg-[#efeae2] px-3 py-4" style={FUNDO_WHATSAPP}>
+                    <div className="space-y-2">
+                      {messages.map((message) => {
+                        const outbound = message.direction === 'outbound'
+                        return (
                           <div
-                            className={`max-w-[80%] rounded-[16px] px-3 py-2 ${
-                              outbound
-                                ? 'bg-[#081b2c] text-white'
-                                : 'bg-[#f4f6f5] text-[#081b2c]'
-                            }`}
+                            key={message.id}
+                            className={`flex ${outbound ? 'justify-end' : 'justify-start'}`}
                           >
-                            <p className="whitespace-pre-wrap text-[11px] leading-relaxed">
-                              {message.body ||
-                                (message.templateName
-                                  ? `[modelo: ${message.templateName}]`
-                                  : '[sem conteúdo]')}
-                            </p>
-                            <p
-                              className={`mt-1 flex items-center gap-1 text-[9px] font-bold ${
-                                outbound ? 'text-white/60' : 'text-slate-400'
+                            <div
+                              className={`relative max-w-[78%] rounded-[8px] px-2.5 py-1.5 shadow-[0_1px_0.5px_rgba(11,20,26,.13)] ${
+                                outbound ? 'bg-[#d9fdd3]' : 'bg-white'
                               }`}
                             >
-                              {outbound && <Send className="h-2.5 w-2.5" />}
-                              {formatWhen(message.createdAt)}
-                              {outbound && ` · ${message.status}`}
-                            </p>
-                            {message.failureReason && (
-                              <p className="mt-1 text-[9px] font-bold text-red-300">
-                                {message.failureReason}
+                              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-[19px] text-[#111b21]">
+                                {message.body ||
+                                  (message.templateName
+                                    ? `[modelo: ${message.templateName}]`
+                                    : '[sem conteúdo]')}
                               </p>
-                            )}
+                              <span className="mt-0.5 flex items-center justify-end gap-1 text-[11px] leading-none text-[#667781]">
+                                {formatWhen(message.createdAt)}
+                                {outbound && <Confirmacao status={message.status} />}
+                              </span>
+                              {message.failureReason && (
+                                <p className="mt-1 text-[11px] font-semibold text-[#b42318]">
+                                  {message.failureReason}
+                                </p>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )
-                    })}
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
 
@@ -861,6 +923,11 @@ export default function Conversations({
                       </div>
                     </>
                   ) : (
+                    /* Antes daqui saia so o aviso, e a equipe ficava sem saida
+                       dentro do proprio sistema: lia "e preciso um modelo
+                       aprovado" e nao tinha por onde enviar um. O botao manda o
+                       modelo de utilidade que reabre a conversa - ele nao
+                       resolve o assunto, abre a porta para resolver. */
                     <div className="rounded-[14px] border border-[#dc8e5f]/30 bg-[#fdf5ef] px-4 py-3">
                       <p className="text-[11px] font-extrabold text-[#8a4b1d]">
                         {janelaAte
@@ -869,8 +936,21 @@ export default function Conversations({
                       </p>
                       <p className="mt-1 text-[10px] font-semibold text-[#8a4b1d]/80">
                         A Meta só permite texto livre nas 24 horas seguintes à mensagem do
-                        paciente. Para retomar agora, é preciso enviar um modelo aprovado.
+                        paciente. Dá para enviar um convite para o paciente responder — quando ele
+                        responder, a janela reabre e você escreve normalmente.
                       </p>
+                      <button
+                        type="button"
+                        disabled={reabrindo}
+                        onClick={() => void reabrirConversa()}
+                        className="mt-2.5 inline-flex items-center gap-1.5 rounded-xl bg-[#8a4b1d] px-4 py-2 text-[10px] font-extrabold text-white transition hover:bg-[#733c15] disabled:cursor-wait disabled:opacity-50"
+                      >
+                        <MessageSquareText className="h-3.5 w-3.5" />
+                        {reabrindo ? 'Enviando...' : 'Enviar convite para retomar a conversa'}
+                      </button>
+                      {avisoRetomada && (
+                        <p className="mt-2 text-[10px] font-bold text-[#b42318]">{avisoRetomada}</p>
+                      )}
                     </div>
                   )}
                 </div>

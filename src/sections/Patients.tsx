@@ -20,6 +20,7 @@ import type { PatientDraft } from '@/lib/store'
 import PatientRecord from '@/sections/PatientRecord'
 import { fmtBR, idade } from '@/lib/followup'
 import { FOLLOWUP_LABEL, UNIDADES } from '@/types/patient'
+import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
 import {
   Sheet,
   SheetContent,
@@ -78,12 +79,12 @@ function sexoPeloNome(nomeCompleto: string): 'F' | 'M' | null {
  * cadastrada a mao na agenda pode sair com hifen ou sem acento, e e melhor
  * casar mesmo assim do que deixar o campo em branco sem explicar por que.
  */
-function unidadeEquivalente(nomeDaAgenda: string): string | null {
+function unidadeEquivalente(nomeDaAgenda: string, opcoes: string[]): string | null {
   const limpar = (v: string) =>
     v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/gi, ' ').trim().toLowerCase()
   const alvo = limpar(nomeDaAgenda)
   if (!alvo) return null
-  return UNIDADES.find((opcao) => limpar(opcao) === alvo) ?? null
+  return opcoes.find((opcao) => limpar(opcao) === alvo) ?? null
 }
 
 function emptyDraft(): PatientDraft {
@@ -192,6 +193,7 @@ export default function Patients({
   preCadastro = null,
   onPacienteCriado,
 }: Props) {
+  const unidadesDaClinica = useUnidades()
   const [query, setQuery] = useState('')
   // Lista simples e o padrao: cabe mais paciente na tela e a busca visual e
   // mais rapida. O modo de cartoes continua a um clique.
@@ -221,8 +223,9 @@ export default function Patients({
           nome: preCadastro.nome,
           telefone: preCadastro.telefone,
           ...(preCadastro.dataConsulta ? { dataConsulta: preCadastro.dataConsulta } : {}),
-          ...(preCadastro.unidade && unidadeEquivalente(preCadastro.unidade)
-            ? { unidade: unidadeEquivalente(preCadastro.unidade)! }
+          ...(preCadastro.unidade &&
+          unidadeEquivalente(preCadastro.unidade, opcoesDeUnidade(unidadesDaClinica))
+            ? { unidade: unidadeEquivalente(preCadastro.unidade, opcoesDeUnidade(unidadesDaClinica))! }
             : {}),
           ...((sexoPeloNome(preCadastro.nome) && { sexo: sexoPeloNome(preCadastro.nome)! }) || {}),
         }
@@ -760,7 +763,11 @@ export default function Patients({
               </Field>
               <Field label="Unidade">
                 <select className={inputClass} value={form.unidade} onChange={(event) => set('unidade', event.target.value)}>
-                  {UNIDADES.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                  {opcoesDeUnidade(unidadesDaClinica, form.unidade).map((unit) => (
+                    <option key={unit} value={unit}>
+                      {unit}
+                    </option>
+                  ))}
                 </select>
               </Field>
               <Field label="Cidade">
