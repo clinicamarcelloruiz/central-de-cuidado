@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import type { Db, FollowupKey } from '@/types/patient'
 import { DEFAULT_TEMPLATES } from '@/lib/store'
-import { atualizarFotoDoPerfil } from '@/lib/repository'
+import { atualizarFotoDoPerfil, situacaoDoWhatsApp, type SituacaoDoNumero } from '@/lib/repository'
 
 const inputClass =
   'mt-3 min-h-[138px] w-full resize-y rounded-[18px] border border-[#081b2c]/10 bg-[#fafaf8] p-4 text-xs font-medium leading-relaxed text-[#203546] outline-none transition placeholder:text-slate-300 focus:border-[#dc8e5f] focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10'
@@ -28,6 +28,21 @@ interface Props {
 }
 
 export default function Settings({ db, setTemplates, importDb, clearAll }: Props) {
+  const [situacao, setSituacao] = useState<SituacaoDoNumero | null>(null)
+  const [erroSituacao, setErroSituacao] = useState('')
+
+  // Consulta na abertura das configuracoes. E leitura pura na Meta, entao nao
+  // custa nada e evita ter que lembrar de apertar um botao para saber.
+  useEffect(() => {
+    void (async () => {
+      try {
+        setSituacao(await situacaoDoWhatsApp())
+      } catch (causa) {
+        setErroSituacao(causa instanceof Error ? causa.message : 'Falha ao consultar.')
+      }
+    })()
+  }, [])
+
   const [trocandoFoto, setTrocandoFoto] = useState(false)
   const [avisoFoto, setAvisoFoto] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
 
@@ -264,13 +279,35 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
               <ImageUp className="h-4 w-4" />
             </span>
             <div>
-              <h2 className="text-xs font-extrabold text-[#081b2c]">Foto do perfil no WhatsApp</h2>
+              <h2 className="text-xs font-extrabold text-[#081b2c]">Perfil no WhatsApp</h2>
               <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400">
                 Usa a imagem publicada em drmarcelloruiz.com.br/assets/perfil-whatsapp.png. É ela
                 que os pacientes veem ao receber as mensagens da clínica.
               </p>
             </div>
           </div>
+          {/* O estado do nome vem da propria Meta. Antes disto so dava para
+              olhar o Gerenciador e adivinhar o que cada rotulo queria dizer. */}
+          {situacao && (
+            <dl className="mt-4 space-y-1.5 rounded-xl bg-[#f8f7f4] px-3 py-2.5 text-[10px]">
+              <div className="flex justify-between gap-3">
+                <dt className="font-bold text-slate-400">Nome em uso</dt>
+                <dd className="text-right font-extrabold text-[#081b2c]">{situacao.nomeAtual ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="font-bold text-slate-400">Situação desse nome</dt>
+                <dd className="text-right font-bold text-slate-600">{situacao.situacaoDoNomeAtual}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="font-bold text-slate-400">Pedido em andamento</dt>
+                <dd className="text-right font-bold text-slate-600">{situacao.situacaoDoPedido}</dd>
+              </div>
+            </dl>
+          )}
+          {erroSituacao && (
+            <p className="mt-3 text-[10px] font-bold leading-relaxed text-red-500">{erroSituacao}</p>
+          )}
+
           <button
             type="button"
             onClick={() => void trocarFoto()}

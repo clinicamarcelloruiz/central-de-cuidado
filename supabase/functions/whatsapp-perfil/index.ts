@@ -16,7 +16,24 @@ import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.
  * arquivo la e chamar isto de novo.
  */
 
-type Pedido = { imagemUrl?: string }
+type Pedido = { imagemUrl?: string; acao?: 'foto' | 'status' }
+
+/**
+ * Como a Meta chama cada situacao do nome, em portugues.
+ *
+ * Os codigos dela sao secos e alguns enganam: DECLINED nao quer dizer que o
+ * numero esta bloqueado, so que aquele nome especifico foi recusado. Sem esta
+ * traducao, quem le a tela conclui coisa errada - foi exatamente a duvida que
+ * levou a este painel.
+ */
+const SITUACOES: Record<string, string> = {
+  APPROVED: 'Aprovado',
+  AVAILABLE_WITHOUT_REVIEW: 'Em uso, sem necessidade de análise',
+  DECLINED: 'Recusado',
+  EXPIRED: 'Expirado',
+  PENDING_REVIEW: 'Em análise',
+  NONE: 'Nenhum pedido em andamento',
+}
 
 const PADRAO = 'https://drmarcelloruiz.com.br/assets/perfil-whatsapp.png'
 
@@ -45,6 +62,36 @@ Deno.serve(async (req) => {
 
     const versao = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
     const corpo = (await req.json().catch(() => ({}))) as Pedido
+
+    // Consulta o estado do nome. So leitura - nao submete nada, nao gasta
+    // nenhuma das tres trocas permitidas em 30 dias.
+    if (corpo.acao === 'status') {
+      const campos = 'verified_name,name_status,new_name_status,display_phone_number,quality_rating'
+      const consulta = await fetch(
+        `https://graph.facebook.com/${versao}/${ajustes.whatsapp_phone_number_id}` +
+          `?fields=${campos}&access_token=${encodeURIComponent(token)}`,
+      )
+      const dados = await consulta.json()
+      if (!consulta.ok) {
+        return json({
+          error: 'A Meta recusou a consulta do número.',
+          details: JSON.stringify(dados).slice(0, 400),
+        }, 502)
+      }
+
+      const traduz = (v: unknown) =>
+        typeof v === 'string' ? SITUACOES[v] ?? v : 'Não informado'
+
+      return json({
+        ok: true,
+        numero: dados.display_phone_number ?? null,
+        nomeAtual: dados.verified_name ?? null,
+        situacaoDoNomeAtual: traduz(dados.name_status),
+        situacaoDoPedido: traduz(dados.new_name_status),
+        qualidade: dados.quality_rating ?? null,
+      })
+    }
+
     const imagemUrl = corpo.imagemUrl?.trim() || PADRAO
 
     // 1) Buscar a imagem.
