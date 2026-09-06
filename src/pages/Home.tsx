@@ -314,9 +314,16 @@ export default function Home() {
             {/* Versao publicada. Serve para responder, sem adivinhacao, se a
                 tela aberta ja e a de depois da ultima publicacao - o GitHub
                 leva minutos para servir o build novo e o navegador guarda o
-                antigo em cache. */}
+                antigo em cache.
+
+                O "typeof" nao e preciosismo: se o build sair sem estas
+                variaveis, o nome sozinho derruba a pagina inteira com
+                ReferenceError - foi o que aconteceu em 06/09/2026, quando o
+                vite.config.ts nao subiu junto e o sistema abriu em branco.
+                Uma etiqueta de versao nao pode ter poder de apagar a tela. */}
             <p className="relative mt-3 text-[9px] font-semibold tracking-[0.06em] text-white/25">
-              Versão {__VERSAO__} · {__COMMIT__}
+              Versão {typeof __VERSAO__ === 'string' ? __VERSAO__ : '?'} ·{' '}
+              {typeof __COMMIT__ === 'string' ? __COMMIT__ : '?'}
             </p>
           </div>
 
