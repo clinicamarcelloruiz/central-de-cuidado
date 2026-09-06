@@ -121,9 +121,17 @@ Deno.serve(async (req) => {
     if (procura.status !== 404) {
       const detalhe = await procura.text()
       console.error('Memed recusou a consulta', procura.status, detalhe)
+
+      // 502/503/504 nao e recusa, e servico fora do ar - e a diferenca importa
+      // para quem esta na frente da tela. O ambiente de teste da Memed dorme
+      // nos fins de semana e das 0h as 6h; dizer "recusou" nesse caso manda o
+      // medico procurar erro onde nao ha.
+      const foraDoAr = procura.status >= 502 && procura.status <= 504
       return json({
-        error: 'A Memed recusou a consulta do prescritor.',
-        code: 'MEMED_RECUSOU',
+        error: foraDoAr
+          ? 'A Memed está fora do ar no momento. Tente de novo em alguns minutos.'
+          : 'A Memed recusou a consulta do prescritor.',
+        code: foraDoAr ? 'MEMED_FORA_DO_AR' : 'MEMED_RECUSOU',
         status: procura.status,
         details: detalhe.slice(0, 300),
       }, 502)

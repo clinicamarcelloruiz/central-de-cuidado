@@ -52,6 +52,7 @@ import {
   archiveNoteTemplate,
   concluirAssinatura,
   conferirIntegridade,
+  listPrescriptions,
   iniciarAssinatura,
   linkDoAtendimentoAssinado,
   createNoteTemplate,
@@ -59,6 +60,7 @@ import {
   listNoteTemplates,
   type Integridade,
   type NoteTemplate,
+  type Receita,
 } from '@/lib/repository'
 import type {
   Consultation,
@@ -1390,6 +1392,7 @@ function ConsultationCard({
   onAbrirAssinado,
   onPrescrever,
   prescrevendo,
+  receitas,
   assinando,
 }: {
   consultation: Consultation
@@ -1400,6 +1403,8 @@ function ConsultationCard({
   onAbrirAssinado: (consultation: Consultation) => void
   onPrescrever: (consultation: Consultation) => void
   prescrevendo: boolean
+  /** Receitas emitidas neste atendimento. */
+  receitas: Receita[]
   /** Id da consulta cuja assinatura esta em andamento, se houver. */
   assinando: string | null
 }) {
@@ -1604,11 +1609,108 @@ function ConsultationCard({
           <Detail label="Avaliação e hipótese diagnóstica" value={consultation.avaliacao} />
           <Detail label="Conduta" value={consultation.conduta} />
           <Detail label="Prescrição" value={consultation.prescricao} />
+          {/* As receitas da Memed entram no prontuario com os itens escritos,
+              e nao so com o link: se a integracao acabar amanha, o atendimento
+              continua dizendo o que foi prescrito. O link e conveniencia. */}
+          {receitas.length > 0 && (
+            <div>
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-slate-500">
+                Receitas emitidas
+              </p>
+              <div className="mt-2 space-y-2">
+                {receitas.map((receita) => (
+                  <div
+                    key={receita.id}
+                    className={`rounded-[14px] border px-4 py-3 ${
+                      receita.excluidaEm
+                        ? 'border-[#081b2c]/10 bg-[#fafaf8]'
+                        : 'border-[#2563eb]/20 bg-[#f7f9fe]'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-[#1d4ed8]">
+                        <Pill className="h-3.5 w-3.5" />
+                        {fmtBR(receita.emitidaEm.slice(0, 10))}
+                      </span>
+                      {receita.excluidaEm ? (
+                        <span className="text-[10px] font-bold text-slate-400">
+                          Receita cancelada pelo médico
+                        </span>
+                      ) : (
+                        receita.link && (
+                          <a
+                            href={receita.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[10px] font-extrabold text-[#1d4ed8] underline underline-offset-2"
+                          >
+                            Abrir receita
+                          </a>
+                        )
+                      )}
+                    </div>
+                    <ul className="mt-2 space-y-1.5">
+                      {receita.itens.map((item, indice) => (
+                        <li key={`${receita.id}-${indice}`} className="text-[13px] leading-snug">
+                          <span className="font-bold text-[#081b2c]">{item.nome}</span>
+                          {item.posologia && (
+                            <span className="block text-[12px] font-medium text-slate-500">
+                              {item.posologia}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <Detail label="Retorno" value={consultation.retorno} />
           <Detail label="Observações clínicas" value={consultation.observacoes} />
         </div>
       </AccordionContent>
     </AccordionItem>
+  )
+}
+
+/**
+ * O recado que o prontuario da depois de uma acao demorada.
+ *
+ * Assinatura e prescricao terminam longe de onde comecaram - a primeira depois
+ * de o navegador ir ao VIDaaS e voltar, a segunda dentro da tela da Memed. Sem
+ * um lugar fixo para o resultado, o medico voltaria para uma tela igual a que
+ * deixou, sem saber se deu certo.
+ */
+type AvisoDoProntuarioProps = {
+  aviso: { tipo: 'ok' | 'erro'; texto: string }
+  onFechar: () => void
+}
+
+function AvisoDoProntuario({ aviso, onFechar }: AvisoDoProntuarioProps) {
+  return (
+    <div
+      className={`mb-3 flex items-start gap-2 rounded-[14px] border px-4 py-3 text-[12px] font-bold ${
+        aviso.tipo === 'ok'
+          ? 'border-[#1c6b3a]/25 bg-[#eef7f1] text-[#1c6b3a]'
+          : 'border-[#b42318]/25 bg-[#fceceb] text-[#b42318]'
+      }`}
+    >
+      {aviso.tipo === 'ok' ? (
+        <ShieldCheck className="mt-px h-4 w-4 shrink-0" />
+      ) : (
+        <AlertTriangle className="mt-px h-4 w-4 shrink-0" />
+      )}
+      <span className="flex-1">{aviso.texto}</span>
+      <button
+        type="button"
+        onClick={onFechar}
+        className="shrink-0 opacity-60 transition hover:opacity-100"
+        aria-label="Fechar aviso"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
   )
 }
 
@@ -1634,10 +1736,11 @@ export default function PatientRecord({
   const [assinando, setAssinando] = useState<string | null>(null)
   const [assinaturaConcluida, setAssinaturaConcluida] = useState(0)
   const [prescrevendo, setPrescrevendo] = useState(false)
+  const [receitas, setReceitas] = useState<Receita[]>([])
   // Qual campo a barra de formatacao esta comandando. Mora aqui, e nao dentro
   // do formulario, porque a barra e os campos sao irmaos na arvore.
   const [campoAtivo, setCampoAtivo] = useState<ControleDeCampo | null>(null)
-  const [avisoAssinatura, setAvisoAssinatura] = useState<
+  const [aviso, setAviso] = useState<
     { tipo: 'ok' | 'erro'; texto: string } | null
   >(null)
   const unidadesDaClinica = useUnidades()
@@ -1656,6 +1759,10 @@ export default function PatientRecord({
         // selo dela: sem isso, imprimir logo depois de abrir sairia sem selo.
         const estado = await conferirIntegridade(membership.clinicId)
         if (vivo) setIntegridade(estado)
+        if (patient) {
+          const emitidas = await listPrescriptions(membership.clinicId, patient.id)
+          if (vivo) setReceitas(emitidas)
+        }
       } catch {
         // Modelo e conveniencia: se a lista falhar, o prontuario continua
         // inteiro e o medico escreve como sempre escreveu.
@@ -1664,7 +1771,10 @@ export default function PatientRecord({
     return () => {
       vivo = false
     }
-  }, [open])
+    // Depende do id, e nao do objeto: o paciente e recriado a cada carga da
+    // lista, e observar o objeto recarregaria tudo em looping.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, patient?.id])
 
   /**
    * Volta da autorizacao no VIDaaS.
@@ -1693,9 +1803,9 @@ export default function PatientRecord({
         // nulo daquele instante. Quem recarrega e o efeito logo abaixo, que
         // enxerga o paciente ja aberto.
         setAssinaturaConcluida((n) => n + 1)
-        setAvisoAssinatura({ tipo: 'ok', texto: 'Atendimento assinado e arquivado.' })
+        setAviso({ tipo: 'ok', texto: 'Atendimento assinado e arquivado.' })
       } catch (causa) {
-        setAvisoAssinatura({
+        setAviso({
           tipo: 'erro',
           texto: causa instanceof Error ? causa.message : 'A assinatura não foi concluída.',
         })
@@ -1732,11 +1842,11 @@ export default function PatientRecord({
    */
   async function prescrever(consultation: Consultation | null) {
     if (!patient) return
-    setAvisoAssinatura(null)
+    setAviso(null)
 
     const falta = faltaParaPrescrever(patient)
     if (falta.length) {
-      setAvisoAssinatura({
+      setAviso({
         tipo: 'erro',
         texto: `Para emitir receita falta ${falta.join(' e ')} no cadastro de ${patient.nome.split(' ')[0]}. É exigência da RDC 1000/25 — sem isso a Memed recusa a emissão.`,
       })
@@ -1750,9 +1860,10 @@ export default function PatientRecord({
           void (async () => {
             try {
               await guardarReceita(patient.id, consultation?.id ?? null, dados)
-              setAvisoAssinatura({ tipo: 'ok', texto: 'Receita emitida e guardada no prontuário.' })
+              if (clinicId) setReceitas(await listPrescriptions(clinicId, patient.id))
+              setAviso({ tipo: 'ok', texto: 'Receita emitida e guardada no prontuário.' })
             } catch (causa) {
-              setAvisoAssinatura({
+              setAviso({
                 tipo: 'erro',
                 texto: causa instanceof Error ? causa.message : 'A receita não pôde ser arquivada.',
               })
@@ -1762,7 +1873,7 @@ export default function PatientRecord({
         onExcluida: (id) => void marcarReceitaExcluida(id),
       })
     } catch (causa) {
-      setAvisoAssinatura({
+      setAviso({
         tipo: 'erro',
         texto: causa instanceof Error ? causa.message : 'Não foi possível abrir a prescrição.',
       })
@@ -1772,13 +1883,33 @@ export default function PatientRecord({
   }
 
   /**
+   * Prescrever de dentro do formulario, com a consulta aberta.
+   *
+   * A receita precisa se pendurar num atendimento que ja existe no banco. Numa
+   * consulta ainda nao salva ela ficaria solta, ligada so ao paciente - e daqui
+   * a um ano ninguem saberia dizer de qual atendimento ela saiu. Melhor pedir
+   * para salvar antes, numa frase, do que guardar uma receita orfa.
+   */
+  async function prescreverDoFormulario() {
+    if (!editingConsultationId) {
+      setAviso({
+        tipo: 'erro',
+        texto: 'Salve a consulta antes de prescrever — assim a receita fica ligada a este atendimento.',
+      })
+      return
+    }
+    const consulta = consultations.find((item) => item.id === editingConsultationId) ?? null
+    await prescrever(consulta)
+  }
+
+  /**
    * Manda o medico autorizar no VIDaaS.
    *
    * A ida e por troca de endereco, e nao por janela nova: bloqueador de pop-up
    * mataria a assinatura em silencio, e no celular a aba extra se perde.
    */
   async function pedirAssinatura(consultation: Consultation) {
-    setAvisoAssinatura(null)
+    setAviso(null)
     setAssinando(consultation.id)
     try {
       // O endereco de volta leva o paciente para que o sistema reabra este
@@ -1790,7 +1921,7 @@ export default function PatientRecord({
       window.location.href = autorizarEm
     } catch (causa) {
       setAssinando(null)
-      setAvisoAssinatura({
+      setAviso({
         tipo: 'erro',
         texto: causa instanceof Error ? causa.message : 'Não foi possível pedir a autorização.',
       })
@@ -1802,7 +1933,7 @@ export default function PatientRecord({
     try {
       window.open(await linkDoAtendimentoAssinado(consultation.arquivoAssinado), '_blank')
     } catch (causa) {
-      setAvisoAssinatura({
+      setAviso({
         tipo: 'erro',
         texto: causa instanceof Error ? causa.message : 'Não foi possível abrir o documento.',
       })
@@ -2220,29 +2351,7 @@ export default function PatientRecord({
                       ao VIDaaS e voltar - sem este aviso, o medico voltaria
                       para uma tela igual a que deixou e nao saberia se deu
                       certo. */}
-                  {avisoAssinatura && (
-                    <div
-                      className={`mb-3 flex items-start gap-2 rounded-[14px] border px-4 py-3 text-[12px] font-bold ${
-                        avisoAssinatura.tipo === 'ok'
-                          ? 'border-[#1c6b3a]/25 bg-[#eef7f1] text-[#1c6b3a]'
-                          : 'border-[#b42318]/25 bg-[#fceceb] text-[#b42318]'
-                      }`}
-                    >
-                      {avisoAssinatura.tipo === 'ok' ? (
-                        <ShieldCheck className="mt-px h-4 w-4 shrink-0" />
-                      ) : (
-                        <AlertTriangle className="mt-px h-4 w-4 shrink-0" />
-                      )}
-                      <span className="flex-1">{avisoAssinatura.texto}</span>
-                      <button
-                        type="button"
-                        onClick={() => setAvisoAssinatura(null)}
-                        className="shrink-0 opacity-60 transition hover:opacity-100"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  )}
+                  {aviso && <AvisoDoProntuario aviso={aviso} onFechar={() => setAviso(null)} />}
 
                   {consultasFiltradas.length === 0 ? (
                     <p className="py-10 text-center text-[13px] font-semibold text-slate-400">
@@ -2266,6 +2375,7 @@ export default function PatientRecord({
                           onAbrirAssinado={(item) => void abrirAssinado(item)}
                           onPrescrever={(item) => void prescrever(item)}
                           prescrevendo={prescrevendo}
+                          receitas={receitas.filter((r) => r.consultationId === consultation.id)}
                           assinando={assinando}
                         />
                       ))}
@@ -2303,6 +2413,7 @@ export default function PatientRecord({
 
             <div className="scrollbar-subtle flex-1 overflow-y-auto px-5 pb-6 pt-2 sm:px-7">
               <BarraDeFormatacao />
+              {aviso && <AvisoDoProntuario aviso={aviso} onFechar={() => setAviso(null)} />}
               <div className="grid gap-4 sm:grid-cols-2">
                 <SectionTitle>Atendimento</SectionTitle>
                 {/* O recado da recepcao aparece aqui de proposito, e so para
@@ -2479,8 +2590,28 @@ export default function PatientRecord({
                   modelos={modelos}
                   onSalvarModelo={salvarModelo}
                   onApagarModelo={apagarModelo}
-                  placeholder="Medicamento, dose, via e duração..."
+                  placeholder="Orientações e o que não sai em receita. A receita formal é emitida pela Memed."
                 />
+                {/* O botao vive ao lado do campo porque e onde o medico esta
+                    pensando em medicamento. O campo de texto continua para o
+                    que nao e receita - orientacao, dieta, "manter o que usa";
+                    a receita formal nasce na Memed e volta para ca com link e
+                    itens, para o prontuario nao ter duas versoes do mesmo. */}
+                <div className="sm:col-span-2 -mt-1">
+                  <button
+                    type="button"
+                    onClick={() => void prescreverDoFormulario()}
+                    disabled={prescrevendo}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-[#2563eb]/20 bg-[#eef3fd] px-3.5 py-2.5 text-[11px] font-extrabold text-[#1d4ed8] transition hover:bg-[#e2eafb] disabled:cursor-wait disabled:opacity-70"
+                  >
+                    {prescrevendo ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Pill className="h-4 w-4" />
+                    )}
+                    Prescrever pela Memed
+                  </button>
+                </div>
                 <RichTextField
                   label="Retorno"
                   value={form.retorno}
