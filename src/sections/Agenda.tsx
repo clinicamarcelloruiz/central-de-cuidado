@@ -259,7 +259,7 @@ export default function Agenda({
     setAviso(
       aviso.avisou
         ? 'Consulta confirmada e paciente avisado pelo WhatsApp.'
-        : 'Consulta confirmada. Não consegui avisar pelo WhatsApp — responda pela tela de Respostas.',
+        : 'Consulta confirmada. Não consegui avisar pelo WhatsApp. Responda pela tela de Respostas.',
     )
   }
 
@@ -779,9 +779,9 @@ export default function Agenda({
                     />
                     <span className="text-[11px] text-slate-600">
                       {prefs.reminderDays === 0
-                        ? 'dias antes — envia na manhã do próprio dia'
+                        ? 'dias antes. Envia na manhã do próprio dia'
                         : prefs.reminderDays === 1
-                          ? 'dia antes — envia na véspera'
+                          ? 'dia antes. Envia na véspera'
                           : 'dias antes da consulta'}
                     </span>
                   </div>

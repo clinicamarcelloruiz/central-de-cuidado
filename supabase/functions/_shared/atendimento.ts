@@ -229,11 +229,28 @@ function agruparPorDia(horarios: Horario[], timezone: string) {
   return [...porDia.entries()].map(([chave, lista]) => ({ chave, horarios: lista }))
 }
 
+/**
+ * O menu como o pai le no celular.
+ *
+ * O emoji nao e enfeite: quem abre esta conversa costuma estar com uma crianca
+ * no colo e pressa, e o icone diz do que se trata antes da leitura. Um por
+ * linha, sempre o mesmo - variar so atrapalharia o reconhecimento.
+ *
+ * O numero vai em negrito porque e o que a pessoa precisa digitar. O verbo vem
+ * na frente ("Marcar", "Falar", "Ver") para a linha responder a pergunta "o que
+ * eu quero fazer" em vez de nomear uma funcao do sistema.
+ */
 const OPCOES = [
-  '1 - Informações sobre a consulta',
-  '2 - Agendar consulta',
-  '3 - Falar com a nossa equipe',
-  '4 - Ver ou cancelar minha consulta',
+  '*1* 💬 Dúvidas sobre a consulta',
+  // 🗓️ e nao 📅: o calendario cheio desenha uma data fixa dentro do icone, e um
+  // "24 de fevereiro" ao lado de uma consulta de setembro confunde quem le.
+  '*2* 🗓️ Marcar uma consulta',
+  // 🗣️ e nao 👩‍⚕️: o emoji de profissional de saude e composto por dois
+  // caracteres colados por um invisivel, e em Android antigo a cola falha e
+  // aparecem dois desenhos soltos - justamente no aparelho mais simples.
+  '*3* 🗣️ Falar com alguém da equipe',
+  // 🔄 e nao 🔎: a opcao faz tres coisas, e a lupa sugere apenas olhar.
+  '*4* 🔄 Ver, remarcar ou cancelar',
 ].join('\n')
 
 // O "0" sempre funcionou - pediuMenu o aceita desde o inicio, e ele nunca
@@ -365,16 +382,20 @@ async function mostrarMenu(
 
   // Com aviso, o aviso ja e a instrucao. Repetir "Como podemos ajudar?" logo
   // depois de "Nao entendi, responda com o numero" dava duas ordens seguidas.
-  const cabecalho = aviso || `${saudacao}\n\nComo podemos ajudar? Responda com o número:`
+  const cabecalho = aviso ||
+    `${saudacao}\n\nEstamos aqui para cuidar do seu filho. Como podemos ajudar hoje?`
+  // A instrucao vai DEPOIS das opcoes de proposito: quem ja sabe o que quer
+  // responde na hora, e quem hesitou tem a saida logo abaixo do que leu.
+  const instrucao = aviso ? '' : '\n\nResponda com o número ou toque em "Ver opções".'
   return {
-    resposta: `${cabecalho}\n\n${OPCOES}`,
+    resposta: `${cabecalho}\n\n${OPCOES}${instrucao}`,
     lista: {
       rotulo: 'Ver opções',
       linhas: [
-        { id: '1', titulo: 'Informações', descricao: 'Valores, contatos e orientações' },
-        { id: '2', titulo: 'Agendar consulta', descricao: 'Escolher unidade, dia e horário' },
+        { id: '1', titulo: 'Dúvidas sobre a consulta', descricao: 'Valores, contatos e orientações' },
+        { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
         { id: '3', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
-        { id: '4', titulo: 'Minha consulta', descricao: 'Ver, cancelar ou remarcar' },
+        { id: '4', titulo: 'Minha consulta', descricao: 'Ver, remarcar ou cancelar' },
       ],
     },
   }
@@ -943,7 +964,7 @@ export async function tratarConversa(opcoes: {
     unico && opcoes.textos.saudacaoConhecida.trim()
       ? opcoes.textos.saudacaoConhecida.replace(/\{nome\}/g, primeiroNome)
       : opcoes.textos.saudacao
-  ).trim() || 'Olá! Aqui é o consultório do Dr. Marcello Ruiz.'
+  ).trim() || 'Olá! 👋 Aqui é o consultório do Dr. Marcello Ruiz, Gastroenterologista Pediátrico.'
 
   /** Quem vai no prontuario da consulta: o escolhido, ou o unico que existe. */
   const pacienteDaConsulta =
@@ -1019,7 +1040,10 @@ export async function tratarConversa(opcoes: {
       return {
         resposta:
           `${informacoes}\n\n` +
-          'Digite 2 para agendar, 3 para falar com a nossa equipe, ou 0 para ver as opções.',
+          // Curta de proposito: o texto de informacoes ja explica o 2 e o 3 no
+          // meio das frases, com contexto. Repetir os tres numeros aqui embaixo
+          // criava duas linhas de instrucao coladas dizendo quase a mesma coisa.
+          'Digite *2* para agendar ou *0* para ver todas as opções.',
       }
     }
 
