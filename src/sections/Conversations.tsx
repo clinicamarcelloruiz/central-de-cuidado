@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
+  ArrowDown,
   Check,
   CheckCheck,
   CircleSlash,
@@ -24,12 +25,14 @@ import {
   markConversationSeen,
   reopenConversation,
   resetConversationBot,
+  resumoDoPaciente,
   resolveConversation,
   saveAutoReply,
   sendConversationReply,
   type AutoReplySettings,
   type Conversation,
   type ConversationMessage,
+  type ResumoDoPaciente,
 } from '@/lib/repository'
 
 const STATUS_LABEL: Record<Conversation['status'], string> = {
@@ -203,6 +206,9 @@ export default function Conversations({
   // presa ao valor de selectedId do primeiro render e nunca saberia qual
   // conversa esta aberta agora.
   const selectedIdRef = useRef<string | null>(null)
+  // Fim da lista de mensagens. O botao de descer rola ate ele.
+  const fimDasMensagens = useRef<HTMLDivElement>(null)
+  const [resumo, setResumo] = useState<ResumoDoPaciente | null>(null)
   selectedIdRef.current = selectedId
 
   const load = useCallback(async (silencioso = false) => {
@@ -281,6 +287,7 @@ export default function Conversations({
       void supabase.removeChannel(canal)
     }
   }, [clinicId, load])
+
 
   async function openConversation(conversation: Conversation) {
     setSelectedId(conversation.id)
@@ -437,6 +444,28 @@ export default function Conversations({
     (item) => item.attentionReason !== 'atendente' && item.attentionReason !== 'falha',
   )
   const selected = conversations.find((item) => item.id === selectedId) ?? null
+
+  // Resumo do paciente da conversa aberta. Some quando o contato nao tem
+  // cadastro: sem paciente nao ha historico para contar.
+  useEffect(() => {
+    const paciente = selected?.patientId
+    if (!clinicId || !paciente) {
+      setResumo(null)
+      return
+    }
+    let vivo = true
+    void (async () => {
+      try {
+        const dados = await resumoDoPaciente(clinicId, paciente)
+        if (vivo) setResumo(dados)
+      } catch {
+        if (vivo) setResumo(null)
+      }
+    })()
+    return () => {
+      vivo = false
+    }
+  }, [clinicId, selected?.patientId])
 
   if (loading) {
     return (
@@ -816,6 +845,33 @@ export default function Conversations({
                     <p className="text-[10px] font-bold text-slate-400">
                       {selected.phone} · {STATUS_LABEL[selected.status]}
                     </p>
+                    {/* Com quem a equipe esta falando, em quatro numeros. Quem
+                        ja veio cinco vezes e quem cancelou tres seguidas
+                        merecem respostas diferentes, e isso so aparecia
+                        garimpando outras telas. */}
+                    {resumo && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-bold">
+                        <span className="text-slate-500">
+                          {resumo.contatos} {resumo.contatos === 1 ? 'contato' : 'contatos'}
+                        </span>
+                        <span className="text-[#1c6b3a]">
+                          {resumo.realizadas}{' '}
+                          {resumo.realizadas === 1 ? 'consulta feita' : 'consultas feitas'}
+                        </span>
+                        {resumo.agendadas > 0 && (
+                          <span className="text-[#1d4ed8]">
+                            {resumo.agendadas}{' '}
+                            {resumo.agendadas === 1 ? 'agendada' : 'agendadas'}
+                          </span>
+                        )}
+                        {resumo.cancelamentos > 0 && (
+                          <span className="text-[#b42318]">
+                            {resumo.cancelamentos}{' '}
+                            {resumo.cancelamentos === 1 ? 'cancelamento' : 'cancelamentos'}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   {selected.status !== 'resolved' && (
                     <button
@@ -829,6 +885,28 @@ export default function Conversations({
                   )}
                 </div>
 
+                {/* O bloco inteiro continua no rodape, junto da caixa de
+                    resposta que ele explica. Aqui em cima fica so o atalho:
+                    quem abre a conversa para escrever descobre na hora que nao
+                    vai poder, em vez de rolar a conversa inteira ate esbarrar
+                    no aviso. */}
+                {!janelaAberta && (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-[#dc8e5f]/30 bg-[#fdf5ef] px-3.5 py-2.5">
+                    <p className="text-[10px] font-extrabold text-[#8a4b1d]">
+                      Janela de resposta fechada. Só dá para enviar um convite.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={reabrindo}
+                      onClick={() => void reabrirConversa()}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#8a4b1d] px-3 py-1.5 text-[10px] font-extrabold text-white transition hover:bg-[#733c15] disabled:cursor-wait disabled:opacity-50"
+                    >
+                      <MessageSquareText className="h-3.5 w-3.5" />
+                      {reabrindo ? 'Enviando...' : 'Enviar convite'}
+                    </button>
+                  </div>
+                )}
+
                 {loadingMessages ? (
                   <p className="pt-12 text-center text-xs font-semibold text-slate-400">
                     Carregando mensagens...
@@ -840,7 +918,25 @@ export default function Conversations({
                      tela precisa saber na hora o que o paciente esta vendo do
                      outro lado, e o painel escuro do resto do sistema obrigava
                      a traduzir mentalmente a cada mensagem. */
-                  <div className="mt-3 rounded-[14px] bg-[#efeae2] px-3 py-4" style={FUNDO_WHATSAPP}>
+                  <div className="relative mt-3 rounded-[14px] bg-[#efeae2] px-3 py-4" style={FUNDO_WHATSAPP}>
+                    {/* Conversas antigas tem dezenas de mensagens, e o que
+                        interessa esta sempre no fim. Sem isto a equipe rolava a
+                        roda ate cansar toda vez que abria uma conversa. */}
+                    {messages.length > 6 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          fimDasMensagens.current?.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'end',
+                          })
+                        }
+                        className="sticky top-1 z-10 ml-auto flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-[10px] font-extrabold text-[#557f75] shadow-[0_2px_6px_rgba(11,20,26,.18)] backdrop-blur transition hover:bg-white"
+                      >
+                        <ArrowDown className="h-3 w-3" />
+                        Ir para o fim
+                      </button>
+                    )}
                     <div className="space-y-2">
                       {messages.map((message) => {
                         const outbound = message.direction === 'outbound'
@@ -874,6 +970,7 @@ export default function Conversations({
                         )
                       })}
                     </div>
+                    <div ref={fimDasMensagens} />
                   </div>
                 )}
 
