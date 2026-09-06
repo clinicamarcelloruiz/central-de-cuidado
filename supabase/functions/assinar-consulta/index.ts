@@ -276,7 +276,7 @@ Deno.serve(async (req) => {
           ok: false,
           code: 'AGUARDANDO',
           error: 'Aguardando a autorização no celular.',
-          details: JSON.stringify(credencial.dados),
+          details: `v2 auth/info ${JSON.stringify(credencial.dados)}`,
         }, 202)
       }
 
@@ -297,6 +297,7 @@ Deno.serve(async (req) => {
           ok: false,
           code: 'AGUARDANDO',
           error: 'A assinatura já está sendo concluída.',
+          details: 'outra tela está assinando',
         }, 202)
       }
 
