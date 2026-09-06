@@ -1731,13 +1731,15 @@ function EsperaDaAssinatura({ espera, onDesistir }: EsperaDaAssinaturaProps) {
           poucos segundos{espera.tentativas > 0 ? ` (${espera.tentativas} vez${espera.tentativas > 1 ? 'es' : ''} até agora)` : ''}.
           O pedido vale por {minutos} min.
         </p>
-        <p className="font-medium text-[#1c6b3a]/80">
-          A página do VIDaaS não abriu?{' '}
-          <a href={espera.autorizarEm} target="_blank" rel="noreferrer" className="underline">
-            Abrir aqui
-          </a>
-          .
-        </p>
+        {espera.autorizarEm && (
+          <p className="font-medium text-[#1c6b3a]/80">
+            A página do VIDaaS não abriu?{' '}
+            <a href={espera.autorizarEm} target="_blank" rel="noreferrer" className="underline">
+              Abrir aqui
+            </a>
+            .
+          </p>
+        )}
       </div>
       <button
         type="button"
@@ -1893,7 +1895,16 @@ export default function PatientRecord({
       try {
         const resultado = await concluirAssinatura(pedido)
         if (resultado.situacao === 'aguardando') {
-          setAviso({ tipo: 'erro', texto: 'A autorização no celular ainda não chegou. Peça a assinatura de novo.' })
+          // A outra aba pode estar assinando neste instante. Esta entra na
+          // mesma espera e descobre o resultado nas proximas perguntas.
+          setEspera({
+            pedido,
+            consultaId: '',
+            autorizarEm: '',
+            expiraEm: Date.now() + 15 * 60 * 1000,
+            tentativas: 0,
+            minutosRestantes: 15,
+          })
           return
         }
         // Nao recarrega a lista aqui: este efeito roda na montagem, quando o
