@@ -1467,6 +1467,18 @@ export async function reopenConversation(conversationId: string) {
   }
 }
 
+/**
+ * Troca a foto de perfil do WhatsApp Business.
+ *
+ * A imagem nao vai daqui: a funcao no servidor busca o arquivo publicado no
+ * site. Assim a foto tem um endereco fixo e versionado, e quem trocar amanha
+ * troca o arquivo, nao o codigo.
+ */
+export async function atualizarFotoDoPerfil() {
+  const { error } = await supabase.functions.invoke('whatsapp-perfil', { body: {} })
+  if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível trocar a foto.'))
+}
+
 // ---------------------------------------------------------------------------
 // Receitas emitidas pela Memed
 // ---------------------------------------------------------------------------
