@@ -936,7 +936,7 @@ export default function Conversations({
                       </p>
                       <p className="mt-1 text-[10px] font-semibold text-[#8a4b1d]/80">
                         A Meta só permite texto livre nas 24 horas seguintes à mensagem do
-                        paciente. Dá para enviar um convite para o paciente responder — quando ele
+                        paciente. Dá para enviar um convite para o paciente responder. Quando ele
                         responder, a janela reabre e você escreve normalmente.
                       </p>
                       <button

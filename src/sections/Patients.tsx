@@ -789,7 +789,7 @@ export default function Patients({
                 </select>
                 {sexoSugerido && (
                   <span className="mt-1 block text-[10px] font-semibold text-[#8a4b1d]">
-                    Sugerido pelo nome — confira antes de salvar.
+                    Sugerido pelo nome. Confira antes de salvar.
                   </span>
                 )}
               </Field>

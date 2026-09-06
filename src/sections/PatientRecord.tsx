@@ -374,7 +374,7 @@ function BarraDeFormatacao() {
           {modelos.length === 0 ? (
             <p className="text-[10px] font-semibold text-slate-400">
               Nenhum modelo salvo para {ativo.rotulo.toLowerCase()} ainda. Escreva o texto no campo e
-              salve abaixo — ele fica disponível para as próximas consultas.
+              salve abaixo. Ele fica disponível para as próximas consultas.
             </p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
@@ -591,7 +591,7 @@ async function imprimirProntuario(
         .join('')
 
       return `<section class="consulta">
-        <h2>${consultationLabels[consulta.tipo]} — ${fmtBR(consulta.data)}</h2>
+        <h2>${consultationLabels[consulta.tipo]} · ${fmtBR(consulta.data)}</h2>
         <p class="meta">${[consulta.unidade, medidas, consulta.cid ? `CID ${consulta.cid.toUpperCase()}` : '']
           .filter(Boolean)
           .join('  ·  ')}</p>
@@ -1034,7 +1034,7 @@ function RichTextField({
     // Chrome segurou o dispositivo de uma gravacao anterior e nao soltou.
     if (faixa && faixa.readyState !== 'live') {
       setSpeechError(
-        'O microfone não respondeu. Feche e abra o Chrome novamente — ele costuma ficar segurando o dispositivo.',
+        'O microfone não respondeu. Feche e abra o Chrome novamente: ele costuma ficar segurando o dispositivo.',
       )
       stream.getTracks().forEach((t) => t.stop())
       return
@@ -1217,7 +1217,7 @@ function RichTextField({
       if (picoRef.current < 0.01) {
         setSpeechError(
           `Nenhum som chegou do "${dispositivoRef.current}". A causa mais comum é outro programa ` +
-            `ou outra aba ter pegado o microfone — WhatsApp Web, Zoom, Teams ou Meet reservam o ` +
+            `ou outra aba ter pegado o microfone. WhatsApp Web, Zoom, Teams ou Meet reservam o ` +
             `dispositivo mesmo em segundo plano. Feche essas abas e programas e, se não resolver, ` +
             `feche o Chrome por completo e abra de novo: recarregar a página não basta, porque o ` +
             `travamento é do navegador inteiro.`,
@@ -1303,7 +1303,7 @@ function Detail({ label, value, alerta = false }: { label: string; value: string
   return (
     <div>
       {/* "Documento sereno": rotulo pequeno e apagado, texto clinico em serifa
-          grande. Nada de caixas ou fundos — a leitura corrida e o que importa.
+          grande. Nada de caixas ou fundos: a leitura corrida e o que importa.
           Cor so aparece no campo de alergias, o unico que precisa saltar. */}
       <p className="text-[10px] font-extrabold uppercase tracking-[0.13em] text-slate-400">{label}</p>
       <div
@@ -1858,7 +1858,7 @@ export default function PatientRecord({
     if (falta.length) {
       setAviso({
         tipo: 'erro',
-        texto: `Para emitir receita falta ${falta.join(' e ')} no cadastro de ${patient.nome.split(' ')[0]}. É exigência da RDC 1000/25 — sem isso a Memed recusa a emissão.`,
+        texto: `Para emitir receita falta ${falta.join(' e ')} no cadastro de ${patient.nome.split(' ')[0]}. É exigência da RDC 1000/25: sem isso a Memed recusa a emissão.`,
       })
       return
     }
@@ -1904,7 +1904,7 @@ export default function PatientRecord({
     if (!editingConsultationId) {
       setAviso({
         tipo: 'erro',
-        texto: 'Salve a consulta antes de prescrever — assim a receita fica ligada a este atendimento.',
+        texto: 'Salve a consulta antes de prescrever. Assim a receita fica ligada a este atendimento.',
       })
       return
     }
