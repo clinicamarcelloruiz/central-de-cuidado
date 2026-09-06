@@ -48,6 +48,15 @@ alter table public.signature_requests force row level security;
 -- passa. service_role ignora RLS, entao a Edge Function continua funcionando.
 revoke all on table public.signature_requests from public, anon, authenticated;
 
+-- O revoke acima precisa deste grant logo atras.
+--
+-- "public" no revoke nao e o schema: e o papel generico do Postgres, do qual
+-- todos os outros herdam - inclusive o service_role. Revogar dele fecha a
+-- tabela ate para a Edge Function, que foi exatamente o que aconteceu na
+-- primeira tentativa de assinar: "permission denied for table
+-- signature_requests". O acesso do servidor precisa ser dito em voz alta.
+grant select, insert, update, delete on table public.signature_requests to service_role;
+
 /**
  * Acervo dos PDFs assinados.
  *

@@ -1171,6 +1171,67 @@ function ConsultationTypeIcon({ type }: { type: ConsultationType }) {
   return <Stethoscope className="h-4 w-4" />
 }
 
+/**
+ * Em que pe esta a consulta.
+ *
+ * Cadastrar um paciente com data de consulta, ou marcar um horario pelo
+ * WhatsApp, cria um registro em branco esperando aquele dia. Ele existe para o
+ * medico escrever na hora e para pendurar os acompanhamentos - mas na tela
+ * aparecia com a mesma cara de um atendimento ja realizado, e o prontuario
+ * parecia ter duas consultas onde houve uma.
+ *
+ * O terceiro estado e o que ninguem tinha percebido: data passada e nada
+ * escrito. Nao e agendamento nem atendimento, e um registro que faltou - a
+ * unica das situacoes que pede providencia.
+ */
+type EstadoDaConsulta = 'agendada' | 'sem-registro' | 'realizada' | 'assinada'
+
+function estadoDaConsulta(consultation: Consultation): EstadoDaConsulta {
+  if (consultation.assinadoEm) return 'assinada'
+
+  const escrita = [
+    consultation.queixa,
+    consultation.historiaEvolucao,
+    consultation.antecedentesPessoais,
+    consultation.antecedentesFamiliares,
+    consultation.alergias,
+    consultation.medicamentos,
+    consultation.exameFisico,
+    consultation.avaliacao,
+    consultation.cid,
+    consultation.conduta,
+    consultation.prescricao,
+    consultation.retorno,
+    consultation.observacoes,
+  ].some(temTexto) || Boolean(consultation.peso) || Boolean(consultation.altura)
+
+  if (escrita) return 'realizada'
+
+  // Comparacao por data, sem hora: uma consulta marcada para hoje as 15h ainda
+  // e "agendada" as 9h da manha, e virar "sem registro" no meio do expediente
+  // seria acusar o medico de esquecer algo que ainda nem aconteceu.
+  const hoje = new Date().toISOString().slice(0, 10)
+  return consultation.data >= hoje ? 'agendada' : 'sem-registro'
+}
+
+const SELO_DO_ESTADO: Record<EstadoDaConsulta, { texto: string; classe: string } | null> = {
+  agendada: {
+    texto: 'Agendada',
+    classe: 'bg-[#eef2f7] text-[#5b6b7d]',
+  },
+  'sem-registro': {
+    texto: 'Sem registro',
+    classe: 'bg-[#fdf3e7] text-[#96591a]',
+  },
+  // Realizada nao ganha selo: e o caso normal, e etiquetar o normal so gera
+  // ruido. O que precisa de destaque e o que foge dele.
+  realizada: null,
+  assinada: {
+    texto: 'Assinada',
+    classe: 'bg-[#e8f5ec] text-[#1c6b3a]',
+  },
+}
+
 function ConsultationCard({
   consultation,
   anterior,
@@ -1194,6 +1255,8 @@ function ConsultationCard({
   const summary = textoSimples(
     consultation.avaliacao || consultation.queixa || consultation.historiaEvolucao || consultation.conduta,
   )
+
+  const estado = estadoDaConsulta(consultation)
 
   const imc = calcularIMC(consultation.peso, consultation.altura)
   const imcAnterior = anterior ? calcularIMC(anterior.peso, anterior.altura) : null
@@ -1227,9 +1290,22 @@ function ConsultationCard({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[14px] font-extrabold text-[#081b2c]">
+              <span
+                className={`text-[14px] font-extrabold ${
+                  estado === 'agendada' ? 'text-slate-500' : 'text-[#081b2c]'
+                }`}
+              >
                 {consultationLabels[consultation.tipo]}
               </span>
+              {SELO_DO_ESTADO[estado] && (
+                <span
+                  className={`rounded-full px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.06em] ${
+                    SELO_DO_ESTADO[estado]!.classe
+                  }`}
+                >
+                  {SELO_DO_ESTADO[estado]!.texto}
+                </span>
+              )}
               {consultation.cid && (
                 <span className="rounded-full bg-[#eef3f2] px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.06em] text-[#557f75]">
                   CID {consultation.cid.toUpperCase()}
@@ -1316,9 +1392,13 @@ function ConsultationCard({
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
+              {/* Consulta em branco nao tem o que assinar: assinar o vazio
+                  produziria um documento com valor legal afirmando nada. O
+                  botao so aparece quando ha atendimento escrito. */}
               <button
                 type="button"
                 onClick={() => onAssinar(consultation)}
+                hidden={estado !== 'realizada'}
                 disabled={assinando === consultation.id}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-[#1c6b3a]/20 bg-[#eef7f1] px-3 py-2 text-[10px] font-extrabold text-[#1c6b3a] transition hover:bg-[#e2f0e8] disabled:cursor-wait disabled:opacity-70"
               >
@@ -1334,7 +1414,8 @@ function ConsultationCard({
                 onClick={() => onEdit(consultation)}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-[#c87543]/20 bg-[#fdf4ef] px-3 py-2 text-[10px] font-extrabold text-[#b96535] transition hover:bg-[#f8e6dc]"
               >
-                <Edit3 className="h-3.5 w-3.5" /> Editar consulta
+                <Edit3 className="h-3.5 w-3.5" />
+                {estado === 'realizada' ? 'Editar consulta' : 'Escrever atendimento'}
               </button>
             </div>
           )}
