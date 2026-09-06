@@ -23,7 +23,18 @@ type Pedido = {
   motivo?: string
   /** Falso quando a equipe prefere ligar em vez de mandar mensagem. */
   avisarPaciente?: boolean
+  /**
+   * Manda tres horarios da mesma unidade junto do aviso.
+   *
+   * Cancelar sem oferecer alternativa empurra o trabalho para a familia, que
+   * vai ter de voltar, navegar o menu e escolher tudo de novo. Com as sugestoes
+   * o paciente resolve num toque, na mesma mensagem em que recebeu a ma
+   * noticia.
+   */
+  sugerirDatas?: boolean
 }
+
+type Horario = { inicio: string; fim: string }
 
 /**
  * O que o paciente le.
@@ -32,28 +43,49 @@ type Pedido = {
  * soa a descaso. A excecao e quando o cancelamento partiu da propria familia:
  * ali repetir o motivo de volta seria estranho, e a mensagem vira confirmacao.
  */
+function formatarHorario(iso: string, fuso: string) {
+  return new Date(iso).toLocaleString('pt-BR', {
+    timeZone: fuso,
+    weekday: 'long',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).replace('-feira', '')
+}
+
 function mensagemParaPaciente(
   nome: string,
   quando: string,
   unidade: string | null,
   motivo: string,
+  sugestoes: Horario[],
+  fuso: string,
 ) {
   const tratamento = nome ? `Olá, ${nome}! ` : 'Olá! '
   const onde = unidade ? ` em ${unidade}` : ''
+  const aPedido = /pedido (do|da) paciente|pedido da fam[ií]lia/i.test(motivo)
 
-  if (/pedido (do|da) paciente|pedido da fam[ií]lia/i.test(motivo)) {
-    return (
-      `${tratamento}Confirmando: sua consulta de *${quando}*${onde} foi cancelada, ` +
-      'conforme você pediu.\n\n' +
-      'Quando quiser remarcar, é só responder aqui. Digite *2* para ver os horários.'
-    )
+  const abertura = aPedido
+    ? `${tratamento}Confirmando: sua consulta de *${quando}*${onde} foi cancelada, ` +
+      'conforme você pediu.'
+    : `${tratamento}Precisamos cancelar sua consulta de *${quando}*${onde}.\n\n` +
+      `Motivo: ${motivo}.\n\nSentimos muito pelo transtorno.`
+
+  if (sugestoes.length === 0) {
+    return `${aPedido ? '✅' : '⚠️'} ${abertura}\n\n` +
+      '🗓️ Para escolher uma nova data, digite *2* aqui mesmo, ou *9* para falar com a nossa equipe.'
   }
 
+  const linhas = sugestoes
+    .map((h, i) => `*${i + 1}* ${formatarHorario(h.inicio, fuso)}`)
+    .join('\n')
+
   return (
-    `${tratamento}Precisamos cancelar sua consulta de *${quando}*${onde}.\n\n` +
-    `Motivo: ${motivo}.\n\n` +
-    'Sentimos muito pelo transtorno. Para escolher uma nova data, digite *2* ' +
-    'aqui mesmo, ou responda esta mensagem que a nossa equipe ajuda.'
+    `${aPedido ? '✅' : '⚠️'} ${abertura}\n\n` +
+    `🗓️ *Já separamos outros horários${unidade ? ` em ${unidade}` : ''}:*\n\n${linhas}\n\n` +
+    'Responda com o número para remarcar, ou toque em uma das opções.\n' +
+    'Digite *2* para ver mais datas, ou *9* para falar com a nossa equipe.'
   )
 }
 
@@ -207,21 +239,83 @@ Deno.serve(async (req) => {
       .trim()
       .split(/\s+/)[0] ?? ''
 
-    const texto = mensagemParaPaciente(primeiroNome, quando, unidade?.name ?? null, motivo)
+    // ---- Tres horarios da mesma unidade ----
+    //
+    // Da MESMA unidade de proposito: quem marcou em Santos nao quer sugestao de
+    // Ibirapuera. E so tres, porque a mensagem chega junto com uma ma noticia e
+    // uma lista longa ali vira ruido.
+    let sugestoes: Horario[] = []
+    if (corpo.sugerirDatas !== false && consulta.unit_id) {
+      await admin.rpc('liberar_reservas_vencidas')
+      const { data: livres } = await admin.rpc('available_slots', { p_unit_id: consulta.unit_id })
+      sugestoes = ((livres ?? []) as { slot_start: string; slot_end: string }[])
+        .map((h) => ({ inicio: h.slot_start, fim: h.slot_end }))
+        .slice(0, 3)
+    }
+
+    const texto = mensagemParaPaciente(
+      primeiroNome,
+      quando,
+      unidade?.name ?? null,
+      motivo,
+      sugestoes,
+      fuso,
+    )
     const versao = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
+
+    // Deixa a conversa no mesmo ponto em que o robo deixaria depois de listar
+    // horarios. Assim o toque do paciente cai no fluxo que ja existe, e a
+    // remarcacao acontece sem nenhum caminho novo para dar errado.
+    if (sugestoes.length > 0) {
+      await admin
+        .from('whatsapp_conversations')
+        .update({
+          booking_state: 'aguardando_horario',
+          booking_options: sugestoes,
+          booking_unit_id: consulta.unit_id,
+          booking_patient_id: consulta.patient_id,
+        })
+        .eq('id', conversa.id)
+    }
+
+    const corpoDaMensagem = sugestoes.length > 0
+      ? {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: conversa.wa_id,
+          type: 'interactive',
+          interactive: {
+            type: 'list',
+            body: { text: texto },
+            action: {
+              button: 'Escolher horário',
+              sections: [{
+                rows: [
+                  ...sugestoes.map((h, i) => ({
+                    id: String(i + 1),
+                    title: formatarHorario(h.inicio, fuso).slice(0, 24),
+                  })),
+                  { id: '9', title: 'Falar com a equipe' },
+                  { id: '0', title: 'Voltar ao menu' },
+                ],
+              }],
+            },
+          },
+        }
+      : {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: conversa.wa_id,
+          type: 'text',
+          text: { preview_url: false, body: texto },
+        }
 
     const envio = await fetch(
       `https://graph.facebook.com/${versao}/${ajustes.whatsapp_phone_number_id}/messages`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual',
-          to: conversa.wa_id,
-          type: 'text',
-          text: { preview_url: false, body: texto },
-        }),
+        body: JSON.stringify(corpoDaMensagem),
       },
     )
 
@@ -235,7 +329,7 @@ Deno.serve(async (req) => {
       external_message_id: resposta?.messages?.[0]?.id ?? null,
       direction: 'outbound',
       automatic: true,
-      message_type: 'text',
+      message_type: sugestoes.length > 0 ? 'interactive' : 'text',
       body: texto,
       status: envio.ok ? 'accepted' : 'failed',
       sent_at: envio.ok ? agora : null,

@@ -825,12 +825,69 @@ export async function cancelAppointment(
   appointmentId: string,
   motivo: string,
   avisarPaciente = true,
+  sugerirDatas = true,
 ) {
   const { data, error } = await supabase.functions.invoke('appointment-cancel', {
-    body: { appointmentId, motivo, avisarPaciente },
+    body: { appointmentId, motivo, avisarPaciente, sugerirDatas },
   })
   if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível cancelar a consulta.'))
   return data as ResultadoDoCancelamento
+}
+
+export interface ResumoDoPaciente {
+  /** Mensagens que o paciente mandou, em todas as conversas. */
+  contatos: number
+  /** Consultas que ja aconteceram: passaram da data e nao foram canceladas. */
+  realizadas: number
+  /** Consultas futuras ainda de pe. */
+  agendadas: number
+  cancelamentos: number
+}
+
+/**
+ * O historico do paciente em quatro numeros.
+ *
+ * Serve para quem abre a conversa saber com quem esta falando antes de
+ * responder: alguem que ja veio cinco vezes e alguem que cancelou tres seguidas
+ * merecem tratamentos diferentes, e hoje isso so aparecia garimpando telas.
+ */
+export async function resumoDoPaciente(clinicId: string, patientId: string) {
+  const agora = new Date().toISOString()
+
+  const [contatos, realizadas, agendadas, cancelamentos] = await Promise.all([
+    supabase
+      .from('whatsapp_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('patient_id', patientId)
+      .eq('direction', 'inbound'),
+    supabase
+      .from('appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('clinic_id', clinicId)
+      .eq('patient_id', patientId)
+      .neq('status', 'cancelled')
+      .lt('starts_at', agora),
+    supabase
+      .from('appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('clinic_id', clinicId)
+      .eq('patient_id', patientId)
+      .neq('status', 'cancelled')
+      .gte('starts_at', agora),
+    supabase
+      .from('appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('clinic_id', clinicId)
+      .eq('patient_id', patientId)
+      .eq('status', 'cancelled'),
+  ])
+
+  return {
+    contatos: contatos.count ?? 0,
+    realizadas: realizadas.count ?? 0,
+    agendadas: agendadas.count ?? 0,
+    cancelamentos: cancelamentos.count ?? 0,
+  } satisfies ResumoDoPaciente
 }
 
 /* ------------------------------------------------------------------ *

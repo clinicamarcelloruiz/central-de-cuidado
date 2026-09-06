@@ -107,11 +107,16 @@ function CaixaDeCancelamento({
 }: {
   consulta: { id: string; paciente: string; quando: string }
   onFechar: () => void
-  onCancelar: (motivo: string, avisar: boolean) => Promise<ResultadoDoCancelamento>
+  onCancelar: (
+    motivo: string,
+    avisar: boolean,
+    sugerir: boolean,
+  ) => Promise<ResultadoDoCancelamento>
 }) {
   const [motivo, setMotivo] = useState<string>(MOTIVOS_DE_CANCELAMENTO[0])
   const [outro, setOutro] = useState('')
   const [avisar, setAvisar] = useState(true)
+  const [sugerir, setSugerir] = useState(true)
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
   const [resultado, setResultado] = useState<ResultadoDoCancelamento | null>(null)
@@ -127,7 +132,7 @@ function CaixaDeCancelamento({
     setErro('')
     setEnviando(true)
     try {
-      setResultado(await onCancelar(texto, avisar))
+      setResultado(await onCancelar(texto, avisar, sugerir))
     } catch (causa) {
       setErro(causa instanceof Error ? causa.message : 'Não foi possível cancelar.')
     } finally {
@@ -221,6 +226,25 @@ function CaixaDeCancelamento({
                 </span>
               </span>
             </label>
+
+            {/* So faz sentido dentro do aviso: sugerir horario a quem nao vai
+                receber mensagem nenhuma seria conversa com a parede. */}
+            {avisar && (
+              <label className="mt-1.5 flex cursor-pointer items-start gap-2.5 rounded-xl bg-[#f8f7f4] px-3.5 py-3 text-[11px] font-bold text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={sugerir}
+                  onChange={(evento) => setSugerir(evento.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 accent-[#c87543]"
+                />
+                <span>
+                  Sugerir 3 horários da mesma unidade
+                  <span className="mt-0.5 block font-semibold text-slate-400">
+                    O paciente remarca com um toque, sem refazer o caminho.
+                  </span>
+                </span>
+              </label>
+            )}
 
             {erro && <p className="mt-2 text-[10px] font-bold text-red-500">{erro}</p>}
 
@@ -481,7 +505,9 @@ export default function Agenda({
             void carregarUnidade()
             onSolicitacoesMudaram?.()
           }}
-          onCancelar={(motivo, avisar) => cancelAppointment(cancelando.id, motivo, avisar)}
+          onCancelar={(motivo, avisar, sugerir) =>
+            cancelAppointment(cancelando.id, motivo, avisar, sugerir)
+          }
         />
       )}
       {error && (
