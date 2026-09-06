@@ -1709,16 +1709,46 @@ export async function iniciarAssinatura(consultationId: string, voltarPara: stri
     body: { acao: 'iniciar', consultationId, voltarPara },
   })
   if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível pedir a autorização.'))
-  return data as { pedido: string; autorizarEm: string }
+  return data as { pedido: string; autorizarEm: string; expiraEm?: string }
 }
 
-/** Segundo passo: o medico ja autorizou; agora o documento e assinado. */
-export async function concluirAssinatura(pedido: string) {
+export type ResultadoDaAssinatura =
+  | { situacao: 'assinado'; assinadoEm: string; arquivo: string; digital: string }
+  | { situacao: 'aguardando'; detalhe?: string }
+
+/**
+ * Segundo passo: tenta assinar com a permissao pedida.
+ *
+ * Devolve "aguardando" enquanto o medico nao aprovou no celular - a tela
+ * pergunta de novo em alguns segundos. Erro de verdade vira excecao.
+ *
+ * Antes isto so rodava quando o navegador voltava do VIDaaS com o numero do
+ * pedido no endereco. Essa volta nunca aconteceu: nove autorizacoes no celular
+ * em 06/09/2026 e nenhuma assinatura. Perguntando, o sistema nao depende dela.
+ */
+export async function concluirAssinatura(pedido: string): Promise<ResultadoDaAssinatura> {
   const { data, error } = await supabase.functions.invoke('assinar-consulta', {
     body: { acao: 'concluir', pedido },
   })
-  if (error) throw new Error(await motivoDaFalha(error, 'A assinatura não foi concluída.'))
-  return data as { assinadoEm: string; arquivo: string; digital: string }
+
+  if (error) {
+    // O 202 de "aguardando" tambem chega como erro para o cliente do Supabase,
+    // que so considera sucesso o 2xx com corpo de sucesso. Le o codigo antes
+    // de tratar como falha.
+    const contexto = (error as { context?: unknown }).context
+    if (contexto instanceof Response) {
+      try {
+        const corpo = await contexto.clone().json()
+        if (corpo?.code === 'AGUARDANDO') return { situacao: 'aguardando', detalhe: corpo.details }
+      } catch {
+        // sem JSON - segue para o erro normal
+      }
+    }
+    throw new Error(await motivoDaFalha(error, 'A assinatura não foi concluída.'))
+  }
+
+  if (data?.code === 'AGUARDANDO') return { situacao: 'aguardando', detalhe: data.details }
+  return { situacao: 'assinado', ...(data as { assinadoEm: string; arquivo: string; digital: string }) }
 }
 
 /**

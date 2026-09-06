@@ -249,6 +249,16 @@ export default function Home() {
               <HeartHandshake className="h-3.5 w-3.5 text-[#e2a077]" />
               Central de cuidado
             </div>
+            {/* Versao publicada, logo abaixo do nome: e o que responde, sem
+                adivinhacao, se a tela aberta ja e a de depois da ultima
+                publicacao. Ficava no rodape, mas em tela menor o rodape nao
+                aparece, e a pergunta "qual versao?" e feita justamente quando
+                algo esta estranho. O "typeof" evita que a etiqueta derrube a
+                pagina se um dia o build sair sem as variaveis - ja aconteceu. */}
+            <p className="mt-2 text-[10px] font-semibold tracking-[0.08em] text-white/35">
+              Versão {typeof __COMMIT__ === 'string' ? __COMMIT__ : '?'} ·{' '}
+              {typeof __VERSAO__ === 'string' ? __VERSAO__ : '?'}
+            </p>
           </div>
 
           <div className="mx-7 h-px bg-white/10" />
@@ -311,20 +321,6 @@ export default function Home() {
                 <p className="mt-0.5 text-[10px] leading-relaxed text-white/40">Sincronizados com acesso protegido</p>
               </div>
             </div>
-            {/* Versao publicada. Serve para responder, sem adivinhacao, se a
-                tela aberta ja e a de depois da ultima publicacao - o GitHub
-                leva minutos para servir o build novo e o navegador guarda o
-                antigo em cache.
-
-                O "typeof" nao e preciosismo: se o build sair sem estas
-                variaveis, o nome sozinho derruba a pagina inteira com
-                ReferenceError - foi o que aconteceu em 06/09/2026, quando o
-                vite.config.ts nao subiu junto e o sistema abriu em branco.
-                Uma etiqueta de versao nao pode ter poder de apagar a tela. */}
-            <p className="relative mt-3 text-[9px] font-semibold tracking-[0.06em] text-white/25">
-              Versão {typeof __VERSAO__ === 'string' ? __VERSAO__ : '?'} ·{' '}
-              {typeof __COMMIT__ === 'string' ? __COMMIT__ : '?'}
-            </p>
           </div>
 
           <div className="flex items-center gap-3 border-t border-white/10 px-6 py-5">

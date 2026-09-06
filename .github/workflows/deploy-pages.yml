@@ -98,6 +98,11 @@ jobs:
           supabase functions deploy whatsapp-reopen --project-ref "$PROJECT_REF"
           supabase functions deploy appointment-reminders --project-ref "$PROJECT_REF"
           supabase functions deploy transcrever-audio --project-ref "$PROJECT_REF"
+          supabase functions deploy assinar-consulta --project-ref "$PROJECT_REF"
+          supabase functions deploy appointment-cancel --project-ref "$PROJECT_REF"
+          supabase functions deploy whatsapp-perfil --project-ref "$PROJECT_REF"
+          supabase functions deploy memed-prescritor --project-ref "$PROJECT_REF"
+          supabase functions deploy memed-receita --project-ref "$PROJECT_REF"
 
       # Aplica as migrations pendentes. Sem isto, toda alteracao de banco tem de
       # ser colada na mao no SQL Editor, o que ja causou schema publicado

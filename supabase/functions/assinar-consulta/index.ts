@@ -63,6 +63,21 @@ async function tokenDaBry(cloud: string) {
   return dados.access_token as string
 }
 
+/**
+ * A recusa do assinador significa "ainda nao autorizou" ou "deu errado"?
+ *
+ * Nao ha codigo unico documentado para o primeiro caso, entao a leitura e por
+ * aproximacao: 401 e 403 sao a credencial sem permissao, e o texto costuma
+ * falar em autorizacao, credencial ou sessao. Tudo o mais e falha real.
+ * Errar para o lado da espera custa alguns segundos a mais; errar para o lado
+ * da falha marca como falho um pedido que ainda ia dar certo.
+ */
+function pareceAguardandoAutorizacao(status: number, texto: string) {
+  if (status === 401 || status === 403) return true
+  return /autoriz|credencial|credential|unauthori|pendente|pending|sess[aã]o|session|aguard|n[aã]o (foi )?aprovad/i
+    .test(texto)
+}
+
 async function digitalDoArquivo(bytes: Uint8Array) {
   const resumo = await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(resumo), (b) => b.toString(16).padStart(2, '0')).join('')
@@ -156,6 +171,7 @@ Deno.serve(async (req) => {
 
       const { data: usuario } = await escopo.auth.getUser()
 
+      const expiraEm = new Date(Date.now() + 900 * 1000).toISOString()
       const { error: erroPedido } = await admin.from('signature_requests').insert({
         id: pedidoId,
         clinic_id: consulta.clinic_id,
@@ -163,7 +179,7 @@ Deno.serve(async (req) => {
         patient_id: consulta.patient_id,
         requested_by: usuario?.user?.id ?? null,
         psc_credential: dados.token,
-        expires_at: new Date(Date.now() + 900 * 1000).toISOString(),
+        expires_at: expiraEm,
       })
 
       if (erroPedido) {
@@ -171,7 +187,7 @@ Deno.serve(async (req) => {
         return json({ error: 'Falha ao registrar o pedido de assinatura.' }, 500)
       }
 
-      return json({ ok: true, pedido: pedidoId, autorizarEm: dados.url })
+      return json({ ok: true, pedido: pedidoId, autorizarEm: dados.url, expiraEm })
     }
 
     // -----------------------------------------------------------------------
@@ -290,6 +306,24 @@ Deno.serve(async (req) => {
       const respostaTexto = await assinatura.text()
 
       if (!assinatura.ok) {
+        // Ainda sem autorizacao no celular nao e falha: e espera. A tela
+        // pergunta de novo em alguns segundos. So vira falha de verdade quando
+        // o pedido expira ou quando a recusa e por outro motivo.
+        //
+        // Isto existe porque a volta do VIDaaS por redirecionamento nunca
+        // chegou ao sistema: em 06/09/2026 o medico autorizou nove vezes no
+        // celular e nove pedidos ficaram sem uso, sem falha, sem nada. Com a
+        // tela perguntando, a assinatura nao depende de ninguem "voltar".
+        if (pareceAguardandoAutorizacao(assinatura.status, respostaTexto)) {
+          return json({
+            ok: false,
+            code: 'AGUARDANDO',
+            error: 'Aguardando a autorização no celular.',
+            status: assinatura.status,
+            details: respostaTexto.slice(0, 300),
+          }, 202)
+        }
+
         console.error('Assinador recusou', assinatura.status, respostaTexto)
         await admin
           .from('signature_requests')
