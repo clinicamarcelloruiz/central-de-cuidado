@@ -30,10 +30,12 @@ const AMBIENTES = {
   producao: {
     cloud: 'https://cloud.bry.com.br',
     integra: 'https://integra.bry.com.br/api/service',
+    hub: 'https://hub2.bry.com.br',
   },
   homologacao: {
     cloud: 'https://cloud-hom.bry.com.br',
     integra: 'https://integra.hom.bry.com.br/api/service',
+    hub: 'https://hub2.hom.bry.com.br',
   },
 }
 
@@ -64,19 +66,27 @@ async function tokenDaBry(cloud: string) {
 }
 
 /**
- * A recusa do assinador significa "ainda nao autorizou" ou "deu errado"?
+ * Pergunta a BRy se a credencial ja foi autorizada no celular.
  *
- * Nao ha codigo unico documentado para o primeiro caso, entao a leitura e por
- * aproximacao: 401 e 403 sao a credencial sem permissao, e o texto costuma
- * falar em autorizacao, credencial ou sessao. Tudo o mais e falha real.
- * Errar para o lado da espera custa alguns segundos a mais; errar para o lado
- * da falha marca como falho um pedido que ainda ia dar certo.
+ * E a resposta definitiva: 'signatureReady' so vira true depois que o medico
+ * aprova no VIDaaS. Antes disto o sistema tentava assinar e adivinhava, pelo
+ * texto do erro, se era "ainda nao" ou "deu errado" - e um 401 de qualquer
+ * outra origem (endereco errado, token vencido) viraria espera eterna.
  */
-function pareceAguardandoAutorizacao(status: number, texto: string) {
-  if (status === 401 || status === 403) return true
-  return /autoriz|credencial|credential|unauthori|pendente|pending|sess[aã]o|session|aguard|n[aã]o (foi )?aprovad/i
-    .test(texto)
+async function situacaoDaCredencial(integra: string, jwt: string, credencial: string) {
+  const resposta = await fetch(`${integra}/auth/info`, {
+    headers: { Authorization: `Bearer ${jwt}`, 'X-API-KEY': credencial },
+  })
+  const texto = await resposta.text()
+  if (!resposta.ok) {
+    return { ok: false as const, status: resposta.status, texto }
+  }
+  const dados = JSON.parse(texto) as { signatureReady?: boolean; expiration?: number; scope?: string }
+  return { ok: true as const, pronta: dados.signatureReady === true, dados }
 }
+
+/** Marca de "alguem ja esta assinando este pedido". Some ao concluir. */
+const EM_ANDAMENTO = 'em andamento'
 
 async function digitalDoArquivo(bytes: Uint8Array) {
   const resumo = await crypto.subtle.digest('SHA-256', bytes)
@@ -198,12 +208,22 @@ Deno.serve(async (req) => {
 
       const { data: pedido } = await admin
         .from('signature_requests')
-        .select('id,clinic_id,consultation_id,patient_id,psc_credential,expires_at,used_at')
+        .select('id,clinic_id,consultation_id,patient_id,psc_credential,expires_at,used_at,failed_at,failure_reason')
         .eq('id', corpo.pedido)
         .maybeSingle()
 
       if (!pedido) return json({ error: 'Pedido de assinatura não encontrado.' }, 404)
-      if (pedido.used_at) return json({ error: 'Este pedido já foi usado.', code: 'JA_USADO' }, 409)
+      // Pedido ja usado e sucesso, nao erro: e a outra tela perguntando depois
+      // que a primeira concluiu. Devolver erro aqui mostraria "falhou" para um
+      // atendimento assinado.
+      if (pedido.used_at) return json({ ok: true, assinadoEm: pedido.used_at, jaEstava: true })
+      if (pedido.failed_at) {
+        return json({
+          error: 'Este pedido já falhou. Peça a assinatura de novo.',
+          code: 'JA_FALHOU',
+          details: pedido.failure_reason ?? undefined,
+        }, 409)
+      }
       if (new Date(pedido.expires_at).getTime() < Date.now()) {
         return json({
           error: 'A autorização expirou. Peça a assinatura de novo.',
@@ -223,9 +243,7 @@ Deno.serve(async (req) => {
         .maybeSingle()
 
       if (!consulta) return json({ error: 'Atendimento não encontrado.', code: 'NOT_VISIBLE' }, 403)
-      if (consulta.signed_at) {
-        return json({ error: 'Este atendimento já está assinado.', code: 'JA_ASSINADO' }, 409)
-      }
+      if (consulta.signed_at) return json({ ok: true, assinadoEm: consulta.signed_at, jaEstava: true })
 
       const { data: paciente } = await escopo
         .from('patients')
@@ -234,6 +252,53 @@ Deno.serve(async (req) => {
         .maybeSingle()
 
       if (!paciente) return json({ error: 'Paciente não encontrado.' }, 404)
+
+      const jwt = await tokenDaBry(env.cloud)
+
+      // Primeiro: o medico ja aprovou? Sem isto nao adianta montar PDF nenhum.
+      // "Ainda nao" nao e falha, e espera: a tela pergunta de novo em segundos.
+      const credencial = await situacaoDaCredencial(env.integra, jwt, pedido.psc_credential)
+      if (!credencial.ok) {
+        console.error('auth/info recusou', credencial.status, credencial.texto)
+        await admin
+          .from('signature_requests')
+          .update({ failed_at: new Date().toISOString(), failure_reason: `auth/info ${credencial.status}: ${credencial.texto.slice(0, 400)}` })
+          .eq('id', pedido.id)
+        return json({
+          error: 'A certificadora não reconheceu o pedido de assinatura.',
+          code: 'CREDENCIAL_INVALIDA',
+          status: credencial.status,
+          details: credencial.texto.slice(0, 300),
+        }, 502)
+      }
+      if (!credencial.pronta) {
+        return json({
+          ok: false,
+          code: 'AGUARDANDO',
+          error: 'Aguardando a autorização no celular.',
+          details: JSON.stringify(credencial.dados),
+        }, 202)
+      }
+
+      // Duas telas podem chegar aqui ao mesmo tempo: a que ficou perguntando
+      // e a aba que o VIDaaS devolveu com o numero do pedido. Sem esta marca,
+      // as duas assinariam - duas cobrancas e dois arquivos para um mesmo
+      // atendimento. Quem marca primeiro assina; a outra espera e, na
+      // proxima pergunta, encontra a consulta ja assinada.
+      const { data: reservado } = await admin
+        .from('signature_requests')
+        .update({ failure_reason: EM_ANDAMENTO })
+        .eq('id', pedido.id)
+        .is('failure_reason', null)
+        .is('used_at', null)
+        .select('id')
+      if (!reservado || reservado.length === 0) {
+        return json({
+          ok: false,
+          code: 'AGUARDANDO',
+          error: 'A assinatura já está sendo concluída.',
+        }, 202)
+      }
 
       const { data: clinica } = await admin
         .from('clinics')
@@ -264,14 +329,22 @@ Deno.serve(async (req) => {
         geradoEm: new Date(),
       })
 
-      const token = await tokenDaBry(env.cloud)
+      const token = jwt
 
       // O endereco do assinador e o perfil ficam configuraveis porque sao a
       // parte da integracao que ainda nao foi confirmada com a BRy. Errar aqui
       // e uma troca de segredo, e nao uma reimplantacao as pressas.
-      const enderecoAssinador = Deno.env.get('BRY_ASSINATURA_URL')?.trim() ||
-        `${env.integra}/fw/v1/pdf/kms/lote/assinaturas`
-      const urlDoPsc = Deno.env.get('BRY_PSC_URL')?.trim() || 'https://psc.bry.com.br'
+      //
+      // Pela documentacao do Integra: a assinatura e feita no HUB Signer, e o
+      // "url" da credencial PSC e a base do proprio Integra. Como isto nunca
+      // foi exercitado ate 06/09/2026, o sistema tenta o HUB e, se ele
+      // recusar, tenta o Integra - e guarda as duas respostas para leitura.
+      const enderecosDoAssinador = [
+        Deno.env.get('BRY_ASSINATURA_URL')?.trim() || '',
+        `${env.hub}/fw/v1/pdf/kms/lote/assinaturas`,
+        `${env.integra}/fw/v1/pdf/kms/lote/assinaturas`,
+      ].filter((endereco, indice, lista) => endereco && lista.indexOf(endereco) === indice)
+      const urlDoPsc = Deno.env.get('BRY_PSC_URL')?.trim() || env.integra
       // ADRB: assinatura ICP-Brasil basica. O perfil ADRT acrescenta carimbo do
       // tempo de autoridade credenciada - e o que prova a DATA perante
       // terceiros, nao so a autoria. Fica para depois de sabermos o preco dele.
@@ -297,44 +370,38 @@ Deno.serve(async (req) => {
         }),
       )
 
-      const assinatura = await fetch(enderecoAssinador, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, kms_type: 'PSC' },
-        body: formulario,
-      })
-
-      const respostaTexto = await assinatura.text()
-
-      if (!assinatura.ok) {
-        // Ainda sem autorizacao no celular nao e falha: e espera. A tela
-        // pergunta de novo em alguns segundos. So vira falha de verdade quando
-        // o pedido expira ou quando a recusa e por outro motivo.
-        //
-        // Isto existe porque a volta do VIDaaS por redirecionamento nunca
-        // chegou ao sistema: em 06/09/2026 o medico autorizou nove vezes no
-        // celular e nove pedidos ficaram sem uso, sem falha, sem nada. Com a
-        // tela perguntando, a assinatura nao depende de ninguem "voltar".
-        if (pareceAguardandoAutorizacao(assinatura.status, respostaTexto)) {
-          return json({
-            ok: false,
-            code: 'AGUARDANDO',
-            error: 'Aguardando a autorização no celular.',
-            status: assinatura.status,
-            details: respostaTexto.slice(0, 300),
-          }, 202)
+      let assinatura: Response | null = null
+      let respostaTexto = ''
+      const recusas: string[] = []
+      for (const endereco of enderecosDoAssinador) {
+        // O FormData nao pode ser reaproveitado depois de enviado.
+        const corpo = new FormData()
+        for (const [chave, valor] of formulario.entries()) corpo.append(chave, valor)
+        const tentativa = await fetch(endereco, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, kms_type: 'PSC' },
+          body: corpo,
+        })
+        respostaTexto = await tentativa.text()
+        if (tentativa.ok) {
+          assinatura = tentativa
+          break
         }
+        console.error('Assinador recusou', endereco, tentativa.status, respostaTexto)
+        recusas.push(`${new URL(endereco).host} ${tentativa.status}: ${respostaTexto.slice(0, 200)}`)
+      }
 
-        console.error('Assinador recusou', assinatura.status, respostaTexto)
+      if (!assinatura) {
+        const motivo = recusas.join(' | ')
         await admin
           .from('signature_requests')
-          .update({ failed_at: new Date().toISOString(), failure_reason: respostaTexto.slice(0, 500) })
+          .update({ failed_at: new Date().toISOString(), failure_reason: motivo.slice(0, 500) })
           .eq('id', pedido.id)
 
         return json({
-          error: 'A assinatura não foi concluída.',
+          error: 'A certificadora recusou a assinatura.',
           code: 'ASSINADOR_RECUSOU',
-          status: assinatura.status,
-          details: respostaTexto.slice(0, 500),
+          details: motivo.slice(0, 500),
         }, 502)
       }
 
@@ -358,6 +425,10 @@ Deno.serve(async (req) => {
 
       if (erroArquivo) {
         console.error('Falha ao arquivar', erroArquivo)
+        await admin
+          .from('signature_requests')
+          .update({ failed_at: new Date().toISOString(), failure_reason: `arquivo: ${erroArquivo.message}`.slice(0, 500) })
+          .eq('id', pedido.id)
         return json({
           error: 'O documento foi assinado mas não pôde ser arquivado.',
           code: 'FALHA_ARQUIVO',
@@ -383,6 +454,10 @@ Deno.serve(async (req) => {
 
       if (erroMarcar) {
         console.error('Falha ao marcar como assinada', erroMarcar)
+        await admin
+          .from('signature_requests')
+          .update({ failed_at: new Date().toISOString(), failure_reason: `registro: ${erroMarcar.message}`.slice(0, 500) })
+          .eq('id', pedido.id)
         return json({
           error: 'O documento foi assinado e arquivado, mas o prontuário não registrou.',
           code: 'FALHA_REGISTRO',
@@ -391,7 +466,7 @@ Deno.serve(async (req) => {
 
       await admin
         .from('signature_requests')
-        .update({ used_at: agora })
+        .update({ used_at: agora, failure_reason: null })
         .eq('id', pedido.id)
 
       return json({ ok: true, assinadoEm: agora, arquivo: caminho, digital })
