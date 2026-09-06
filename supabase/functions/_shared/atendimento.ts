@@ -21,9 +21,19 @@
 import type { adminClient } from './whatsapp.ts'
 
 /** Dias oferecidos de uma vez. Cabe a quinzena inteira numa mensagem so. */
-const MAX_DIAS = 10
+/**
+ * Ate oito dias por lista.
+ *
+ * Nao e limite de tela: e para o *9* poder significar "falar com a equipe" em
+ * qualquer etapa. Com dez dias na lista, o nove seria um dia e a saida teria de
+ * voltar a ser uma palavra digitada.
+ */
+const MAX_DIAS = 8
 /** Horarios de um dia. Um expediente de 8h as 18h em blocos de 40min da 15. */
-const MAX_HORARIOS_DIA = 15
+// Oito tambem aqui, pelo mesmo motivo dos dias: com nove horarios na lista, o
+// *9* seria um horario. Quem precisar de um horario fora dos oito primeiros usa
+// justamente o 9 para falar com a equipe, que e o que a linha de saida oferece.
+const MAX_HORARIOS_DIA = 8
 /** Teto do WhatsApp para linhas de uma lista tocavel. */
 const MAX_TOQUES = 10
 
@@ -122,12 +132,16 @@ function pediuVoltar(texto: string) {
 /**
  * Chamar a equipe por palavra, e nao por numero.
  *
- * Dentro do agendamento "3" e a terceira unidade da lista, entao oferecer "3
- * para falar com a equipe" ali criaria justamente a duvida que este menu
- * existe para evitar. Palavra funciona em qualquer etapa sem colidir.
+ * A palavra continua valendo para quem digita, mas deixou de ser o caminho
+ * anunciado: hoje o *9* faz o mesmo em qualquer etapa, e pedir uma palavra a
+ * quem esta respondendo numeros era trocar de idioma no meio da conversa.
  */
 function pediuAtendente(texto: string) {
   const t = normalizar(texto)
+  // O 9 vale em qualquer etapa porque nenhuma lista passa de oito opcoes. E a
+  // primeira coisa conferida a cada mensagem, entao ele nunca e confundido com
+  // a escolha de um dia ou de um horario.
+  if (t === '9') return true
   return (
     t === 'atendente' ||
     t === 'secretaria' ||
@@ -256,17 +270,22 @@ const OPCOES = [
 // O "0" sempre funcionou - pediuMenu o aceita desde o inicio, e ele nunca
 // colide com a lista porque indice de opcao comeca em 1. So nao estava escrito
 // em lugar nenhum, e o que nao se anuncia nao existe para quem le.
-const VOLTA = 'Digite 0 a qualquer momento para voltar ao início.'
-const SAIDAS = 'Digite 0 para voltar ao início, ou ATENDENTE para falar com a nossa equipe.'
+const VOLTA = 'Digite *0* a qualquer momento para voltar ao início.'
+const SAIDAS = 'Digite *9* para falar com a nossa equipe, ou *0* para voltar ao início.'
 
 /**
- * Acrescenta a saida na propria lista tocavel.
+ * Acrescenta as duas saidas na propria lista tocavel.
  *
- * Quem toca nao deveria precisar digitar nada - nem "0", nem "MENU". A linha de
- * volta ocupa uma das dez, entao o conteudo e cortado em nove.
+ * Quem toca nao deveria precisar digitar nada. As duas linhas ocupam duas das
+ * dez, entao o conteudo e cortado em oito - o mesmo oito de MAX_DIAS, para que
+ * o numero mostrado e o numero tocado nunca discordem.
  */
 function comVoltar(linhas: Toque[]): Toque[] {
-  return [...linhas.slice(0, MAX_TOQUES - 1), { id: '0', titulo: 'Voltar ao menu' }]
+  return [
+    ...linhas.slice(0, MAX_TOQUES - 2),
+    { id: '9', titulo: 'Falar com a equipe' },
+    { id: '0', titulo: 'Voltar ao menu' },
+  ]
 }
 
 async function salvarEstado(
@@ -534,7 +553,7 @@ async function perguntarPaciente(
   conversationId: string,
   pacientes: Paciente[],
 ): Promise<Resultado> {
-  const linhas = pacientes.map((p, i) => `${i + 1} - ${p.name}`).join('\n')
+  const linhas = pacientes.map((p, i) => `*${i + 1}* ${p.name}`).join('\n')
 
   await salvarEstado(admin, conversationId, {
     booking_state: 'aguardando_paciente',
@@ -545,8 +564,17 @@ async function perguntarPaciente(
 
   return {
     resposta:
-      `Vamos agendar. Para quem é a consulta?\n\n${linhas}\n\n` +
+      `👶 *Vamos agendar!* Para quem é a consulta?\n\n${linhas}\n\n` +
       `Responda com o número. ${SAIDAS}`,
+    // Era a unica etapa sem lista tocavel: quem chegava aqui tinha de digitar,
+    // enquanto nas telas seguintes bastava tocar. A troca de gesto no meio do
+    // caminho e o tipo de coisa que faz a pessoa achar que travou.
+    lista: {
+      rotulo: 'Escolher paciente',
+      linhas: comVoltar(
+        pacientes.map((p, i) => ({ id: String(i + 1), titulo: p.name.slice(0, 24) })),
+      ),
+    },
   }
 }
 
@@ -642,7 +670,7 @@ async function perguntarUnidade(
   const linhas = comAgenda
     .map((u, i) => {
       const marca = u.horarios.length > 0 ? '' : ' (sem horários no momento)'
-      return `${i + 1} - ${u.unidade.name}${marca}`
+      return `*${i + 1}* ${u.unidade.name}${marca}`
     })
     .join('\n')
 
@@ -654,7 +682,7 @@ async function perguntarUnidade(
 
   return {
     resposta:
-      `Vamos agendar sua consulta.\n\nEm qual unidade você prefere ser atendido?\n\n${linhas}\n\n` +
+      `📍 *Vamos agendar!* Em qual unidade você prefere ser atendido?\n\n${linhas}\n\n` +
       `Responda com o número. ${SAIDAS}`,
     lista: {
       rotulo: 'Escolher unidade',
@@ -711,7 +739,7 @@ async function perguntarDia(
   const linhas = mostrados
     .map((d, i) => {
       const quantos = d.horarios.length
-      return `${i + 1} - ${formatarDia(d.horarios[0].inicio, timezone)} (${quantos} ${
+      return `*${i + 1}* ${formatarDia(d.horarios[0].inicio, timezone)} (${quantos} ${
         quantos === 1 ? 'horário' : 'horários'
       })`
     })
@@ -726,8 +754,8 @@ async function perguntarDia(
   // Sem agenda alem da quinzena nao adianta prometer: quem precisa de data
   // distante fala com a equipe, que enxerga o calendario inteiro.
   const rodape = podeTrocarUnidade
-    ? 'Digite VOLTAR para escolher outra unidade, ATENDENTE se precisar de uma data mais distante, ou 0 para o início.'
-    : 'Digite ATENDENTE se precisar de uma data mais distante, ou MENU para o início.'
+    ? 'Digite VOLTAR para escolher outra unidade, *9* se precisar de uma data mais distante, ou *0* para o início.'
+    : 'Digite *9* se precisar de uma data mais distante, ou *0* para o início.'
 
   return {
     resposta:
@@ -781,7 +809,7 @@ async function perguntarHorario(
     return await perguntarDia(admin, clinicId, conversationId, unidade as Unidade)
   }
 
-  const linhas = doDia.map((h, i) => `${i + 1} - ${formatarHora(h.inicio, timezone)}`).join('\n')
+  const linhas = doDia.map((h, i) => `*${i + 1}* ${formatarHora(h.inicio, timezone)}`).join('\n')
 
   await salvarEstado(admin, conversationId, {
     booking_state: 'aguardando_horario',
@@ -810,7 +838,7 @@ async function perguntarHorario(
     resposta:
       `Horários de ${formatarDia(doDia[0].inicio, timezone)}:\n\n${linhas}\n\n` +
       'Responda com o número do horário.\n' +
-      'Digite VOLTAR para escolher outro dia, ATENDENTE para falar com a nossa equipe, ou MENU para o início.',
+      'Digite VOLTAR para escolher outro dia, *9* para falar com a nossa equipe, ou *0* para o início.',
   }
 }
 
