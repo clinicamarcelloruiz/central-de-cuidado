@@ -93,6 +93,8 @@ function emptyDraft(): PatientDraft {
     responsavel: '',
     nascimento: '',
     sexo: 'F',
+    cpf: '',
+    email: '',
     telefone: '',
     cidade: '',
     bairro: '',
@@ -323,6 +325,8 @@ export default function Patients({
       nascimento: patient.nascimento,
       sexo: patient.sexo,
       telefone: patient.telefone,
+      cpf: patient.cpf ?? '',
+      email: patient.email ?? '',
       cidade: patient.cidade,
       bairro: patient.bairro,
       convenio: patient.convenio,
@@ -744,6 +748,30 @@ export default function Patients({
               </Field>
               <Field label="Data de nascimento">
                 <input type="date" className={inputClass} value={form.nascimento} onChange={(event) => set('nascimento', event.target.value)} />
+              </Field>
+              {/* CPF e do PACIENTE, nao do responsavel - inclusive de bebe, que
+                  tem CPF desde o registro de nascimento. A RDC 1000/25 passou a
+                  exigi-lo em toda receita; sem ele a Memed recusa a emissao.
+                  Fica opcional aqui de proposito: travar o cadastro de um
+                  paciente novo por falta de CPF seria pior do que o problema. */}
+              <Field label="CPF do paciente">
+                <input
+                  className={inputClass}
+                  value={form.cpf}
+                  onChange={(event) => set('cpf', event.target.value)}
+                  placeholder="Necessário para emitir receita"
+                  inputMode="numeric"
+                  maxLength={14}
+                />
+              </Field>
+              <Field label="E-mail">
+                <input
+                  className={inputClass}
+                  value={form.email}
+                  onChange={(event) => set('email', event.target.value)}
+                  placeholder="Para onde a receita pode ser enviada"
+                  inputMode="email"
+                />
               </Field>
               <Field label="Sexo">
                 <select

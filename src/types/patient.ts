@@ -17,6 +17,9 @@ export interface Patient {
   nascimento: string // YYYY-MM-DD
   sexo: Sexo
   telefone: string
+  /** CPF do proprio paciente. Exigido pela RDC 1000/25 para emitir receita. */
+  cpf: string
+  email: string
   cidade: string
   bairro: string
   convenio: string
