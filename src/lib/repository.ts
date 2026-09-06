@@ -1468,6 +1468,85 @@ export async function reopenConversation(conversationId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Receitas emitidas pela Memed
+// ---------------------------------------------------------------------------
+
+export interface ItemDaReceita {
+  nome: string
+  posologia: string
+  quantidade: number | null
+  unidade: string | null
+}
+
+export interface Receita {
+  id: string
+  consultationId: string | null
+  memedId: string
+  link: string | null
+  emitidaEm: string
+  excluidaEm: string | null
+  itens: ItemDaReceita[]
+}
+
+/**
+ * As receitas do paciente, para aparecerem dentro do atendimento.
+ *
+ * Os itens vem do banco, e nao da Memed, de proposito: o prontuario precisa
+ * dizer o que foi prescrito mesmo que a integracao acabe ou o servico saia do
+ * ar. O link e conveniencia; o texto e o registro.
+ */
+/**
+ * Escape para tabelas que o banco ja tem e os tipos gerados ainda nao.
+ *
+ * Some quando os tipos forem regerados depois da migration da prescricao. Ate
+ * la o cliente recusaria o nome da tabela na compilacao.
+ */
+type ConsultaCrua = {
+  select: (colunas: string) => ConsultaCrua
+  eq: (coluna: string, valor: string) => ConsultaCrua
+  order: (
+    coluna: string,
+    opcoes: { ascending: boolean },
+  ) => PromiseLike<{ data: unknown; error: unknown }>
+}
+
+function tabelaCrua(nome: string) {
+  return (supabase.from as unknown as (n: string) => ConsultaCrua)(nome)
+}
+
+export async function listPrescriptions(clinicId: string, patientId: string) {
+  const { data, error } = await tabelaCrua('prescriptions')
+    .select('id,consultation_id,memed_id,link,itens,emitida_em,excluida_em')
+    .eq('clinic_id', clinicId)
+    .eq('patient_id', patientId)
+    .order('emitida_em', { ascending: false })
+
+  // Receita e complemento do prontuario: se a listagem falhar - por exemplo
+  // antes de a migration rodar -, o atendimento continua inteiro na tela.
+  if (error) return []
+
+  type Linha = {
+    id: string
+    consultation_id: string | null
+    memed_id: string
+    link: string | null
+    itens: ItemDaReceita[] | null
+    emitida_em: string
+    excluida_em: string | null
+  }
+
+  return ((data ?? []) as unknown as Linha[]).map((linha) => ({
+    id: linha.id,
+    consultationId: linha.consultation_id,
+    memedId: linha.memed_id,
+    link: linha.link,
+    emitidaEm: linha.emitida_em,
+    excluidaEm: linha.excluida_em,
+    itens: Array.isArray(linha.itens) ? linha.itens : [],
+  })) satisfies Receita[]
+}
+
+// ---------------------------------------------------------------------------
 // Assinatura digital do atendimento
 // ---------------------------------------------------------------------------
 
