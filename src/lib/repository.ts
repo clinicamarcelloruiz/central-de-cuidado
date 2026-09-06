@@ -1474,6 +1474,23 @@ export async function reopenConversation(conversationId: string) {
  * site. Assim a foto tem um endereco fixo e versionado, e quem trocar amanha
  * troca o arquivo, nao o codigo.
  */
+export interface SituacaoDoNumero {
+  numero: string | null
+  nomeAtual: string | null
+  situacaoDoNomeAtual: string
+  situacaoDoPedido: string
+  qualidade: string | null
+}
+
+/** Le o estado do numero na Meta. So leitura: nao submete nome nenhum. */
+export async function situacaoDoWhatsApp() {
+  const { data, error } = await supabase.functions.invoke('whatsapp-perfil', {
+    body: { acao: 'status' },
+  })
+  if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível consultar a Meta.'))
+  return data as SituacaoDoNumero
+}
+
 export async function atualizarFotoDoPerfil() {
   const { error } = await supabase.functions.invoke('whatsapp-perfil', { body: {} })
   if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível trocar a foto.'))
