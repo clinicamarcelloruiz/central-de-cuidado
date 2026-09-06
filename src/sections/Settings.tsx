@@ -4,6 +4,7 @@ import {
   DatabaseBackup,
   Download,
   FileJson,
+  ImageUp,
   Info,
   MessageCircleHeart,
   RefreshCw,
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react'
 import type { Db, FollowupKey } from '@/types/patient'
 import { DEFAULT_TEMPLATES } from '@/lib/store'
+import { atualizarFotoDoPerfil } from '@/lib/repository'
 
 const inputClass =
   'mt-3 min-h-[138px] w-full resize-y rounded-[18px] border border-[#081b2c]/10 bg-[#fafaf8] p-4 text-xs font-medium leading-relaxed text-[#203546] outline-none transition placeholder:text-slate-300 focus:border-[#dc8e5f] focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10'
@@ -26,6 +28,28 @@ interface Props {
 }
 
 export default function Settings({ db, setTemplates, importDb, clearAll }: Props) {
+  const [trocandoFoto, setTrocandoFoto] = useState(false)
+  const [avisoFoto, setAvisoFoto] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+
+  async function trocarFoto() {
+    setAvisoFoto(null)
+    setTrocandoFoto(true)
+    try {
+      await atualizarFotoDoPerfil()
+      setAvisoFoto({
+        tipo: 'ok',
+        texto: 'Foto atualizada. Pode levar alguns minutos para aparecer no celular dos pacientes.',
+      })
+    } catch (causa) {
+      setAvisoFoto({
+        tipo: 'erro',
+        texto: causa instanceof Error ? causa.message : 'Não foi possível trocar a foto.',
+      })
+    } finally {
+      setTrocandoFoto(false)
+    }
+  }
+
   const [d30, setD30] = useState(db.templates.d30)
   const [m90, setM90] = useState(db.templates.m90)
   const [saved, setSaved] = useState(false)
@@ -228,6 +252,43 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
             <FileJson className="h-3.5 w-3.5 text-[#d98e5f]" />
             <span className="text-[9px] font-bold text-slate-400">Formato do backup: arquivo JSON</span>
           </div>
+        </section>
+
+        {/* A foto do perfil do WhatsApp nem sempre e editavel pelo Gerenciador
+            da Meta - foi o caso aqui. Pela API funciona, e a imagem vem do
+            proprio site: trocar a foto amanha e trocar o arquivo la e apertar
+            este botao. */}
+        <section className="surface-card rounded-[24px] p-5">
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#eaf0f8] text-[#4d6f91]">
+              <ImageUp className="h-4 w-4" />
+            </span>
+            <div>
+              <h2 className="text-xs font-extrabold text-[#081b2c]">Foto do perfil no WhatsApp</h2>
+              <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400">
+                Usa a imagem publicada em drmarcelloruiz.com.br/assets/perfil-whatsapp.png. É ela
+                que os pacientes veem ao receber as mensagens da clínica.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void trocarFoto()}
+            disabled={trocandoFoto}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[#081b2c] px-4 py-2.5 text-[10px] font-extrabold text-white transition hover:bg-[#102d47] disabled:cursor-wait disabled:opacity-70"
+          >
+            {trocandoFoto ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ImageUp className="h-3.5 w-3.5" />}
+            {trocandoFoto ? 'Enviando para a Meta...' : 'Atualizar foto do perfil'}
+          </button>
+          {avisoFoto && (
+            <p
+              className={`mt-2.5 text-[10px] font-bold leading-relaxed ${
+                avisoFoto.tipo === 'ok' ? 'text-[#1c6b3a]' : 'text-red-500'
+              }`}
+            >
+              {avisoFoto.texto}
+            </p>
+          )}
         </section>
 
         <section className="rounded-[24px] border border-red-100 bg-[#fffafa] p-5">
