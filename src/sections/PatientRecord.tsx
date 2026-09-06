@@ -1688,8 +1688,18 @@ type AvisoDoProntuarioProps = {
 }
 
 function AvisoDoProntuario({ aviso, onFechar }: AvisoDoProntuarioProps) {
+  const caixa = useRef<HTMLDivElement>(null)
+
+  // O texto entra nas dependencias para que um aviso NOVO tambem role a tela:
+  // dois erros seguidos no mesmo lugar sao dois avisos, e o segundo precisa
+  // ser visto igual ao primeiro.
+  useEffect(() => {
+    caixa.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [aviso.texto])
+
   return (
     <div
+      ref={caixa}
       className={`mb-3 flex items-start gap-2 rounded-[14px] border px-4 py-3 text-[12px] font-bold ${
         aviso.tipo === 'ok'
           ? 'border-[#1c6b3a]/25 bg-[#eef7f1] text-[#1c6b3a]'
@@ -2597,7 +2607,7 @@ export default function PatientRecord({
                     que nao e receita - orientacao, dieta, "manter o que usa";
                     a receita formal nasce na Memed e volta para ca com link e
                     itens, para o prontuario nao ter duas versoes do mesmo. */}
-                <div className="sm:col-span-2 -mt-1">
+                <div className="-mt-1 sm:col-start-2">
                   <button
                     type="button"
                     onClick={() => void prescreverDoFormulario()}
