@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Edit3,
   FileHeart,
+  FileText,
   HeartPulse,
   Italic,
   List,
@@ -48,7 +49,10 @@ import {
 import { fmtBR, idade, todayISO } from '@/lib/followup'
 import {
   archiveNoteTemplate,
+  concluirAssinatura,
   conferirIntegridade,
+  iniciarAssinatura,
+  linkDoAtendimentoAssinado,
   createNoteTemplate,
   getCurrentMembership,
   listNoteTemplates,
@@ -1171,11 +1175,18 @@ function ConsultationCard({
   consultation,
   anterior,
   onEdit,
+  onAssinar,
+  onAbrirAssinado,
+  assinando,
 }: {
   consultation: Consultation
   /** Consulta imediatamente anterior, para mostrar o que mudou. */
   anterior?: Consultation
   onEdit: (consultation: Consultation) => void
+  onAssinar: (consultation: Consultation) => void
+  onAbrirAssinado: (consultation: Consultation) => void
+  /** Id da consulta cuja assinatura esta em andamento, se houver. */
+  assinando: string | null
 }) {
   // Os campos guardam HTML (negrito, cor). Para a linha de resumo so interessa
   // o texto: sem esta limpeza o cartao exibia a marcacao crua, tipo
@@ -1282,13 +1293,51 @@ function ConsultationCard({
           ) : (
             <span />
           )}
-          <button
-            type="button"
-            onClick={() => onEdit(consultation)}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-[#c87543]/20 bg-[#fdf4ef] px-3 py-2 text-[10px] font-extrabold text-[#b96535] transition hover:bg-[#f8e6dc]"
-          >
-            <Edit3 className="h-3.5 w-3.5" /> Editar consulta
-          </button>
+          {/* Assinada, a consulta deixa de ser rascunho: some o botao de editar
+              e entra o documento. Correcao a partir daqui e adendo, nunca
+              alteracao do que ja foi assinado - e a regra da nao-rasura do
+              prontuario, e tambem o que mantem a assinatura valida. */}
+          {consultation.assinadoEm ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e8f5ec] px-3 py-1 text-[11px] font-extrabold text-[#1c6b3a]">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Assinado em {fmtBR(consultation.assinadoEm.slice(0, 10))}
+                {consultation.assinadoPor ? ` por ${consultation.assinadoPor}` : ''}
+              </span>
+              {consultation.arquivoAssinado && (
+                <button
+                  type="button"
+                  onClick={() => onAbrirAssinado(consultation)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-white px-3 py-2 text-[10px] font-extrabold text-slate-600 transition hover:bg-slate-50"
+                >
+                  <FileText className="h-3.5 w-3.5" /> Ver documento assinado
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onAssinar(consultation)}
+                disabled={assinando === consultation.id}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#1c6b3a]/20 bg-[#eef7f1] px-3 py-2 text-[10px] font-extrabold text-[#1c6b3a] transition hover:bg-[#e2f0e8] disabled:cursor-wait disabled:opacity-70"
+              >
+                {assinando === consultation.id ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                )}
+                {assinando === consultation.id ? 'Abrindo o VIDaaS...' : 'Assinar digitalmente'}
+              </button>
+              <button
+                type="button"
+                onClick={() => onEdit(consultation)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#c87543]/20 bg-[#fdf4ef] px-3 py-2 text-[10px] font-extrabold text-[#b96535] transition hover:bg-[#f8e6dc]"
+              >
+                <Edit3 className="h-3.5 w-3.5" /> Editar consulta
+              </button>
+            </div>
+          )}
         </div>
         {mudancas.length > 0 && (
           <div className="mt-3 rounded-[14px] border border-[#dc8e5f]/30 bg-[#fdf5ef] px-4 py-3">
@@ -1338,6 +1387,10 @@ export default function PatientRecord({
   const [integridade, setIntegridade] = useState<Integridade | null>(null)
   const [conferindo, setConferindo] = useState(false)
   const [buscaConsulta, setBuscaConsulta] = useState('')
+  const [assinando, setAssinando] = useState<string | null>(null)
+  const [avisoAssinatura, setAvisoAssinatura] = useState<
+    { tipo: 'ok' | 'erro'; texto: string } | null
+  >(null)
   const unidadesDaClinica = useUnidades()
 
   useEffect(() => {
@@ -1363,6 +1416,76 @@ export default function PatientRecord({
       vivo = false
     }
   }, [open])
+
+  /**
+   * Volta da autorizacao no VIDaaS.
+   *
+   * A certificadora devolve o navegador para ca com o numero do pedido no
+   * endereco. Este efeito o reconhece, conclui a assinatura e limpa o endereco -
+   * senao um F5 tentaria assinar de novo um pedido ja gasto e mostraria um erro
+   * que nao e erro.
+   */
+  useEffect(() => {
+    const endereco = new URL(window.location.href)
+    const pedido = endereco.searchParams.get('state')
+    if (!pedido) return
+
+    endereco.searchParams.delete('state')
+    endereco.searchParams.delete('code')
+    window.history.replaceState({}, '', endereco.toString())
+
+    void (async () => {
+      setAssinando(pedido)
+      try {
+        await concluirAssinatura(pedido)
+        if (patient) setConsultations(await listConsultations(patient.id))
+        setAvisoAssinatura({ tipo: 'ok', texto: 'Atendimento assinado e arquivado.' })
+      } catch (causa) {
+        setAvisoAssinatura({
+          tipo: 'erro',
+          texto: causa instanceof Error ? causa.message : 'A assinatura não foi concluída.',
+        })
+      } finally {
+        setAssinando(null)
+      }
+    })()
+    // De proposito so na montagem: a volta do VIDaaS acontece uma vez, num
+    // carregamento novo da pagina.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /**
+   * Manda o medico autorizar no VIDaaS.
+   *
+   * A ida e por troca de endereco, e nao por janela nova: bloqueador de pop-up
+   * mataria a assinatura em silencio, e no celular a aba extra se perde.
+   */
+  async function pedirAssinatura(consultation: Consultation) {
+    setAvisoAssinatura(null)
+    setAssinando(consultation.id)
+    try {
+      const { autorizarEm } = await iniciarAssinatura(consultation.id, window.location.href)
+      window.location.href = autorizarEm
+    } catch (causa) {
+      setAssinando(null)
+      setAvisoAssinatura({
+        tipo: 'erro',
+        texto: causa instanceof Error ? causa.message : 'Não foi possível pedir a autorização.',
+      })
+    }
+  }
+
+  async function abrirAssinado(consultation: Consultation) {
+    if (!consultation.arquivoAssinado) return
+    try {
+      window.open(await linkDoAtendimentoAssinado(consultation.arquivoAssinado), '_blank')
+    } catch (causa) {
+      setAvisoAssinatura({
+        tipo: 'erro',
+        texto: causa instanceof Error ? causa.message : 'Não foi possível abrir o documento.',
+      })
+    }
+  }
 
   async function salvarModelo(campo: string, titulo: string, texto: string) {
     if (!clinicId) return
@@ -1764,6 +1887,34 @@ export default function PatientRecord({
                     />
                   </div>
 
+                  {/* O resultado da assinatura chega depois de o navegador ir
+                      ao VIDaaS e voltar - sem este aviso, o medico voltaria
+                      para uma tela igual a que deixou e nao saberia se deu
+                      certo. */}
+                  {avisoAssinatura && (
+                    <div
+                      className={`mb-3 flex items-start gap-2 rounded-[14px] border px-4 py-3 text-[12px] font-bold ${
+                        avisoAssinatura.tipo === 'ok'
+                          ? 'border-[#1c6b3a]/25 bg-[#eef7f1] text-[#1c6b3a]'
+                          : 'border-[#b42318]/25 bg-[#fceceb] text-[#b42318]'
+                      }`}
+                    >
+                      {avisoAssinatura.tipo === 'ok' ? (
+                        <ShieldCheck className="mt-px h-4 w-4 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="mt-px h-4 w-4 shrink-0" />
+                      )}
+                      <span className="flex-1">{avisoAssinatura.texto}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAvisoAssinatura(null)}
+                        className="shrink-0 opacity-60 transition hover:opacity-100"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+
                   {consultasFiltradas.length === 0 ? (
                     <p className="py-10 text-center text-[13px] font-semibold text-slate-400">
                       Nenhuma consulta menciona "{buscaConsulta}".
@@ -1782,6 +1933,9 @@ export default function PatientRecord({
                             ]
                           }
                           onEdit={startEditingConsultation}
+                          onAssinar={(item) => void pedirAssinatura(item)}
+                          onAbrirAssinado={(item) => void abrirAssinado(item)}
+                          assinando={assinando}
                         />
                       ))}
                     </Accordion>
