@@ -300,8 +300,15 @@ export default function Patients({
    * com o numero do pedido, depois de concluir a assinatura.
    */
   useEffect(() => {
-    const paciente = new URL(window.location.href).searchParams.get('paciente')
-    if (paciente) setRecordPatientId(paciente)
+    const endereco = new URL(window.location.href)
+    const paciente = endereco.searchParams.get('paciente')
+    if (!paciente) return
+
+    setRecordPatientId(paciente)
+    // Limpa depois de usar: sem isto, um F5 reabriria o prontuario sozinho
+    // toda vez, e a pessoa nao entenderia por que.
+    endereco.searchParams.delete('paciente')
+    window.history.replaceState({}, '', endereco.toString())
   }, [])
 
   function set<K extends keyof PatientDraft>(key: K, value: PatientDraft[K]) {

@@ -1818,7 +1818,10 @@ export default function PatientRecord({
 
     endereco.searchParams.delete('state')
     endereco.searchParams.delete('code')
-    endereco.searchParams.delete('paciente')
+    // O "paciente" NAO sai aqui: quem o le e a lista de pacientes, e no React
+    // o efeito do filho roda antes do efeito do pai. Apagando neste ponto, o
+    // prontuario concluia a assinatura e nao abria, porque a lista ja nao
+    // achava o paciente no endereco.
     window.history.replaceState({}, '', endereco.toString())
 
     void (async () => {
