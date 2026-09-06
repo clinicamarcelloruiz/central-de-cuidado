@@ -182,15 +182,10 @@ Deno.serve(async (req) => {
       ? Date.now() - new Date(ultimaEntrada.created_at).getTime() < JANELA_HORAS * 3600 * 1000
       : false
 
-    if (!dentroDaJanela) {
-      return json({
-        ok: true,
-        avisado: false,
-        motivoDoSilencio:
-          'O paciente não escreve há mais de 24 horas, e nesse caso a Meta só aceita ' +
-          'mensagem por modelo aprovado. Ligue para avisar.',
-      })
-    }
+    // Fora da janela o texto livre nao passa. O modelo aprovado passa - e e o
+    // unico caminho que existe, porque cancelamento quase sempre acontece com
+    // dias de antecedencia, quando o paciente nao escreve ha muito tempo.
+    const porModelo = !dentroDaJanela
 
     const { data: paciente } = await admin
       .from('patients')
@@ -204,7 +199,7 @@ Deno.serve(async (req) => {
 
     const { data: ajustes } = await admin
       .from('clinic_settings')
-      .select('whatsapp_phone_number_id')
+      .select('whatsapp_phone_number_id,whatsapp_cancel_template_name,whatsapp_template_language')
       .eq('clinic_id', consulta.clinic_id)
       .maybeSingle()
 
@@ -245,7 +240,7 @@ Deno.serve(async (req) => {
     // Ibirapuera. E so tres, porque a mensagem chega junto com uma ma noticia e
     // uma lista longa ali vira ruido.
     let sugestoes: Horario[] = []
-    if (corpo.sugerirDatas !== false && consulta.unit_id) {
+    if (!porModelo && corpo.sugerirDatas !== false && consulta.unit_id) {
       await admin.rpc('liberar_reservas_vencidas')
       const { data: livres } = await admin.rpc('available_slots', { p_unit_id: consulta.unit_id })
       sugestoes = ((livres ?? []) as { slot_start: string; slot_end: string }[])
@@ -278,7 +273,32 @@ Deno.serve(async (req) => {
         .eq('id', conversa.id)
     }
 
-    const corpoDaMensagem = sugestoes.length > 0
+    // Pelo modelo nao ha lista tocavel nem texto livre: a Meta so aceita o
+    // corpo aprovado com as variaveis preenchidas. As sugestoes de horario
+    // ficam de fora, e a mensagem convida a responder - a resposta reabre a
+    // janela e o paciente cai no robo, que ai sim oferece os horarios.
+    const corpoPorModelo = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: conversa.wa_id,
+      type: 'template',
+      template: {
+        name: ajustes.whatsapp_cancel_template_name || 'consulta_cancelada',
+        language: { code: ajustes.whatsapp_template_language || 'pt_BR' },
+        components: [{
+          type: 'body',
+          parameters: [
+            { type: 'text', text: (primeiroNome || 'tudo bem').slice(0, 60) },
+            { type: 'text', text: quando.slice(0, 120) },
+            { type: 'text', text: motivo.slice(0, 200) },
+          ],
+        }],
+      },
+    }
+
+    const corpoDaMensagem = porModelo
+      ? corpoPorModelo
+      : sugestoes.length > 0
       ? {
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
@@ -329,7 +349,8 @@ Deno.serve(async (req) => {
       external_message_id: resposta?.messages?.[0]?.id ?? null,
       direction: 'outbound',
       automatic: true,
-      message_type: sugestoes.length > 0 ? 'interactive' : 'text',
+      message_type: porModelo ? 'template' : sugestoes.length > 0 ? 'interactive' : 'text',
+      template_name: porModelo ? (ajustes.whatsapp_cancel_template_name || 'consulta_cancelada') : null,
       body: texto,
       status: envio.ok ? 'accepted' : 'failed',
       sent_at: envio.ok ? agora : null,
@@ -339,10 +360,18 @@ Deno.serve(async (req) => {
 
     if (!envio.ok) {
       console.error('Meta recusou o aviso de cancelamento', resposta)
+      // 132001 = modelo inexistente ou ainda nao aprovado. E o erro esperado
+      // enquanto a clinica nao criou o modelo, e merece texto proprio: "a Meta
+      // recusou" mandaria a recepcao procurar defeito onde nao ha.
+      const semModelo = porModelo &&
+        (resposta?.error?.code === 132001 || /template/i.test(String(resposta?.error?.message ?? '')))
       return json({
         ok: true,
         avisado: false,
-        motivoDoSilencio: 'A Meta recusou o envio. Ligue para avisar.',
+        motivoDoSilencio: semModelo
+          ? 'O paciente não escreve há mais de 24 horas e o modelo de cancelamento ainda ' +
+            'não foi aprovado pela Meta. Ligue para avisar.'
+          : 'A Meta recusou o envio. Ligue para avisar.',
       })
     }
 
