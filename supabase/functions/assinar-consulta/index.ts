@@ -85,6 +85,76 @@ async function situacaoDaCredencial(integra: string, jwt: string, credencial: st
   return { ok: true as const, pronta: dados.signatureReady === true, dados }
 }
 
+type Admin = ReturnType<typeof adminClient>
+
+/**
+ * Grava na consulta que ela foi assinada. Um lugar so, porque acontece em
+ * dois caminhos: logo depois de assinar, e na recuperacao de um documento
+ * que ja estava arquivado.
+ */
+async function registrarAssinatura(
+  admin: Admin,
+  clinicaId: string,
+  consultaId: string,
+  pedidoId: string,
+  caminho: string,
+  digital: string,
+  assinadoEm: string,
+) {
+  const { data: ajustes } = await admin
+    .from('clinic_settings')
+    .select('signer_name')
+    .eq('clinic_id', clinicaId)
+    .maybeSingle()
+
+  return admin
+    .from('consultations')
+    .update({
+      signed_at: assinadoEm,
+      signed_by_name: ajustes?.signer_name ?? null,
+      signature_provider: 'BRy/VIDaaS',
+      signature_reference: pedidoId,
+      signed_pdf_path: caminho,
+      signed_pdf_hash: digital,
+    })
+    .eq('id', consultaId)
+}
+
+/**
+ * Pedido que assinou e arquivou mas nao registrou: termina o servico.
+ * Devolve a data da assinatura quando conseguiu, null quando nao havia nada.
+ */
+async function recuperarAssinaturaArquivada(admin: Admin, consultaId: string) {
+  const { data: pedido } = await admin
+    .from('signature_requests')
+    .select('id,clinic_id,failed_at,failure_reason')
+    .eq('consultation_id', consultaId)
+    .like('failure_reason', 'registro:%')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (!pedido) return null
+
+  const caminho = `${pedido.clinic_id}/${consultaId}.pdf`
+  const { data: arquivo } = await admin.storage.from('prontuarios-assinados').download(caminho)
+  if (!arquivo) return null
+
+  const bytes = new Uint8Array(await arquivo.arrayBuffer())
+  const digital = await digitalDoArquivo(bytes)
+  const assinadoEm = pedido.failed_at ?? new Date().toISOString()
+
+  const { error } = await registrarAssinatura(admin, pedido.clinic_id, consultaId, pedido.id, caminho, digital, assinadoEm)
+  if (error) {
+    console.error('Recuperacao falhou', error)
+    return null
+  }
+  await admin
+    .from('signature_requests')
+    .update({ used_at: assinadoEm, failed_at: null, failure_reason: null })
+    .eq('id', pedido.id)
+  return assinadoEm
+}
+
 /** Marca de "alguem ja esta assinando este pedido". Some ao concluir. */
 const EM_ANDAMENTO = 'em andamento'
 
@@ -133,6 +203,13 @@ Deno.serve(async (req) => {
           code: 'JA_ASSINADO',
         }, 409)
       }
+
+      // Antes de pedir uma autorizacao nova: existe assinatura pronta, feita e
+      // arquivada, que so nao chegou a ser registrada? Em 06/09/2026 a BRy
+      // assinou e o registro caiu por permissao. Pedir de novo custaria outra
+      // assinatura e outra ida ao celular por um documento que ja existe.
+      const recuperada = await recuperarAssinaturaArquivada(admin, consulta.id)
+      if (recuperada) return json({ ok: true, recuperado: true, assinadoEm: recuperada })
 
       const cpf = Deno.env.get('BRY_CPF_MEDICO')?.trim()
       if (!cpf) return json({ error: 'CPF do certificado não configurado.', code: 'SEM_CPF' }, 503)
@@ -441,17 +518,15 @@ Deno.serve(async (req) => {
       // So agora a consulta vira "assinada" - com o arquivo ja guardado. Se a
       // ordem fosse a inversa, uma falha no meio deixaria um prontuario que
       // afirma estar assinado e um acervo sem o documento.
-      const { error: erroMarcar } = await admin
-        .from('consultations')
-        .update({
-          signed_at: agora,
-          signed_by_name: ajustes?.signer_name ?? null,
-          signature_provider: 'BRy/VIDaaS',
-          signature_reference: pedido.id,
-          signed_pdf_path: caminho,
-          signed_pdf_hash: digital,
-        })
-        .eq('id', pedido.consultation_id)
+      const { error: erroMarcar } = await registrarAssinatura(
+        admin,
+        pedido.clinic_id,
+        pedido.consultation_id,
+        pedido.id,
+        caminho,
+        digital,
+        agora,
+      )
 
       if (erroMarcar) {
         console.error('Falha ao marcar como assinada', erroMarcar)
