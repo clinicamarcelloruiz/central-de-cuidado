@@ -1469,6 +1469,7 @@ export default function PatientRecord({
   const [conferindo, setConferindo] = useState(false)
   const [buscaConsulta, setBuscaConsulta] = useState('')
   const [assinando, setAssinando] = useState<string | null>(null)
+  const [assinaturaConcluida, setAssinaturaConcluida] = useState(0)
   const [avisoAssinatura, setAvisoAssinatura] = useState<
     { tipo: 'ok' | 'erro'; texto: string } | null
   >(null)
@@ -1513,13 +1514,18 @@ export default function PatientRecord({
 
     endereco.searchParams.delete('state')
     endereco.searchParams.delete('code')
+    endereco.searchParams.delete('paciente')
     window.history.replaceState({}, '', endereco.toString())
 
     void (async () => {
       setAssinando(pedido)
       try {
         await concluirAssinatura(pedido)
-        if (patient) setConsultations(await listConsultations(patient.id))
+        // Nao recarrega a lista aqui: este efeito roda na montagem, quando o
+        // paciente ainda nao foi escolhido, e a variavel ficaria presa no valor
+        // nulo daquele instante. Quem recarrega e o efeito logo abaixo, que
+        // enxerga o paciente ja aberto.
+        setAssinaturaConcluida((n) => n + 1)
         setAvisoAssinatura({ tipo: 'ok', texto: 'Atendimento assinado e arquivado.' })
       } catch (causa) {
         setAvisoAssinatura({
@@ -1532,8 +1538,23 @@ export default function PatientRecord({
     })()
     // De proposito so na montagem: a volta do VIDaaS acontece uma vez, num
     // carregamento novo da pagina.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /**
+   * Recarrega a consulta depois que a assinatura foi concluida.
+   *
+   * Separado do efeito acima porque as duas coisas acontecem em ordens
+   * diferentes: a assinatura conclui em segundos, e o prontuario pode abrir
+   * antes ou depois disso. Reagindo aos dois - assinatura pronta e paciente
+   * aberto - a lista atualiza em qualquer das ordens.
+   */
+  useEffect(() => {
+    if (!assinaturaConcluida || !patient) return
+    void load(patient.id)
+    // Depende do id, e nao do objeto: o paciente e recriado a cada carga da
+    // lista, e observar o objeto recarregaria a consulta em looping.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assinaturaConcluida, patient?.id])
 
   /**
    * Manda o medico autorizar no VIDaaS.
@@ -1545,7 +1566,12 @@ export default function PatientRecord({
     setAvisoAssinatura(null)
     setAssinando(consultation.id)
     try {
-      const { autorizarEm } = await iniciarAssinatura(consultation.id, window.location.href)
+      // O endereco de volta leva o paciente para que o sistema reabra este
+      // mesmo prontuario. Sem isso o medico voltaria do VIDaaS para a lista de
+      // pacientes, sem saber se a assinatura deu certo.
+      const volta = new URL(window.location.href)
+      volta.searchParams.set('paciente', consultation.patientId)
+      const { autorizarEm } = await iniciarAssinatura(consultation.id, volta.toString())
       window.location.href = autorizarEm
     } catch (causa) {
       setAssinando(null)
