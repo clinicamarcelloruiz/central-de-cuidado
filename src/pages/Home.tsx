@@ -113,7 +113,19 @@ export default function Home() {
     importDb,
     clearAll,
   } = useDb()
-  const [tab, setTab] = useState<Tab>('followups')
+  /**
+   * Aba inicial.
+   *
+   * Volta da assinatura digital abre direto em Pacientes. O VIDaaS devolve o
+   * navegador com o numero do pedido no endereco, e quem le esse numero e o
+   * prontuario - que so existe na tela quando a aba de Pacientes esta aberta.
+   * Sem isto o medico autorizava no celular, voltava para a tela inicial, e a
+   * assinatura ficava pela metade em silencio: autorizada e nunca concluida.
+   */
+  const [tab, setTab] = useState<Tab>(() => {
+    const endereco = new URLSearchParams(window.location.search)
+    return endereco.get('state') || endereco.get('paciente') ? 'pacientes' : 'followups'
+  })
   // Paciente cuja conversa deve abrir ao entrar em Respostas pelo atalho.
   const [conversaFoco, setConversaFoco] = useState<string | null>(null)
   const [newPatientSignal, setNewPatientSignal] = useState(0)
@@ -299,6 +311,13 @@ export default function Home() {
                 <p className="mt-0.5 text-[10px] leading-relaxed text-white/40">Sincronizados com acesso protegido</p>
               </div>
             </div>
+            {/* Versao publicada. Serve para responder, sem adivinhacao, se a
+                tela aberta ja e a de depois da ultima publicacao - o GitHub
+                leva minutos para servir o build novo e o navegador guarda o
+                antigo em cache. */}
+            <p className="relative mt-3 text-[9px] font-semibold tracking-[0.06em] text-white/25">
+              Versão {__VERSAO__} · {__COMMIT__}
+            </p>
           </div>
 
           <div className="flex items-center gap-3 border-t border-white/10 px-6 py-5">
