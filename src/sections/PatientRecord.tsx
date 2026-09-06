@@ -563,15 +563,21 @@ async function imprimirProntuario(
     .map(([rotulo, valor]) => `<div><span class="r">${rotulo}</span><span class="v">${escapeHtml(String(valor))}</span></div>`)
     .join('')
 
-  const corpo = consultas
-    // Consulta sem nada escrito nao vai para o papel: imprimiria um titulo e
-    // uma linha, ocupando espaco sem dizer nada a quem le.
-    .filter((consulta) =>
-      campos.some(([, chave]) => temTexto(String(consulta[chave] ?? ''))) ||
-      consulta.peso ||
-      consulta.altura ||
-      consulta.cid,
-    )
+  // Consulta sem nada escrito nao vai para o papel: imprimiria um titulo e uma
+  // linha, ocupando espaco sem dizer nada a quem le.
+  const consultasImpressas = consultas.filter((consulta) =>
+    campos.some(([, chave]) => temTexto(String(consulta[chave] ?? ''))) ||
+    consulta.peso ||
+    consulta.altura ||
+    consulta.cid,
+  )
+
+  // Quais das impressas estao assinadas. Quando TODAS estao, o rodape muda de
+  // tom: deixa de avisar que nao substitui ICP-Brasil e passa a afirmar que o
+  // documento e assinado - porque ai ele e.
+  const assinadas = consultasImpressas.filter((consulta) => consulta.assinadoEm)
+
+  const corpo = consultasImpressas
     .map((consulta) => {
       const imc = calcularIMC(consulta.peso, consulta.altura)
       const medidas = [
@@ -619,7 +625,18 @@ async function imprimirProntuario(
              }</code></div>`
           : ''
       }
-      <p class="aviso">A impressão digital comprova que este documento não foi alterado depois de emitido. Não substitui assinatura digital ICP-Brasil.</p>
+      ${
+        assinadas.length > 0
+          ? `<div><span>Assinatura digital ICP-Brasil</span><code>${assinadas
+              .map((c) => `${fmtBR(c.data)} · ${c.assinadoPor ?? 'certificado do médico'}`)
+              .join('<br>')}</code></div>`
+          : ''
+      }
+      <p class="aviso">${
+        assinadas.length === consultasImpressas.length && consultasImpressas.length > 0
+          ? 'Documento assinado digitalmente com certificado ICP-Brasil. A impressão digital comprova que ele não foi alterado depois de emitido.'
+          : 'A impressão digital comprova que este documento não foi alterado depois de emitido. Não substitui assinatura digital ICP-Brasil.'
+      }</p>
     </div>`
 
   const documento = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
@@ -2013,6 +2030,10 @@ export default function PatientRecord({
   })()
   const [form, setForm] = useState<ConsultationDraft>(() => emptyConsultation(patient))
   const [editingConsultationId, setEditingConsultationId] = useState<string | null>(null)
+  const consultaEmEdicaoAssinada = Boolean(
+    editingConsultationId &&
+      consultations.find((item) => item.id === editingConsultationId)?.assinadoEm,
+  )
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -2423,6 +2444,22 @@ export default function PatientRecord({
 
             <div className="scrollbar-subtle flex-1 overflow-y-auto px-5 pb-6 pt-2 sm:px-7">
               <BarraDeFormatacao />
+              {/* Assinada, a consulta e um documento fechado. O banco recusa a
+                  alteracao de qualquer jeito - o aviso existe para a pessoa
+                  descobrir isso ANTES de reescrever meia consulta e perder o
+                  trabalho na hora de salvar. */}
+              {consultaEmEdicaoAssinada && (
+                <div className="mb-4 flex items-start gap-2 rounded-[14px] border border-[#1c6b3a]/25 bg-[#eef7f1] px-4 py-3">
+                  <ShieldCheck className="mt-px h-4 w-4 shrink-0 text-[#1c6b3a]" />
+                  <div className="text-[12px] leading-relaxed text-[#1c6b3a]">
+                    <p className="font-extrabold">Este atendimento já foi assinado digitalmente.</p>
+                    <p className="mt-0.5 font-semibold">
+                      O conteúdo não pode mais ser alterado. Para corrigir ou acrescentar algo,
+                      registre um novo atendimento com a data de hoje explicando a correção.
+                    </p>
+                  </div>
+                </div>
+              )}
               {aviso && <AvisoDoProntuario aviso={aviso} onFechar={() => setAviso(null)} />}
               <div className="grid gap-4 sm:grid-cols-2">
                 <SectionTitle>Atendimento</SectionTitle>
