@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState } from 'react'
 import { invokeWithFormData } from '@/lib/supabase'
 import {
   AlertTriangle,
@@ -169,6 +169,276 @@ const editorColors = [
 ]
 
 const editorTags = new Set(['B', 'BR', 'DIV', 'EM', 'FONT', 'I', 'LI', 'OL', 'P', 'SPAN', 'STRONG', 'U', 'UL'])
+
+/**
+ * O campo que esta recebendo a digitacao no momento.
+ *
+ * Antes cada um dos treze campos carregava a propria barra de negrito, cores,
+ * modelos e ditado. Eram treze copias do mesmo controle competindo com aquilo
+ * que o medico esta escrevendo, e nenhuma delas ficava a vista quando ele
+ * rolava a tela.
+ *
+ * Agora existe uma barra so, no topo, que age sobre o campo em foco. O preco
+ * dessa troca e que a barra precisa saber em qual campo esta atuando - e por
+ * isso ela mostra o nome dele. Sem esse aviso, aplicar negrito viraria aposta.
+ */
+type ControleDeCampo = {
+  id: string
+  rotulo: string
+  campo?: string
+  comando: (nome: string, valor?: string) => void
+  gravando: boolean
+  transcrevendo: boolean
+  nivel: number
+  alternarDitado: () => void
+  modelos: NoteTemplate[]
+  inserirModelo: (texto: string) => void
+  salvarComoModelo: (titulo: string) => Promise<void>
+  apagarModelo?: (id: string) => Promise<void>
+  guardaModelos: boolean
+}
+
+const CampoAtivo = createContext<{
+  ativo: ControleDeCampo | null
+  ativar: (controle: ControleDeCampo | null) => void
+}>({ ativo: null, ativar: () => {} })
+
+function BotaoDaBarra({
+  titulo,
+  rotulo,
+  onClick,
+  ativo,
+  desabilitado,
+  children,
+}: {
+  titulo: string
+  rotulo: string
+  onClick: () => void
+  ativo?: boolean
+  desabilitado?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      // Sem isto o clique tira o foco do campo, a selecao se perde e o comando
+      // nao tem em que se aplicar. Vale para todo botao desta barra.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      disabled={desabilitado}
+      aria-label={rotulo}
+      title={titulo}
+      className={`rounded-md p-1.5 transition disabled:cursor-default disabled:opacity-30 ${
+        ativo ? 'bg-[#081b2c] text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-[#081b2c]'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+/**
+ * A barra unica de formatacao, fixa no topo do formulario.
+ */
+function BarraDeFormatacao() {
+  const { ativo } = useContext(CampoAtivo)
+  const [painelModelos, setPainelModelos] = useState(false)
+  const [novoModelo, setNovoModelo] = useState('')
+  const [salvando, setSalvando] = useState(false)
+
+  // Trocar de campo fecha o painel: os modelos sao por campo, e deixar aberto o
+  // painel do campo anterior ofereceria o texto errado.
+  useEffect(() => {
+    setPainelModelos(false)
+    setNovoModelo('')
+  }, [ativo?.id])
+
+  const parado = !ativo
+  const modelos = ativo?.modelos ?? []
+
+  async function salvar() {
+    const titulo = novoModelo.trim()
+    if (!titulo || !ativo) return
+    setSalvando(true)
+    try {
+      await ativo.salvarComoModelo(titulo)
+      setNovoModelo('')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <div className="sticky top-0 z-20 -mx-5 mb-4 border-b border-[#081b2c]/[0.08] bg-white/95 px-5 py-2 backdrop-blur sm:-mx-7 sm:px-7">
+      <div className="flex flex-wrap items-center gap-1">
+        <BotaoDaBarra titulo="Negrito" rotulo="Negrito" desabilitado={parado} onClick={() => ativo?.comando('bold')}>
+          <Bold className="h-3.5 w-3.5" />
+        </BotaoDaBarra>
+        <BotaoDaBarra titulo="Itálico" rotulo="Itálico" desabilitado={parado} onClick={() => ativo?.comando('italic')}>
+          <Italic className="h-3.5 w-3.5" />
+        </BotaoDaBarra>
+        <BotaoDaBarra titulo="Sublinhado" rotulo="Sublinhado" desabilitado={parado} onClick={() => ativo?.comando('underline')}>
+          <Underline className="h-3.5 w-3.5" />
+        </BotaoDaBarra>
+        <span className="mx-1 h-4 w-px bg-[#081b2c]/10" />
+        <BotaoDaBarra titulo="Lista" rotulo="Lista" desabilitado={parado} onClick={() => ativo?.comando('insertUnorderedList')}>
+          <List className="h-3.5 w-3.5" />
+        </BotaoDaBarra>
+        <BotaoDaBarra titulo="Lista numerada" rotulo="Lista numerada" desabilitado={parado} onClick={() => ativo?.comando('insertOrderedList')}>
+          <ListOrdered className="h-3.5 w-3.5" />
+        </BotaoDaBarra>
+        <span className="mx-1 h-4 w-px bg-[#081b2c]/10" />
+        {editorColors.map((cor) => (
+          <button
+            key={cor.value}
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => ativo?.comando('foreColor', cor.value)}
+            disabled={parado}
+            className="h-5 w-5 rounded-full border-2 border-white shadow-sm ring-1 ring-[#081b2c]/10 transition disabled:opacity-30"
+            style={{ backgroundColor: cor.value }}
+            aria-label={`Cor ${cor.label}`}
+            title={`Cor ${cor.label}`}
+          />
+        ))}
+        <span className="flex-1" />
+
+        {ativo?.guardaModelos && (
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => setPainelModelos((aberto) => !aberto)}
+            className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-extrabold transition ${
+              painelModelos ? 'bg-[#081b2c] text-white' : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'
+            }`}
+            title="Textos prontos para reusar neste campo"
+          >
+            <BookmarkPlus className="h-3.5 w-3.5" />
+            Modelos{modelos.length ? ` (${modelos.length})` : ''}
+          </button>
+        )}
+
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => ativo?.alternarDitado()}
+          disabled={parado || ativo?.transcrevendo}
+          className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-extrabold transition disabled:cursor-wait disabled:opacity-40 ${
+            ativo?.gravando
+              ? 'bg-red-50 text-red-600'
+              : ativo?.transcrevendo
+                ? 'bg-[#fdf3ec] text-[#8a4b1d]'
+                : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'
+          }`}
+          title={ativo?.gravando ? 'Clique para parar e transcrever' : 'Gravar e transcrever'}
+        >
+          {ativo?.transcrevendo ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : ativo?.gravando ? (
+            <MicOff className="h-3.5 w-3.5" />
+          ) : (
+            <Mic className="h-3.5 w-3.5" />
+          )}
+          {ativo?.transcrevendo ? 'Transcrevendo...' : ativo?.gravando ? 'Gravando' : 'Ditar'}
+        </button>
+
+        {ativo?.gravando && (
+          <span
+            className="flex items-center gap-0.5"
+            title="Nível do som captado. Se as barras não se mexem quando você fala, o microfone não está captando."
+          >
+            {[0.15, 0.35, 0.55, 0.75, 0.95].map((limite) => (
+              <span
+                key={limite}
+                className={`h-3 w-1 rounded-full transition-colors ${
+                  ativo.nivel >= limite ? 'bg-red-500' : 'bg-slate-200'
+                }`}
+              />
+            ))}
+          </span>
+        )}
+      </div>
+
+      {/* Em qual campo a barra esta agindo. E o que impede o negrito de cair no
+          lugar errado quando o cursor esta num campo e o olho noutro. */}
+      <p className={`mt-1 text-[10px] font-bold ${parado ? 'text-slate-400' : 'text-[#b96535]'}`}>
+        {parado ? 'Clique num campo para escrever e formatar' : `Formatando: ${ativo.rotulo}`}
+      </p>
+
+      {painelModelos && ativo?.guardaModelos && (
+        <div className="mt-2 rounded-[13px] border border-[#081b2c]/[0.08] bg-[#fbfaf8] px-3 py-2.5">
+          {modelos.length === 0 ? (
+            <p className="text-[10px] font-semibold text-slate-400">
+              Nenhum modelo salvo para {ativo.rotulo.toLowerCase()} ainda. Escreva o texto no campo e
+              salve abaixo — ele fica disponível para as próximas consultas.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {modelos.map((modelo) => (
+                <span
+                  key={modelo.id}
+                  className="inline-flex items-center overflow-hidden rounded-lg border border-[#081b2c]/10 bg-white"
+                >
+                  <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      ativo.inserirModelo(modelo.texto)
+                      setPainelModelos(false)
+                    }}
+                    className="px-2.5 py-1.5 text-[10px] font-bold text-[#081b2c] transition hover:bg-[#eef3f2]"
+                    title="Inserir no fim do texto"
+                  >
+                    {modelo.titulo}
+                  </button>
+                  {ativo.apagarModelo && (
+                    <button
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => void ativo.apagarModelo?.(modelo.id)}
+                      className="border-l border-[#081b2c]/10 px-1.5 py-1.5 text-slate-300 transition hover:bg-red-50 hover:text-red-500"
+                      aria-label={`Aposentar o modelo ${modelo.titulo}`}
+                      title="Aposentar este modelo"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+          {/* Criar o modelo a partir do que ja esta escrito, e nao numa tela
+              separada de configuracao: o texto bom aparece durante a consulta,
+              e e ali que ele precisa poder ser guardado. */}
+          <div className="mt-2 flex items-center gap-1.5 border-t border-[#081b2c]/[0.07] pt-2">
+            <input
+              value={novoModelo}
+              onChange={(event) => setNovoModelo(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  void salvar()
+                }
+              }}
+              maxLength={80}
+              placeholder="Salvar o texto atual como modelo. Dê um nome..."
+              className="min-w-0 flex-1 rounded-lg border border-[#081b2c]/10 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-[#081b2c] outline-none placeholder:text-slate-300 focus:border-[#dc8e5f]"
+            />
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => void salvar()}
+              disabled={!novoModelo.trim() || salvando}
+              className="shrink-0 rounded-lg bg-[#081b2c] px-3 py-1.5 text-[10px] font-extrabold text-white transition hover:bg-[#102d47] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+            >
+              {salvando ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function normalizeEditorColor(value: string) {
   const compact = value.replace(/\s/g, '').toLowerCase()
@@ -528,9 +798,9 @@ function RichTextField({
   const [listening, setListening] = useState(false)
   const [transcrevendo, setTranscrevendo] = useState(false)
   const [speechError, setSpeechError] = useState('')
-  const [painelModelos, setPainelModelos] = useState(false)
-  const [novoModelo, setNovoModelo] = useState('')
-  const [salvandoModelo, setSalvandoModelo] = useState(false)
+  const id = useId()
+  const { ativo, ativar } = useContext(CampoAtivo)
+  const ehAtivo = ativo?.id === id
 
   const doCampo = campo ? (modelos ?? []).filter((m) => m.campo === campo) : []
 
@@ -546,21 +816,41 @@ function RichTextField({
     const proximo = temTexto(atual) ? `${atual}<br>${texto}` : texto
     if (editorRef.current) editorRef.current.innerHTML = proximo
     onChange(sanitizeRichText(proximo))
-    setPainelModelos(false)
   }
 
-  async function salvarComoModelo() {
-    const titulo = novoModelo.trim()
+  async function salvarComoModelo(titulo: string) {
     const texto = sanitizeRichText(editorRef.current?.innerHTML || '')
     if (!titulo || !campo || !onSalvarModelo || !temTexto(texto)) return
-    setSalvandoModelo(true)
-    try {
-      await onSalvarModelo(campo, titulo, texto)
-      setNovoModelo('')
-    } finally {
-      setSalvandoModelo(false)
+    await onSalvarModelo(campo, titulo, texto)
+  }
+
+  /** O que a barra do topo precisa saber para agir sobre este campo. */
+  function controle(): ControleDeCampo {
+    return {
+      id,
+      rotulo: label,
+      campo,
+      comando: command,
+      gravando: listening,
+      transcrevendo,
+      nivel,
+      alternarDitado: () => void toggleDictation(),
+      modelos: doCampo,
+      inserirModelo,
+      salvarComoModelo,
+      apagarModelo: onApagarModelo,
+      guardaModelos: Boolean(campo && onSalvarModelo),
     }
   }
+
+  // Reanuncia o campo enquanto ele for o ativo. Gravacao, transcricao e nivel
+  // do som mudam aqui embaixo e precisam aparecer la em cima - sem isto a barra
+  // continuaria dizendo "Ditar" com o microfone ligado.
+  useEffect(() => {
+    if (!ehAtivo) return
+    ativar(controle())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ehAtivo, listening, transcrevendo, nivel, doCampo.length])
 
   useEffect(() => {
     const editor = editorRef.current
@@ -967,149 +1257,7 @@ function RichTextField({
   return (
     <Field label={label} required={required} className={className}>
       <div className="mt-1.5 overflow-hidden rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] transition focus-within:border-[#dc8e5f] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#dc8e5f]/10">
-        <div className="flex flex-wrap items-center gap-1 border-b border-[#081b2c]/[0.07] bg-white px-2 py-1.5">
-          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('bold')} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#081b2c]" aria-label="Negrito" title="Negrito"><Bold className="h-3.5 w-3.5" /></button>
-          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('italic')} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#081b2c]" aria-label="Itálico" title="Itálico"><Italic className="h-3.5 w-3.5" /></button>
-          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('underline')} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#081b2c]" aria-label="Sublinhado" title="Sublinhado"><Underline className="h-3.5 w-3.5" /></button>
-          <span className="mx-0.5 h-4 w-px bg-[#081b2c]/10" />
-          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('insertUnorderedList')} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#081b2c]" aria-label="Lista" title="Lista"><List className="h-3.5 w-3.5" /></button>
-          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('insertOrderedList')} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#081b2c]" aria-label="Lista numerada" title="Lista numerada"><ListOrdered className="h-3.5 w-3.5" /></button>
-          <span className="mx-0.5 h-4 w-px bg-[#081b2c]/10" />
-          {editorColors.map((color) => <button key={color.value} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command('foreColor', color.value)} className="h-5 w-5 rounded-full border-2 border-white shadow-sm ring-1 ring-[#081b2c]/10" style={{ backgroundColor: color.value }} aria-label={`Cor ${color.label}`} title={`Cor ${color.label}`} />)}
-          <span className="flex-1" />
-          {/* So aparece onde ha campo declarado: um botao de modelos num campo
-              que nao guarda modelo seria botao que nao faz nada. */}
-          {campo && onSalvarModelo && (
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => setPainelModelos((aberto) => !aberto)}
-              className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[9px] font-extrabold transition ${
-                painelModelos
-                  ? 'bg-[#081b2c] text-white'
-                  : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'
-              }`}
-              title="Textos prontos para reusar neste campo"
-            >
-              <BookmarkPlus className="h-3.5 w-3.5" />
-              Modelos{doCampo.length ? ` (${doCampo.length})` : ''}
-            </button>
-          )}
-          <button
-            type="button"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => void toggleDictation()}
-            disabled={transcrevendo}
-            className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[9px] font-extrabold transition disabled:cursor-wait ${
-              listening
-                ? 'bg-red-50 text-red-600'
-                : transcrevendo
-                  ? 'bg-[#fdf3ec] text-[#8a4b1d]'
-                  : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'
-            }`}
-            aria-label={listening ? 'Parar gravação' : 'Gravar e transcrever'}
-            title={
-              listening
-                ? 'Clique para parar e transcrever'
-                : transcrevendo
-                  ? 'Transcrevendo o áudio...'
-                  : 'Gravar e transcrever'
-            }
-          >
-            {transcrevendo ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : listening ? (
-              <MicOff className="h-3.5 w-3.5" />
-            ) : (
-              <Mic className="h-3.5 w-3.5" />
-            )}
-            {transcrevendo ? 'Transcrevendo...' : listening ? 'Gravando' : 'Ditar'}
-          </button>
-          {listening && (
-            <span
-              className="flex items-center gap-0.5"
-              title="Nível do som captado. Se as barras não se mexem quando você fala, o microfone não está captando."
-            >
-              {[0.15, 0.35, 0.55, 0.75, 0.95].map((limite) => (
-                <span
-                  key={limite}
-                  className={`h-3 w-1 rounded-full transition-colors ${
-                    nivel >= limite ? 'bg-red-500' : 'bg-slate-200'
-                  }`}
-                />
-              ))}
-            </span>
-          )}
-        </div>
-        {painelModelos && campo && (
-          <div className="border-b border-[#081b2c]/[0.07] bg-[#fbfaf8] px-3 py-2.5">
-            {doCampo.length === 0 ? (
-              <p className="text-[10px] font-semibold text-slate-400">
-                Nenhum modelo salvo para {label.toLowerCase()} ainda. Escreva o texto no campo e
-                salve abaixo — ele fica disponível para as próximas consultas.
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {doCampo.map((modelo) => (
-                  <span
-                    key={modelo.id}
-                    className="inline-flex items-center overflow-hidden rounded-lg border border-[#081b2c]/10 bg-white"
-                  >
-                    <button
-                      type="button"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => inserirModelo(modelo.texto)}
-                      className="px-2.5 py-1.5 text-[10px] font-bold text-[#081b2c] transition hover:bg-[#eef3f2]"
-                      title="Inserir no fim do texto"
-                    >
-                      {modelo.titulo}
-                    </button>
-                    {onApagarModelo && (
-                      <button
-                        type="button"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => void onApagarModelo(modelo.id)}
-                        className="border-l border-[#081b2c]/10 px-1.5 py-1.5 text-slate-300 transition hover:bg-red-50 hover:text-red-500"
-                        aria-label={`Aposentar o modelo ${modelo.titulo}`}
-                        title="Aposentar este modelo"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </span>
-                ))}
-              </div>
-            )}
-            {/* Criar o modelo a partir do que ja esta escrito, e nao numa tela
-                separada de configuracao: o texto bom aparece durante a consulta,
-                e e ali que ele precisa poder ser guardado. */}
-            <div className="mt-2 flex items-center gap-1.5 border-t border-[#081b2c]/[0.07] pt-2">
-              <input
-                value={novoModelo}
-                onChange={(event) => setNovoModelo(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
-                    void salvarComoModelo()
-                  }
-                }}
-                maxLength={80}
-                placeholder="Salvar o texto atual como modelo. Dê um nome..."
-                className="min-w-0 flex-1 rounded-lg border border-[#081b2c]/10 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-[#081b2c] outline-none placeholder:text-slate-300 focus:border-[#dc8e5f]"
-              />
-              <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => void salvarComoModelo()}
-                disabled={!novoModelo.trim() || salvandoModelo}
-                className="shrink-0 rounded-lg bg-[#081b2c] px-3 py-1.5 text-[10px] font-extrabold text-white transition hover:bg-[#102d47] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
-              >
-                {salvandoModelo ? 'Salvando...' : 'Salvar'}
-              </button>
-            </div>
-          </div>
-        )}
-        <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder={placeholder} onInput={syncEditor} onPaste={pasteAsText} className="min-h-[92px] px-3.5 py-2.5 text-[14px] font-medium leading-[1.6] text-[#081b2c] outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)] [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5" />
+        <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder={placeholder} onFocus={() => ativar(controle())} onInput={syncEditor} onPaste={pasteAsText} className="min-h-[92px] px-3.5 py-2.5 text-[14px] font-medium leading-[1.6] text-[#081b2c] outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)] [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5" />
       </div>
       {speechError && (
         <div className="mt-1.5">
@@ -1470,6 +1618,9 @@ export default function PatientRecord({
   const [buscaConsulta, setBuscaConsulta] = useState('')
   const [assinando, setAssinando] = useState<string | null>(null)
   const [assinaturaConcluida, setAssinaturaConcluida] = useState(0)
+  // Qual campo a barra de formatacao esta comandando. Mora aqui, e nao dentro
+  // do formulario, porque a barra e os campos sao irmaos na arvore.
+  const [campoAtivo, setCampoAtivo] = useState<ControleDeCampo | null>(null)
   const [avisoAssinatura, setAvisoAssinatura] = useState<
     { tipo: 'ok' | 'erro'; texto: string } | null
   >(null)
@@ -1593,6 +1744,12 @@ export default function PatientRecord({
       })
     }
   }
+
+  // Sair do formulario apaga o campo ativo. Sem isto a barra continuaria
+  // anunciando "Formatando: Exame físico" de um campo que nem esta mais na tela.
+  useEffect(() => {
+    if (mode !== 'form') setCampoAtivo(null)
+  }, [mode])
 
   async function salvarModelo(campo: string, titulo: string, texto: string) {
     if (!clinicId) return
@@ -1765,6 +1922,7 @@ export default function PatientRecord({
   }
 
   return (
+    <CampoAtivo.Provider value={{ ativo: campoAtivo, ativar: setCampoAtivo }}>
     <Sheet open={open} onOpenChange={handleOpenChange}>
       {/* Metade da tela como piso: em monitores largos o prontuario vai ate o
           meio do monitor, e nunca fica menor do que os 900px de antes. */}
@@ -2077,7 +2235,8 @@ export default function PatientRecord({
               </div>
             </div>
 
-            <div className="scrollbar-subtle flex-1 overflow-y-auto px-5 py-6 sm:px-7">
+            <div className="scrollbar-subtle flex-1 overflow-y-auto px-5 pb-6 pt-2 sm:px-7">
+              <BarraDeFormatacao />
               <div className="grid gap-4 sm:grid-cols-2">
                 <SectionTitle>Atendimento</SectionTitle>
                 {/* O recado da recepcao aparece aqui de proposito, e so para
@@ -2316,6 +2475,7 @@ export default function PatientRecord({
         )}
       </SheetContent>
     </Sheet>
+    </CampoAtivo.Provider>
   )
 }
 
