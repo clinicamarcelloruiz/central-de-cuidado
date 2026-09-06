@@ -1438,10 +1438,7 @@ export async function reopenConversation(conversationId: string) {
     body: { conversationId },
   })
   if (error) {
-    const detalhe =
-      (error as { context?: { body?: { error?: string } } }).context?.body?.error ??
-      'Não foi possível enviar a mensagem de retomada.'
-    throw new Error(detalhe)
+    throw new Error(await motivoDaFalha(error, 'Não foi possível enviar a mensagem de retomada.'))
   }
 }
 
@@ -1450,16 +1447,30 @@ export async function reopenConversation(conversationId: string) {
 // ---------------------------------------------------------------------------
 
 /**
- * Erro da funcao de assinatura, com o texto que o servidor mandou.
+ * Erro de uma Edge Function, com o texto que o servidor realmente mandou.
  *
- * O invoke do supabase-js engole o corpo da resposta e devolve um
- * "Edge Function returned a non-2xx status code" que nao ajuda ninguem. Aqui a
- * mensagem de verdade e resgatada - assinatura que falha sem dizer por que faz
- * o medico repetir o mesmo gesto ate desistir.
+ * O invoke do supabase-js devolve "Edge Function returned a non-2xx status
+ * code" e guarda a resposta em `context` - como objeto Response, ainda por ler.
+ * Sem abrir esse corpo, todo erro do servidor chega na tela como a mesma frase
+ * generica, e o medico repete o mesmo gesto sem saber o que houve.
  */
-function motivoDaFalha(error: unknown, padrao: string) {
-  const corpo = (error as { context?: { body?: { error?: string } } }).context?.body
-  return corpo?.error ?? padrao
+async function motivoDaFalha(error: unknown, padrao: string) {
+  const contexto = (error as { context?: unknown }).context
+
+  if (contexto instanceof Response) {
+    try {
+      // clone porque o corpo so pode ser lido uma vez, e quem chamou pode
+      // querer olhar a resposta de novo.
+      const corpo = await contexto.clone().json()
+      if (corpo?.error) {
+        return corpo.details ? `${corpo.error} (${corpo.details})` : String(corpo.error)
+      }
+    } catch {
+      // Resposta sem JSON - fica o texto padrao, que ainda e melhor que nada.
+    }
+  }
+
+  return padrao
 }
 
 /**
@@ -1472,7 +1483,7 @@ export async function iniciarAssinatura(consultationId: string, voltarPara: stri
   const { data, error } = await supabase.functions.invoke('assinar-consulta', {
     body: { acao: 'iniciar', consultationId, voltarPara },
   })
-  if (error) throw new Error(motivoDaFalha(error, 'Não foi possível pedir a autorização.'))
+  if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível pedir a autorização.'))
   return data as { pedido: string; autorizarEm: string }
 }
 
@@ -1481,7 +1492,7 @@ export async function concluirAssinatura(pedido: string) {
   const { data, error } = await supabase.functions.invoke('assinar-consulta', {
     body: { acao: 'concluir', pedido },
   })
-  if (error) throw new Error(motivoDaFalha(error, 'A assinatura não foi concluída.'))
+  if (error) throw new Error(await motivoDaFalha(error, 'A assinatura não foi concluída.'))
   return data as { assinadoEm: string; arquivo: string; digital: string }
 }
 
