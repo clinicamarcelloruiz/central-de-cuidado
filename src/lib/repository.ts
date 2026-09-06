@@ -1709,7 +1709,11 @@ export async function iniciarAssinatura(consultationId: string, voltarPara: stri
     body: { acao: 'iniciar', consultationId, voltarPara },
   })
   if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível pedir a autorização.'))
-  return data as { pedido: string; autorizarEm: string; expiraEm?: string }
+  // "recuperado": havia um documento assinado e arquivado que so faltava
+  // registrar. Nao ha celular nem aba nova neste caso - ja esta assinado.
+  return data as
+    | { pedido: string; autorizarEm: string; expiraEm?: string; recuperado?: false }
+    | { recuperado: true; assinadoEm: string; pedido?: undefined; autorizarEm?: undefined; expiraEm?: undefined }
 }
 
 export type ResultadoDaAssinatura =

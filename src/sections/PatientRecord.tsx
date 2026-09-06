@@ -2095,7 +2095,15 @@ export default function PatientRecord({
       // navegador para ca, o sistema reabra este mesmo prontuario.
       const volta = new URL(window.location.href)
       volta.searchParams.set('paciente', consultation.patientId)
-      const { pedido, autorizarEm, expiraEm } = await iniciarAssinatura(consultation.id, volta.toString())
+      const inicio = await iniciarAssinatura(consultation.id, volta.toString())
+      if (inicio.recuperado) {
+        aba?.close()
+        setAssinando(null)
+        setAssinaturaConcluida((n) => n + 1)
+        setAviso({ tipo: 'ok', texto: 'Atendimento assinado e arquivado.' })
+        return
+      }
+      const { pedido, autorizarEm, expiraEm } = inicio
       if (aba) aba.location.href = autorizarEm
       setEspera({
         pedido,
