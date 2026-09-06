@@ -36,6 +36,9 @@ const MAX_DIAS = 8
 const MAX_HORARIOS_DIA = 8
 /** Teto do WhatsApp para linhas de uma lista tocavel. */
 const MAX_TOQUES = 10
+/** Tetos da Meta para o texto de cada linha. Passar disso derruba a mensagem. */
+const LIMITE_TITULO = 24
+const LIMITE_DESCRICAO = 72
 
 /**
  * O cliente com service_role que o webhook ja tem em maos. Tipar pelo retorno
@@ -199,13 +202,23 @@ function escolha(texto: string, total: number): number | null {
   return numero - 1
 }
 
+/**
+ * "segunda, 14/09".
+ *
+ * Por extenso, e nao "seg.": ninguem le uma lista de abreviacoes de olhada, e o
+ * dia da semana e justamente o que a pessoa esta procurando ao escolher.
+ *
+ * O "-feira" sai porque nao acrescenta nada e rouba nove caracteres do titulo
+ * da lista tocavel, que a Meta corta em 24.
+ */
 function formatarDia(iso: string, timezone: string) {
-  return new Date(iso).toLocaleDateString('pt-BR', {
+  const texto = new Date(iso).toLocaleDateString('pt-BR', {
     timeZone: timezone,
-    weekday: 'short',
+    weekday: 'long',
     day: '2-digit',
     month: '2-digit',
   })
+  return texto.replace('-feira', '')
 }
 
 function formatarHora(iso: string, timezone: string) {
@@ -280,9 +293,42 @@ const SAIDAS = 'Digite *9* para falar com a nossa equipe, ou *0* para voltar ao 
  * dez, entao o conteudo e cortado em oito - o mesmo oito de MAX_DIAS, para que
  * o numero mostrado e o numero tocado nunca discordem.
  */
+/**
+ * Encurta um titulo de linha respeitando o limite da Meta.
+ *
+ * Corta no separador quando existe, porque "Livance Ibirapuera - Sao Paulo"
+ * vira "Livance Ibirapuera" e nao "Livance Ibirapuera - Sa". A cidade nao se
+ * perde: ela continua na descricao e no texto da mensagem.
+ */
+function tituloCurto(texto: string): string {
+  const limpo = texto.trim()
+  if (limpo.length <= LIMITE_TITULO) return limpo
+
+  for (const separador of [' - ', ' · ', ' — ', ', ']) {
+    const corte = limpo.split(separador)[0].trim()
+    if (corte.length > 0 && corte.length <= LIMITE_TITULO) return corte
+  }
+  return `${limpo.slice(0, LIMITE_TITULO - 1).trimEnd()}…`
+}
+
+/**
+ * Acrescenta as duas saidas e faz caber no que a Meta aceita.
+ *
+ * O corte acontece AQUI, e nao em cada tela, porque foi assim que a lista de
+ * unidades quebrou: "Livance Ibirapuera - São Paulo" tem 30 caracteres, a Meta
+ * recusou a mensagem interativa inteira, e ela chegou como texto puro sem botao
+ * nenhum. Nada avisa quando isso acontece - a mensagem simplesmente perde o
+ * toque. Centralizando, uma tela nova nao pode reintroduzir o defeito.
+ */
 function comVoltar(linhas: Toque[]): Toque[] {
+  const cabem = linhas.slice(0, MAX_TOQUES - 2).map((linha) => ({
+    ...linha,
+    titulo: tituloCurto(linha.titulo),
+    ...(linha.descricao ? { descricao: linha.descricao.slice(0, LIMITE_DESCRICAO) } : {}),
+  }))
+
   return [
-    ...linhas.slice(0, MAX_TOQUES - 2),
+    ...cabem,
     { id: '9', titulo: 'Falar com a equipe' },
     { id: '0', titulo: 'Voltar ao menu' },
   ]
@@ -465,7 +511,15 @@ async function mostrarMinhaConsulta(
     return {
       resposta:
         'Não encontrei nenhuma consulta marcada para este número.\n\n' +
-        'Digite 2 para agendar, ou 0 para ver as opções.',
+        'Digite *2* para agendar, ou *0* para ver as opções.',
+      lista: {
+        rotulo: 'Ver opções',
+        linhas: [
+          { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
+          { id: '9', titulo: 'Falar com a equipe' },
+          { id: '0', titulo: 'Voltar ao menu' },
+        ],
+      },
     }
   }
 
@@ -488,12 +542,22 @@ async function mostrarMinhaConsulta(
   }
 
   const linhas = consultas
-    .map((c, i) => `${i + 1} - ${formatarData(c.inicio, timezone)} · ${c.unidade}`)
+    .map((c, i) => `*${i + 1}* ${formatarData(c.inicio, timezone)} · ${c.unidade}`)
     .join('\n')
   return {
     resposta:
       `Você tem ${consultas.length} consultas marcadas:\n\n${linhas}\n\n` +
-      'Responda com o número da que quer cancelar ou remarcar, ou MENU para voltar.',
+      'Responda com o número da que quer cancelar ou remarcar, ou *0* para voltar.',
+    lista: {
+      rotulo: 'Escolher consulta',
+      linhas: comVoltar(
+        consultas.map((c, i) => ({
+          id: String(i + 1),
+          titulo: formatarData(c.inicio, timezone).slice(0, 24),
+          descricao: c.unidade.slice(0, 72),
+        })),
+      ),
+    },
   }
 }
 
@@ -759,7 +823,7 @@ async function perguntarDia(
 
   return {
     resposta:
-      `Datas disponíveis em ${unidade.name}:\n\n${linhas}\n\n` +
+      `🗓️ *Datas disponíveis em ${unidade.name}:*\n\n${linhas}\n\n` +
       `Responda com o número do dia.\n${rodape}`,
     lista: {
       rotulo: 'Escolher o dia',
@@ -836,7 +900,7 @@ async function perguntarHorario(
         }
       : {}),
     resposta:
-      `Horários de ${formatarDia(doDia[0].inicio, timezone)}:\n\n${linhas}\n\n` +
+      `⏰ *Horários de ${formatarDia(doDia[0].inicio, timezone)}:*\n\n${linhas}\n\n` +
       'Responda com o número do horário.\n' +
       'Digite VOLTAR para escolher outro dia, *9* para falar com a nossa equipe, ou *0* para o início.',
   }
@@ -910,7 +974,15 @@ async function marcar(
       return {
         resposta:
           'Esse horário acabou de ser ocupado por outra pessoa.\n\n' +
-          'Digite 2 para ver os horários atualizados, ou MENU para voltar ao início.',
+          'Digite *2* para ver os horários atualizados, ou *0* para voltar ao início.',
+        lista: {
+          rotulo: 'Ver opções',
+          linhas: [
+            { id: '2', titulo: 'Ver horários atualizados' },
+            { id: '9', titulo: 'Falar com a equipe' },
+            { id: '0', titulo: 'Voltar ao menu' },
+          ],
+        },
       }
     }
     console.error('Falha ao marcar consulta', error)
@@ -929,14 +1001,18 @@ async function marcar(
 
   const quando = formatarData(slot.inicio, timezone)
   const onde = `${unidade?.name ?? 'nossa unidade'}${unidade?.address ? `\n${unidade.address}` : ''}`
-  const aviso = remarcou ? 'Consulta remarcada!' : 'Consulta marcada!'
+  const aviso = remarcou ? '*Consulta remarcada!*' : '*Consulta marcada!*'
 
+  // Esta mensagem e um comprovante, e nao uma etapa: e ela que a pessoa vai
+  // rolar a conversa para reencontrar semanas depois, atras do endereco. Por
+  // isso nao leva botao - rodape com botao faz parecer que ainda falta algo -
+  // e os tres dados ganham icone, para saltarem numa olhada rapida.
+  //
   // Asterisco simples e o negrito do WhatsApp. O aviso da vespera vem destacado
-  // porque e a unica coisa que ainda se espera da pessoa - o resto da mensagem
-  // ela so precisa conferir.
+  // porque e a unica coisa que ainda se espera da pessoa.
   return {
     resposta:
-      `${aviso}\n\n${quando}\n${onde}\n\n` +
+      `✅ ${aviso}\n\n🗓️ ${quando}\n📍 ${onde}\n\n` +
       '*Um dia antes da consulta enviamos uma mensagem aqui pelo WhatsApp para ' +
       'você confirmar sua presença.*\n\n' + VOLTA,
   }
@@ -1072,6 +1148,17 @@ export async function tratarConversa(opcoes: {
           // meio das frases, com contexto. Repetir os tres numeros aqui embaixo
           // criava duas linhas de instrucao coladas dizendo quase a mesma coisa.
           'Digite *2* para agendar ou *0* para ver todas as opções.',
+        // Esta tela respondia e deixava a pessoa sem botao, no meio de um fluxo
+        // em que todas as outras tem. Quem acabou de ler o preco e o horario e
+        // exatamente quem esta pronto para marcar.
+        lista: {
+          rotulo: 'Ver opções',
+          linhas: [
+            { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
+            { id: '9', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
+            { id: '0', titulo: 'Voltar ao menu' },
+          ],
+        },
       }
     }
 
@@ -1125,14 +1212,24 @@ export async function tratarConversa(opcoes: {
       return {
         resposta:
           `${descreverConsulta(alvo, timezone)}\n\n` +
-          'Digite CANCELAR para desmarcar, REMARCAR para trocar a data, ou MENU para voltar.',
+          'Digite CANCELAR para desmarcar, REMARCAR para trocar a data, ou *0* para voltar.',
+      botoes: [
+        { id: 'REMARCAR', titulo: 'Remarcar' },
+        { id: 'CANCELAR', titulo: 'Cancelar consulta' },
+        { id: 'MENU', titulo: 'Voltar ao menu' },
+      ],
       }
     }
 
     return {
       resposta:
         'Não entendi. Digite CANCELAR para desmarcar, REMARCAR para trocar a data, ' +
-        'ou MENU para voltar ao início.',
+        'ou *0* para voltar ao início.',
+      botoes: [
+        { id: 'REMARCAR', titulo: 'Remarcar' },
+        { id: 'CANCELAR', titulo: 'Cancelar consulta' },
+        { id: 'MENU', titulo: 'Voltar ao menu' },
+      ],
     }
   }
 
