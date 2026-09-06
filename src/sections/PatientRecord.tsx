@@ -1583,7 +1583,7 @@ function ConsultationCard({
                 ) : (
                   <ShieldCheck className="h-3.5 w-3.5" />
                 )}
-                {assinando === consultation.id ? 'Abrindo o VIDaaS...' : 'Assinar digitalmente'}
+                {assinando === consultation.id ? 'Aguardando o celular...' : 'Assinar digitalmente'}
               </button>
               <button
                 type="button"
@@ -1699,6 +1699,57 @@ function ConsultationCard({
  * um lugar fixo para o resultado, o medico voltaria para uma tela igual a que
  * deixou, sem saber se deu certo.
  */
+type EsperaDaAssinaturaProps = {
+  espera: { autorizarEm: string; tentativas: number; minutosRestantes: number }
+  onDesistir: () => void
+}
+
+/**
+ * Painel que fica na tela enquanto o medico aprova no celular.
+ *
+ * Diz o que fazer, mostra que o sistema esta acompanhando, e da o link caso a
+ * aba do VIDaaS nao tenha aberto. Rola ate si mesmo ao aparecer pelo mesmo
+ * motivo do aviso: nasce acima da area visivel e ninguem o veria.
+ */
+function EsperaDaAssinatura({ espera, onDesistir }: EsperaDaAssinaturaProps) {
+  const referencia = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    referencia.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [])
+  const minutos = espera.minutosRestantes
+  return (
+    <div
+      ref={referencia}
+      role="status"
+      className="flex items-start gap-3 rounded-2xl border border-[#1c6b3a]/20 bg-[#eef7f1] px-4 py-3 text-[12px] font-semibold text-[#1c6b3a]"
+    >
+      <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+      <div className="flex-1 space-y-1">
+        <p className="font-extrabold">Aguardando a autorização no celular</p>
+        <p className="font-medium text-[#1c6b3a]/80">
+          Abra o aplicativo VIDaaS no celular e aprove a assinatura. Esta tela confere sozinha a cada
+          poucos segundos{espera.tentativas > 0 ? ` (${espera.tentativas} vez${espera.tentativas > 1 ? 'es' : ''} até agora)` : ''}.
+          O pedido vale por {minutos} min.
+        </p>
+        <p className="font-medium text-[#1c6b3a]/80">
+          A página do VIDaaS não abriu?{' '}
+          <a href={espera.autorizarEm} target="_blank" rel="noreferrer" className="underline">
+            Abrir aqui
+          </a>
+          .
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onDesistir}
+        className="rounded-lg px-2 py-1 text-[11px] font-bold text-[#1c6b3a]/70 hover:bg-[#1c6b3a]/10"
+      >
+        Cancelar
+      </button>
+    </div>
+  )
+}
+
 type AvisoDoProntuarioProps = {
   aviso: { tipo: 'ok' | 'erro'; texto: string }
   onFechar: () => void
@@ -1762,6 +1813,19 @@ export default function PatientRecord({
   const [buscaConsulta, setBuscaConsulta] = useState('')
   const [assinando, setAssinando] = useState<string | null>(null)
   const [assinaturaConcluida, setAssinaturaConcluida] = useState(0)
+  // Pedido de assinatura em aberto: o medico foi aprovar no celular e a tela
+  // fica perguntando a BRy se ja pode assinar. Morre ao concluir, ao expirar
+  // ou quando a pessoa desiste.
+  const [espera, setEspera] = useState<{
+    pedido: string
+    consultaId: string
+    expiraEm: number
+    autorizarEm: string
+    tentativas: number
+    // Contado aqui, a cada pergunta, e nao no render do painel: relogio
+    // dentro do render e impuro e o React recusa com razao.
+    minutosRestantes: number
+  } | null>(null)
   const [prescrevendo, setPrescrevendo] = useState(false)
   const [receitas, setReceitas] = useState<Receita[]>([])
   // Qual campo a barra de formatacao esta comandando. Mora aqui, e nao dentro
@@ -1827,7 +1891,11 @@ export default function PatientRecord({
     void (async () => {
       setAssinando(pedido)
       try {
-        await concluirAssinatura(pedido)
+        const resultado = await concluirAssinatura(pedido)
+        if (resultado.situacao === 'aguardando') {
+          setAviso({ tipo: 'erro', texto: 'A autorização no celular ainda não chegou. Peça a assinatura de novo.' })
+          return
+        }
         // Nao recarrega a lista aqui: este efeito roda na montagem, quando o
         // paciente ainda nao foi escolhido, e a variavel ficaria presa no valor
         // nulo daquele instante. Quem recarrega e o efeito logo abaixo, que
@@ -1846,6 +1914,62 @@ export default function PatientRecord({
     // De proposito so na montagem: a volta do VIDaaS acontece uma vez, num
     // carregamento novo da pagina.
   }, [])
+
+  /**
+   * Pergunta a BRy, a cada poucos segundos, se o medico ja autorizou.
+   *
+   * E o caminho principal da assinatura. O retorno por endereco (efeito acima)
+   * continua existindo como atalho, mas nunca chegou a acontecer na pratica:
+   * o medico aprovava no celular e o navegador do consultorio ficava onde
+   * estava. Perguntando, o sistema nao depende de ninguem voltar.
+   */
+  useEffect(() => {
+    if (!espera) return
+    let vivo = true
+
+    const perguntar = async () => {
+      if (!vivo) return
+      if (Date.now() > espera.expiraEm) {
+        setEspera(null)
+        setAssinando(null)
+        setAviso({ tipo: 'erro', texto: 'A autorização expirou sem resposta do celular. Peça a assinatura de novo.' })
+        return
+      }
+      try {
+        const resultado = await concluirAssinatura(espera.pedido)
+        if (!vivo) return
+        if (resultado.situacao === 'aguardando') {
+          const minutosRestantes = Math.max(0, Math.ceil((espera.expiraEm - Date.now()) / 60000))
+          setEspera((atual) => (atual ? { ...atual, tentativas: atual.tentativas + 1, minutosRestantes } : atual))
+          return
+        }
+        setEspera(null)
+        setAssinando(null)
+        setAssinaturaConcluida((n) => n + 1)
+        setAviso({ tipo: 'ok', texto: 'Atendimento assinado e arquivado.' })
+      } catch (causa) {
+        if (!vivo) return
+        setEspera(null)
+        setAssinando(null)
+        setAviso({
+          tipo: 'erro',
+          texto: causa instanceof Error ? causa.message : 'A assinatura não foi concluída.',
+        })
+      }
+    }
+
+    // A primeira pergunta espera um pouco: o medico ainda esta pegando o
+    // celular. Depois, a cada 5 segundos.
+    const primeiro = window.setTimeout(perguntar, 4000)
+    const ritmo = window.setInterval(perguntar, 5000)
+    return () => {
+      vivo = false
+      window.clearTimeout(primeiro)
+      window.clearInterval(ritmo)
+    }
+    // So reinicia quando o pedido muda; as tentativas sao contadas por fora.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [espera?.pedido])
 
   /**
    * Recarrega a consulta depois que a assinatura foi concluida.
@@ -1941,21 +2065,39 @@ export default function PatientRecord({
   async function pedirAssinatura(consultation: Consultation) {
     setAviso(null)
     setAssinando(consultation.id)
+    // A aba e aberta AGORA, dentro do clique, e recebe o endereco depois: o
+    // bloqueador de pop-up so deixa abrir janela em resposta direta a um clique,
+    // e a resposta da BRy chega tarde demais para isso. Se mesmo assim a aba
+    // nao abrir, o link fica no painel de espera para o medico clicar.
+    const aba = window.open('', '_blank')
     try {
-      // O endereco de volta leva o paciente para que o sistema reabra este
-      // mesmo prontuario. Sem isso o medico voltaria do VIDaaS para a lista de
-      // pacientes, sem saber se a assinatura deu certo.
+      // O endereco de volta leva o paciente para que, se o VIDaaS devolver o
+      // navegador para ca, o sistema reabra este mesmo prontuario.
       const volta = new URL(window.location.href)
       volta.searchParams.set('paciente', consultation.patientId)
-      const { autorizarEm } = await iniciarAssinatura(consultation.id, volta.toString())
-      window.location.href = autorizarEm
+      const { pedido, autorizarEm, expiraEm } = await iniciarAssinatura(consultation.id, volta.toString())
+      if (aba) aba.location.href = autorizarEm
+      setEspera({
+        pedido,
+        consultaId: consultation.id,
+        autorizarEm,
+        expiraEm: expiraEm ? new Date(expiraEm).getTime() : Date.now() + 15 * 60 * 1000,
+        tentativas: 0,
+        minutosRestantes: 15,
+      })
     } catch (causa) {
+      aba?.close()
       setAssinando(null)
       setAviso({
         tipo: 'erro',
         texto: causa instanceof Error ? causa.message : 'Não foi possível pedir a autorização.',
       })
     }
+  }
+
+  function desistirDaAssinatura() {
+    setEspera(null)
+    setAssinando(null)
   }
 
   async function abrirAssinado(consultation: Consultation) {
@@ -2386,6 +2528,7 @@ export default function PatientRecord({
                       para uma tela igual a que deixou e nao saberia se deu
                       certo. */}
                   {aviso && <AvisoDoProntuario aviso={aviso} onFechar={() => setAviso(null)} />}
+                  {espera && <EsperaDaAssinatura espera={espera} onDesistir={desistirDaAssinatura} />}
 
                   {consultasFiltradas.length === 0 ? (
                     <p className="py-10 text-center text-[13px] font-semibold text-slate-400">
@@ -2464,6 +2607,7 @@ export default function PatientRecord({
                 </div>
               )}
               {aviso && <AvisoDoProntuario aviso={aviso} onFechar={() => setAviso(null)} />}
+                  {espera && <EsperaDaAssinatura espera={espera} onDesistir={desistirDaAssinatura} />}
               <div className="grid gap-4 sm:grid-cols-2">
                 <SectionTitle>Atendimento</SectionTitle>
                 {/* O recado da recepcao aparece aqui de proposito, e so para
