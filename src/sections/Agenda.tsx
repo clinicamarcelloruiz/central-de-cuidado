@@ -11,11 +11,14 @@ import {
   RotateCcw,
   Settings2,
   Trash2,
+  MessageCircleOff,
   X,
 } from 'lucide-react'
 import {
   archiveUnit,
   cancelAppointment,
+  MOTIVOS_DE_CANCELAMENTO,
+  type ResultadoDoCancelamento,
   createAppointment,
   createAvailabilityRule,
   createScheduleException,
@@ -86,6 +89,166 @@ function agruparPorDia(slots: string[], appointments: Appointment[]) {
   return [...dias.entries()].sort((a, b) => a[0].localeCompare(b[0]))
 }
 
+/**
+ * Pergunta o motivo antes de cancelar, e diz se o paciente foi avisado.
+ *
+ * O motivo nao e burocracia: ele vai inteiro para o WhatsApp da familia. Por
+ * isso as cinco opcoes estao escritas do ponto de vista de quem le a mensagem,
+ * e nao de quem cancela.
+ *
+ * O aviso pode nao chegar - fora da janela de 24 horas a Meta so aceita modelo
+ * aprovado. Quando isso acontece a tela diz com todas as letras, porque a
+ * alternativa e a recepcao supor que avisou e o paciente aparecer na unidade.
+ */
+function CaixaDeCancelamento({
+  consulta,
+  onFechar,
+  onCancelar,
+}: {
+  consulta: { id: string; paciente: string; quando: string }
+  onFechar: () => void
+  onCancelar: (motivo: string, avisar: boolean) => Promise<ResultadoDoCancelamento>
+}) {
+  const [motivo, setMotivo] = useState<string>(MOTIVOS_DE_CANCELAMENTO[0])
+  const [outro, setOutro] = useState('')
+  const [avisar, setAvisar] = useState(true)
+  const [enviando, setEnviando] = useState(false)
+  const [erro, setErro] = useState('')
+  const [resultado, setResultado] = useState<ResultadoDoCancelamento | null>(null)
+
+  const personalizado = motivo === 'Outro motivo'
+  const texto = personalizado ? outro.trim() : motivo
+
+  async function confirmar() {
+    if (!texto) {
+      setErro('Escreva o motivo antes de cancelar.')
+      return
+    }
+    setErro('')
+    setEnviando(true)
+    try {
+      setResultado(await onCancelar(texto, avisar))
+    } catch (causa) {
+      setErro(causa instanceof Error ? causa.message : 'Não foi possível cancelar.')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#081b2c]/40 p-4">
+      <div className="w-full max-w-[440px] rounded-[22px] bg-white p-5 shadow-[0_24px_60px_rgba(8,27,44,.22)]">
+        {resultado ? (
+          <>
+            <p className="text-sm font-extrabold text-[#081b2c]">Consulta cancelada</p>
+            <p className="mt-1.5 text-[11px] font-semibold leading-relaxed text-slate-500">
+              O horário voltou a ficar livre.
+            </p>
+            {resultado.avisado ? (
+              <p className="mt-3 rounded-xl bg-[#eef7f1] px-3.5 py-3 text-[11px] font-bold leading-relaxed text-[#1c6b3a]">
+                O paciente foi avisado pelo WhatsApp.
+              </p>
+            ) : (
+              <p className="mt-3 flex items-start gap-2 rounded-xl bg-[#fdf3e7] px-3.5 py-3 text-[11px] font-bold leading-relaxed text-[#96591a]">
+                <MessageCircleOff className="mt-px h-4 w-4 shrink-0" />
+                <span>
+                  O paciente NÃO foi avisado. {resultado.motivoDoSilencio}
+                </span>
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={onFechar}
+              className="mt-4 w-full rounded-xl bg-[#081b2c] px-4 py-2.5 text-[11px] font-extrabold text-white transition hover:bg-[#102d47]"
+            >
+              Entendi
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-extrabold text-[#081b2c]">Cancelar a consulta</p>
+            <p className="mt-1 text-[11px] font-semibold text-slate-500">
+              {consulta.paciente} · {consulta.quando}
+            </p>
+
+            <p className="mt-4 text-[10px] font-extrabold uppercase tracking-[0.1em] text-slate-500">
+              Motivo
+            </p>
+            <div className="mt-2 space-y-1.5">
+              {[...MOTIVOS_DE_CANCELAMENTO, 'Outro motivo'].map((opcao) => (
+                <label
+                  key={opcao}
+                  className={`flex cursor-pointer items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-[11px] font-bold transition ${
+                    motivo === opcao
+                      ? 'border-[#dc8e5f] bg-[#fdf4ef] text-[#081b2c]'
+                      : 'border-[#081b2c]/10 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="motivo"
+                    checked={motivo === opcao}
+                    onChange={() => setMotivo(opcao)}
+                    className="h-3.5 w-3.5 accent-[#c87543]"
+                  />
+                  {opcao}
+                </label>
+              ))}
+            </div>
+
+            {personalizado && (
+              <input
+                autoFocus
+                value={outro}
+                onChange={(evento) => setOutro(evento.target.value)}
+                maxLength={140}
+                placeholder="O que o paciente vai ler como motivo"
+                className="mt-2 w-full rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-[11px] font-semibold text-[#081b2c] outline-none focus:border-[#dc8e5f] focus:bg-white"
+              />
+            )}
+
+            <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-xl bg-[#f8f7f4] px-3.5 py-3 text-[11px] font-bold text-slate-600">
+              <input
+                type="checkbox"
+                checked={avisar}
+                onChange={(evento) => setAvisar(evento.target.checked)}
+                className="mt-0.5 h-3.5 w-3.5 accent-[#c87543]"
+              />
+              <span>
+                Avisar o paciente pelo WhatsApp
+                <span className="mt-0.5 block font-semibold text-slate-400">
+                  Desmarque se preferir telefonar.
+                </span>
+              </span>
+            </label>
+
+            {erro && <p className="mt-2 text-[10px] font-bold text-red-500">{erro}</p>}
+
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => void confirmar()}
+                disabled={enviando}
+                className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-[11px] font-extrabold text-white transition hover:bg-red-700 disabled:cursor-wait disabled:opacity-70"
+              >
+                {enviando ? 'Cancelando...' : 'Cancelar consulta'}
+              </button>
+              <button
+                type="button"
+                onClick={onFechar}
+                disabled={enviando}
+                className="rounded-xl border border-[#081b2c]/10 px-4 py-2.5 text-[11px] font-bold text-slate-500 transition hover:bg-slate-50"
+              >
+                Voltar
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function Agenda({
   patients,
   /** Avisa o Home para o contador do menu e o aviso da Visao geral acompanharem. */
@@ -120,6 +283,12 @@ export default function Agenda({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
+  // Consulta que o usuario mandou cancelar e ainda espera o motivo. Guardar o
+  // objeto inteiro, e nao so o id, permite escrever "de Ana, segunda 14/09" na
+  // pergunta - cancelar a consulta errada e um erro caro e silencioso.
+  const [cancelando, setCancelando] = useState<
+    { id: string; paciente: string; quando: string } | null
+  >(null)
   const [slotEscolhido, setSlotEscolhido] = useState<string | null>(null)
 
   // Formularios
@@ -280,7 +449,7 @@ export default function Agenda({
     setEmEdicao(null)
   }
 
-  async function acao(fn: () => Promise<void>, mensagem?: string) {
+  async function acao(fn: () => Promise<unknown>, mensagem?: string) {
     setError('')
     setAviso('')
     try {
@@ -303,6 +472,18 @@ export default function Agenda({
 
   return (
     <div className="space-y-4">
+      {cancelando && (
+        <CaixaDeCancelamento
+          consulta={cancelando}
+          onFechar={() => {
+            setCancelando(null)
+            void carregarBase()
+            void carregarUnidade()
+            onSolicitacoesMudaram?.()
+          }}
+          onCancelar={(motivo, avisar) => cancelAppointment(cancelando.id, motivo, avisar)}
+        />
+      )}
       {error && (
         <div className="flex items-start gap-2 rounded-[16px] border border-red-200 bg-red-50 p-3 text-[11px] font-semibold text-red-700">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -521,10 +702,11 @@ export default function Agenda({
                             type="button"
                             title="Cancelar"
                             onClick={() =>
-                              void acao(
-                                () => cancelAppointment(item.id),
-                                'Consulta cancelada. O horário voltou a ficar livre.',
-                              )
+                              setCancelando({
+                                id: item.id,
+                                paciente: item.patientName,
+                                quando: `${diaLegivel(item.startsAt)}, ${hora(item.startsAt)}`,
+                              })
                             }
                             className="shrink-0 rounded-lg p-1.5 text-white/60 transition hover:bg-white/10 hover:text-white"
                           >
@@ -1140,12 +1322,12 @@ export default function Agenda({
                 <button
                   type="button"
                   onClick={() => {
-                    const id = emEdicao.id
+                    setCancelando({
+                      id: emEdicao.id,
+                      paciente: emEdicao.patientName,
+                      quando: `${diaLegivel(emEdicao.startsAt)}, ${hora(emEdicao.startsAt)}`,
+                    })
                     setEmEdicao(null)
-                    void acao(
-                      () => cancelAppointment(id),
-                      'Consulta cancelada. O horário voltou a ficar livre.',
-                    ).then(() => onSolicitacoesMudaram?.())
                   }}
                   className="ml-auto rounded-xl px-3 py-2.5 text-[11px] font-extrabold text-red-600 transition hover:bg-red-50"
                 >
