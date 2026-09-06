@@ -42,6 +42,10 @@ type PatientRow = {
   birth_date: string | null
   sex: 'F' | 'M' | 'O'
   phone: string
+  // Opcionais ate a migration da prescricao rodar no banco, pelo mesmo motivo
+  // das colunas de assinatura: os tipos gerados ainda nao as conhecem.
+  cpf?: string | null
+  email?: string | null
   city: string | null
   neighborhood: string | null
   insurance: string | null
@@ -144,6 +148,8 @@ function mapPatient(row: PatientRow, followupRows: FollowupRow[]): Patient {
     nascimento: row.birth_date ?? '',
     sexo: row.sex,
     telefone: row.phone,
+    cpf: row.cpf ?? '',
+    email: row.email ?? '',
     cidade: row.city ?? '',
     bairro: row.neighborhood ?? '',
     convenio: row.insurance ?? '',
@@ -221,8 +227,21 @@ function consultationPayload(
   }
 }
 
-function patientCreatePayload(draft: PatientDraft): Omit<PatientInsert, 'clinic_id'> {
+/**
+ * Colunas que o banco ja tem mas os tipos gerados ainda nao conhecem.
+ *
+ * Some quando os tipos forem regerados depois da migration da prescricao. Ate
+ * la, sem esta abertura o CPF seria descartado em silencio no caminho para o
+ * banco - o mesmo tipo de bug que ja custou uma tarde neste projeto.
+ */
+type ColunasNovasDoPaciente = { cpf?: string | null; email?: string | null }
+
+function patientCreatePayload(
+  draft: PatientDraft,
+): Omit<PatientInsert, 'clinic_id'> & ColunasNovasDoPaciente {
   return {
+    cpf: draft.cpf.replace(/\D/g, '') || null,
+    email: draft.email.trim() || null,
     name: draft.nome.trim(),
     guardian_name: draft.responsavel.trim(),
     birth_date: draft.nascimento || null,
@@ -238,8 +257,10 @@ function patientCreatePayload(draft: PatientDraft): Omit<PatientInsert, 'clinic_
   }
 }
 
-function patientUpdatePayload(patch: Partial<Patient>): PatientUpdate {
-  const payload: PatientUpdate = {}
+function patientUpdatePayload(patch: Partial<Patient>): PatientUpdate & ColunasNovasDoPaciente {
+  const payload: PatientUpdate & ColunasNovasDoPaciente = {}
+  if (patch.cpf !== undefined) payload.cpf = patch.cpf.replace(/\D/g, '') || null
+  if (patch.email !== undefined) payload.email = patch.email.trim() || null
   if (patch.nome !== undefined) payload.name = patch.nome.trim()
   if (patch.responsavel !== undefined) payload.guardian_name = patch.responsavel.trim()
   if (patch.nascimento !== undefined) payload.birth_date = patch.nascimento || null
@@ -1130,7 +1151,9 @@ export async function fetchDb(
 export async function createPatient(clinicId: string, draft: PatientDraft) {
   const { data, error } = await supabase
     .from('patients')
-    .insert({ clinic_id: clinicId, ...patientCreatePayload(draft) })
+    // O cast some quando os tipos do Supabase forem regerados: hoje eles
+    // ainda nao conhecem cpf e email, e o cliente recusa campo desconhecido.
+    .insert({ clinic_id: clinicId, ...patientCreatePayload(draft) } as PatientInsert)
     .select('*')
     .single()
 
@@ -1267,7 +1290,7 @@ export async function editConsultation(
 export async function editPatient(clinicId: string, id: string, patch: Partial<Patient>) {
   const { data, error } = await supabase
     .from('patients')
-    .update(patientUpdatePayload(patch))
+    .update(patientUpdatePayload(patch) as PatientUpdate)
     .eq('clinic_id', clinicId)
     .eq('id', id)
     .is('archived_at', null)
@@ -1345,6 +1368,8 @@ export async function importPatients(clinicId: string, data: Db) {
       nascimento: patient.nascimento,
       sexo: patient.sexo,
       telefone: patient.telefone,
+      cpf: patient.cpf ?? '',
+      email: patient.email ?? '',
       cidade: patient.cidade,
       bairro: patient.bairro,
       convenio: patient.convenio,

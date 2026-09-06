@@ -20,6 +20,7 @@ import {
   MessageCircle,
   Mic,
   MicOff,
+  Pill,
   Plus,
   Printer,
   RefreshCw,
@@ -67,6 +68,7 @@ import type {
 } from '@/types/patient'
 import { UNIDADES } from '@/types/patient'
 import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
+import { abrirPrescricao, faltaParaPrescrever, guardarReceita, marcarReceitaExcluida } from '@/lib/memed'
 
 interface PatientRecordProps {
   patient: Patient | null
@@ -1386,6 +1388,8 @@ function ConsultationCard({
   onEdit,
   onAssinar,
   onAbrirAssinado,
+  onPrescrever,
+  prescrevendo,
   assinando,
 }: {
   consultation: Consultation
@@ -1394,6 +1398,8 @@ function ConsultationCard({
   onEdit: (consultation: Consultation) => void
   onAssinar: (consultation: Consultation) => void
   onAbrirAssinado: (consultation: Consultation) => void
+  onPrescrever: (consultation: Consultation) => void
+  prescrevendo: boolean
   /** Id da consulta cuja assinatura esta em andamento, se houver. */
   assinando: string | null
 }) {
@@ -1565,6 +1571,15 @@ function ConsultationCard({
                 <Edit3 className="h-3.5 w-3.5" />
                 {estado === 'realizada' ? 'Editar consulta' : 'Escrever atendimento'}
               </button>
+              <button
+                type="button"
+                onClick={() => onPrescrever(consultation)}
+                disabled={prescrevendo}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#2563eb]/20 bg-[#eef3fd] px-3 py-2 text-[10px] font-extrabold text-[#1d4ed8] transition hover:bg-[#e2eafb] disabled:cursor-wait disabled:opacity-70"
+              >
+                {prescrevendo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pill className="h-3.5 w-3.5" />}
+                Prescrever
+              </button>
             </div>
           )}
         </div>
@@ -1618,6 +1633,7 @@ export default function PatientRecord({
   const [buscaConsulta, setBuscaConsulta] = useState('')
   const [assinando, setAssinando] = useState<string | null>(null)
   const [assinaturaConcluida, setAssinaturaConcluida] = useState(0)
+  const [prescrevendo, setPrescrevendo] = useState(false)
   // Qual campo a barra de formatacao esta comandando. Mora aqui, e nao dentro
   // do formulario, porque a barra e os campos sao irmaos na arvore.
   const [campoAtivo, setCampoAtivo] = useState<ControleDeCampo | null>(null)
@@ -1706,6 +1722,54 @@ export default function PatientRecord({
     // lista, e observar o objeto recarregaria a consulta em looping.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assinaturaConcluida, patient?.id])
+
+  /**
+   * Abre a prescricao da Memed sobre o prontuario.
+   *
+   * A checagem de CPF acontece ANTES de abrir. A Memed so recusa na hora de
+   * imprimir, quando o medico ja escreveu a receita inteira - e aí o trabalho
+   * se perde e a mensagem de erro vem em linguagem de API.
+   */
+  async function prescrever(consultation: Consultation | null) {
+    if (!patient) return
+    setAvisoAssinatura(null)
+
+    const falta = faltaParaPrescrever(patient)
+    if (falta.length) {
+      setAvisoAssinatura({
+        tipo: 'erro',
+        texto: `Para emitir receita falta ${falta.join(' e ')} no cadastro de ${patient.nome.split(' ')[0]}. É exigência da RDC 1000/25 — sem isso a Memed recusa a emissão.`,
+      })
+      return
+    }
+
+    setPrescrevendo(true)
+    try {
+      await abrirPrescricao(patient, consultation, {
+        onReceita: (dados) => {
+          void (async () => {
+            try {
+              await guardarReceita(patient.id, consultation?.id ?? null, dados)
+              setAvisoAssinatura({ tipo: 'ok', texto: 'Receita emitida e guardada no prontuário.' })
+            } catch (causa) {
+              setAvisoAssinatura({
+                tipo: 'erro',
+                texto: causa instanceof Error ? causa.message : 'A receita não pôde ser arquivada.',
+              })
+            }
+          })()
+        },
+        onExcluida: (id) => void marcarReceitaExcluida(id),
+      })
+    } catch (causa) {
+      setAvisoAssinatura({
+        tipo: 'erro',
+        texto: causa instanceof Error ? causa.message : 'Não foi possível abrir a prescrição.',
+      })
+    } finally {
+      setPrescrevendo(false)
+    }
+  }
 
   /**
    * Manda o medico autorizar no VIDaaS.
@@ -2200,6 +2264,8 @@ export default function PatientRecord({
                           onEdit={startEditingConsultation}
                           onAssinar={(item) => void pedirAssinatura(item)}
                           onAbrirAssinado={(item) => void abrirAssinado(item)}
+                          onPrescrever={(item) => void prescrever(item)}
+                          prescrevendo={prescrevendo}
                           assinando={assinando}
                         />
                       ))}
