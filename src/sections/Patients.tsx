@@ -286,6 +286,22 @@ export default function Patients({
     [patients, recordPatientId],
   )
 
+  /**
+   * Reabre o prontuario quando o medico volta da assinatura.
+   *
+   * Assinar leva o navegador para o VIDaaS e o traz de volta com o sistema
+   * recarregado do zero - sem isto ele voltaria para a lista de pacientes, e o
+   * aviso de "assinado" apareceria numa tela fechada. O paciente vai no
+   * endereco de retorno justamente para o sistema saber onde ele estava.
+   *
+   * O parametro nao e apagado aqui: quem apaga e o proprio prontuario, junto
+   * com o numero do pedido, depois de concluir a assinatura.
+   */
+  useEffect(() => {
+    const paciente = new URL(window.location.href).searchParams.get('paciente')
+    if (paciente) setRecordPatientId(paciente)
+  }, [])
+
   function set<K extends keyof PatientDraft>(key: K, value: PatientDraft[K]) {
     setForm((current) => ({ ...current, [key]: value }))
   }
