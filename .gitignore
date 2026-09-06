@@ -34,3 +34,5 @@ ABRIR SISTEMA.html
 *.njsproj
 *.sln
 *.sw?
+tests/atendimento.build.mjs
+tests/lembrete.build.mjs
