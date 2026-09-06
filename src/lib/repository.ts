@@ -790,12 +790,47 @@ export async function createAppointment(
   }
 }
 
-export async function cancelAppointment(appointmentId: string) {
-  const { error } = await supabase
-    .from('appointments')
-    .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
-    .eq('id', appointmentId)
-  if (error) fail(error)
+/**
+ * Os motivos que o consultorio usa de verdade.
+ *
+ * Lista curta de proposito: cinco cobrem quase tudo, e uma lista longa faz a
+ * pessoa escolher "outro" so para nao ler. O sexto e livre, para o caso raro.
+ *
+ * O texto e escrito do ponto de vista de quem vai LER a mensagem, e nao de quem
+ * cancela: cada um destes vai inteiro para o WhatsApp do paciente.
+ */
+export const MOTIVOS_DE_CANCELAMENTO = [
+  'Imprevisto do médico',
+  'Emergência com outro paciente',
+  'Problema de saúde do médico',
+  'A unidade não vai funcionar nesse dia',
+  'A pedido do paciente',
+] as const
+
+export interface ResultadoDoCancelamento {
+  avisado: boolean
+  enviadoPara?: string | null
+  /** Por que o paciente nao soube. So vem quando avisado e falso. */
+  motivoDoSilencio?: string
+}
+
+/**
+ * Cancela e avisa numa operacao so.
+ *
+ * Antes disto o botao da agenda apenas liberava o horario, e o paciente
+ * descobria o cancelamento ao chegar na unidade. A funcao devolve se o aviso
+ * chegou, porque quando nao chega alguem precisa telefonar.
+ */
+export async function cancelAppointment(
+  appointmentId: string,
+  motivo: string,
+  avisarPaciente = true,
+) {
+  const { data, error } = await supabase.functions.invoke('appointment-cancel', {
+    body: { appointmentId, motivo, avisarPaciente },
+  })
+  if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível cancelar a consulta.'))
+  return data as ResultadoDoCancelamento
 }
 
 /* ------------------------------------------------------------------ *
