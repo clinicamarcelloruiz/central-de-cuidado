@@ -55,6 +55,12 @@ export interface Consultation extends ConsultationDraft {
   id: string
   patientId: string
   criadoEm: string
+  /** Momento da assinatura digital. Nulo enquanto o atendimento e rascunho. */
+  assinadoEm: string | null
+  /** Nome que consta no certificado usado. */
+  assinadoPor: string | null
+  /** Caminho do PDF assinado no acervo. E ele que vale como documento. */
+  arquivoAssinado: string | null
 }
 
 export interface Db {

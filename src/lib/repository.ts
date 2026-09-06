@@ -88,6 +88,12 @@ type ConsultationRow = {
   return_plan: string
   notes: string
   created_at: string
+  // Opcionais porque os tipos gerados do Supabase so passam a conhece-las
+  // depois que a migration da assinatura roda no banco. Ate la a consulta
+  // simplesmente nao tem assinatura - que e exatamente o que o codigo assume.
+  signed_at?: string | null
+  signed_by_name?: string | null
+  signed_pdf_path?: string | null
 }
 
 const FOLLOWUP_KEYS: FollowupKey[] = ['d30', 'm90']
@@ -173,6 +179,9 @@ function mapConsultation(row: ConsultationRow): Consultation {
     retorno: row.return_plan,
     observacoes: row.notes,
     criadoEm: row.created_at,
+    assinadoEm: row.signed_at ?? null,
+    assinadoPor: row.signed_by_name ?? null,
+    arquivoAssinado: row.signed_pdf_path ?? null,
   }
 }
 
@@ -1434,6 +1443,60 @@ export async function reopenConversation(conversationId: string) {
       'Não foi possível enviar a mensagem de retomada.'
     throw new Error(detalhe)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Assinatura digital do atendimento
+// ---------------------------------------------------------------------------
+
+/**
+ * Erro da funcao de assinatura, com o texto que o servidor mandou.
+ *
+ * O invoke do supabase-js engole o corpo da resposta e devolve um
+ * "Edge Function returned a non-2xx status code" que nao ajuda ninguem. Aqui a
+ * mensagem de verdade e resgatada - assinatura que falha sem dizer por que faz
+ * o medico repetir o mesmo gesto ate desistir.
+ */
+function motivoDaFalha(error: unknown, padrao: string) {
+  const corpo = (error as { context?: { body?: { error?: string } } }).context?.body
+  return corpo?.error ?? padrao
+}
+
+/**
+ * Primeiro passo: pede a autorizacao e devolve o endereco do VIDaaS.
+ *
+ * Quem manda o medico para la e a tela, e nao o servidor, porque o navegador
+ * precisa lembrar de onde saiu para voltar ao lugar certo.
+ */
+export async function iniciarAssinatura(consultationId: string, voltarPara: string) {
+  const { data, error } = await supabase.functions.invoke('assinar-consulta', {
+    body: { acao: 'iniciar', consultationId, voltarPara },
+  })
+  if (error) throw new Error(motivoDaFalha(error, 'Não foi possível pedir a autorização.'))
+  return data as { pedido: string; autorizarEm: string }
+}
+
+/** Segundo passo: o medico ja autorizou; agora o documento e assinado. */
+export async function concluirAssinatura(pedido: string) {
+  const { data, error } = await supabase.functions.invoke('assinar-consulta', {
+    body: { acao: 'concluir', pedido },
+  })
+  if (error) throw new Error(motivoDaFalha(error, 'A assinatura não foi concluída.'))
+  return data as { assinadoEm: string; arquivo: string; digital: string }
+}
+
+/**
+ * Link temporario para abrir o PDF assinado.
+ *
+ * Temporario de proposito: o arquivo tem o atendimento inteiro dentro, e um
+ * endereco permanente acabaria colado em algum lugar onde nao deveria estar.
+ */
+export async function linkDoAtendimentoAssinado(caminho: string) {
+  const { data, error } = await supabase.storage
+    .from('prontuarios-assinados')
+    .createSignedUrl(caminho, 300)
+  if (error) throw new Error('Não foi possível abrir o documento assinado.')
+  return data.signedUrl
 }
 
 // ---------------------------------------------------------------------------
