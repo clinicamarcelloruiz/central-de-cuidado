@@ -1700,7 +1700,7 @@ function ConsultationCard({
  * deixou, sem saber se deu certo.
  */
 type EsperaDaAssinaturaProps = {
-  espera: { autorizarEm: string; tentativas: number; minutosRestantes: number }
+  espera: { autorizarEm: string; tentativas: number; minutosRestantes: number; ultimaResposta?: string }
   onDesistir: () => void
 }
 
@@ -1731,6 +1731,11 @@ function EsperaDaAssinatura({ espera, onDesistir }: EsperaDaAssinaturaProps) {
           poucos segundos{espera.tentativas > 0 ? ` (${espera.tentativas} vez${espera.tentativas > 1 ? 'es' : ''} até agora)` : ''}.
           O pedido vale por {minutos} min.
         </p>
+        {espera.ultimaResposta && (
+          <p className="break-all font-mono text-[10px] text-[#1c6b3a]/60">
+            BRy: {espera.ultimaResposta}
+          </p>
+        )}
         {espera.autorizarEm && (
           <p className="font-medium text-[#1c6b3a]/80">
             A página do VIDaaS não abriu?{' '}
@@ -1827,6 +1832,9 @@ export default function PatientRecord({
     // Contado aqui, a cada pergunta, e nao no render do painel: relogio
     // dentro do render e impuro e o React recusa com razao.
     minutosRestantes: number
+    // Ultima resposta da BRy, crua. Aparece no painel para que um print baste
+    // para diagnosticar - sem acesso aos logs, era a unica janela.
+    ultimaResposta?: string
   } | null>(null)
   const [prescrevendo, setPrescrevendo] = useState(false)
   const [receitas, setReceitas] = useState<Receita[]>([])
@@ -1951,7 +1959,8 @@ export default function PatientRecord({
         if (!vivo) return
         if (resultado.situacao === 'aguardando') {
           const minutosRestantes = Math.max(0, Math.ceil((espera.expiraEm - Date.now()) / 60000))
-          setEspera((atual) => (atual ? { ...atual, tentativas: atual.tentativas + 1, minutosRestantes } : atual))
+          const ultimaResposta = resultado.detalhe
+          setEspera((atual) => (atual ? { ...atual, tentativas: atual.tentativas + 1, minutosRestantes, ultimaResposta } : atual))
           return
         }
         setEspera(null)
