@@ -18,8 +18,12 @@ import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.
 
 type Ambiente = { api: string }
 
+function producaoAtiva() {
+  return Deno.env.get('MEMED_AMBIENTE')?.trim().toLowerCase() === 'producao'
+}
+
 function ambiente(): Ambiente {
-  const producao = Deno.env.get('MEMED_AMBIENTE')?.trim().toLowerCase() === 'producao'
+  const producao = producaoAtiva()
   return {
     api: producao
       ? 'https://api.memed.com.br/v1'
@@ -113,7 +117,7 @@ Deno.serve(async (req) => {
         }, 409)
       }
 
-      return json({ token, novo: false })
+      return json({ token, novo: false, ambiente: producaoAtiva() ? 'producao' : 'homologacao' })
     }
 
     // Qualquer coisa que nao seja "nao encontrei" e problema de verdade, e
@@ -145,9 +149,12 @@ Deno.serve(async (req) => {
         code: 'CADASTRO_INCOMPLETO',
       }, 409)
     }
-    if (!ajustes.prescriber_email || !ajustes.prescriber_birth_date) {
+    // Data de nascimento e obrigatoria no cadastro (RDC 1000/25); e-mail e
+    // opcional para a Memed, mas sem ele o medico tem de completar o cadastro
+    // dentro da plataforma dela depois.
+    if (!ajustes.prescriber_birth_date) {
       return json({
-        error: 'A Memed exige e-mail e data de nascimento do médico para o primeiro acesso.',
+        error: 'A Memed exige a data de nascimento do médico para o primeiro acesso.',
         code: 'CADASTRO_INCOMPLETO',
       }, 409)
     }
@@ -172,7 +179,7 @@ Deno.serve(async (req) => {
               board_number: soDigitos(ajustes.signer_crm),
               board_state: 'SP',
             },
-            email: ajustes.prescriber_email,
+            ...(ajustes.prescriber_email ? { email: ajustes.prescriber_email } : {}),
             data_nascimento: dataBR(ajustes.prescriber_birth_date),
           },
         },
@@ -203,7 +210,7 @@ Deno.serve(async (req) => {
       .update({ memed_prescritor_criado_em: new Date().toISOString() })
       .eq('clinic_id', ajustes.clinic_id)
 
-    return json({ token, novo: true })
+    return json({ token, novo: true, ambiente: producaoAtiva() ? 'producao' : 'homologacao' })
   } catch (causa) {
     console.error('memed-prescritor falhou', causa)
     return json({ error: causa instanceof Error ? causa.message : 'Falha inesperada.' }, 500)
