@@ -782,7 +782,11 @@ function temTexto(html: string) {
 
 function editorValue(value: string) {
   const sanitized = sanitizeRichText(value)
-  return sanitized === value && !/[<>]/.test(value) ? textToEditorHtml(value) : sanitized
+  // Texto puro e o que nao tem tag NEM entidade. O editor grava o espaco
+  // final como "&nbsp;" mesmo sem nenhuma tag em volta; tratar isso como
+  // texto puro escapava o "&" e o prontuario mostrava "&nbsp;" por extenso.
+  const pareceHtml = /[<>]|&[a-z]+;|&#\d+;/i.test(value)
+  return sanitized === value && !pareceHtml ? textToEditorHtml(value) : sanitized
 }
 
 function emptyConsultation(patient: Patient | null): ConsultationDraft {

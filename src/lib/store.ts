@@ -9,6 +9,8 @@ import type {
 import {
   archiveAllPatients,
   archivePatient,
+  listArchivedPatients,
+  restorePatient as restorePatientRow,
   changeFollowup,
   createConsultation,
   createPatient,
@@ -136,6 +138,17 @@ export function useDb() {
     }))
   }
 
+  async function listArchived() {
+    return run(() => listArchivedPatients(requireClinic()))
+  }
+
+  async function restorePatient(id: string) {
+    await run(() => restorePatientRow(requireClinic(), id))
+    // Recarrega tudo em vez de remendar a lista: o paciente volta com os
+    // acompanhamentos e a ordem certos, como se nunca tivesse saido.
+    await load()
+  }
+
   async function getConsultations(patientId: string) {
     return run(() => listConsultations(requireClinic(), patientId))
   }
@@ -203,6 +216,8 @@ export function useDb() {
     addPatient,
     updatePatient,
     removePatient,
+    listArchived,
+    restorePatient,
     getConsultations,
     addConsultation,
     updateConsultation,

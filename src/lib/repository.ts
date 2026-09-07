@@ -1404,6 +1404,35 @@ export async function archivePatient(clinicId: string, id: string) {
   if (error) fail(error)
 }
 
+/**
+ * Pacientes arquivados, do mais recente para o mais antigo.
+ *
+ * Arquivar nao apaga: prontuario e obrigado a ser guardado por 20 anos (Lei
+ * 13.787/2018), entao o cadastro sai das listas e fica de lado. Esta funcao e
+ * a porta para ele voltar - ou para conferir que continua la.
+ */
+export async function listArchivedPatients(clinicId: string): Promise<Patient[]> {
+  const { data, error } = await supabase
+    .from('patients')
+    .select('*')
+    .eq('clinic_id', clinicId)
+    .not('archived_at', 'is', null)
+    .order('archived_at', { ascending: false })
+
+  if (error) fail(error)
+  return ((data ?? []) as PatientRow[]).map((row) => mapPatient(row, []))
+}
+
+export async function restorePatient(clinicId: string, id: string) {
+  const { error } = await supabase
+    .from('patients')
+    .update({ archived_at: null })
+    .eq('clinic_id', clinicId)
+    .eq('id', id)
+
+  if (error) fail(error)
+}
+
 export async function changeFollowup(
   clinicId: string,
   patientId: string,
