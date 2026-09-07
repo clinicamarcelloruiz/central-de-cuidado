@@ -1161,6 +1161,25 @@ export async function getReplyWindow(conversationId: string): Promise<string | n
   return new Date(new Date(data.created_at).getTime() + 24 * 3600 * 1000).toISOString()
 }
 
+/**
+ * Manda o menu do robo para a conversa e devolve a pessoa ao atendimento
+ * automatico. So funciona com a janela de 24h aberta, como qualquer mensagem.
+ */
+export async function sendConversationMenu(conversationId: string) {
+  const { data, error } = await supabase.functions.invoke('whatsapp-reply', {
+    body: { conversationId, menu: true },
+  })
+  if (error) {
+    const detalhe =
+      (error as { context?: { body?: { error?: string } } }).context?.body?.error ??
+      (data as { error?: string } | null)?.error
+    throw new Error(detalhe || 'Não foi possível enviar o menu.')
+  }
+  if ((data as { error?: string } | null)?.error) {
+    throw new Error((data as { error: string }).error)
+  }
+}
+
 /** Envia uma resposta escrita pela equipe. O servidor revalida a janela de 24h. */
 export async function sendConversationReply(
   conversationId: string,

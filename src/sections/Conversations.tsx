@@ -14,6 +14,7 @@ import {
   Sparkles,
   UserPlus,
   X,
+  List as ListIcon,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import {
@@ -29,6 +30,7 @@ import {
   resolveConversation,
   saveAutoReply,
   sendConversationReply,
+  sendConversationMenu,
   type AutoReplySettings,
   type Conversation,
   type ConversationMessage,
@@ -334,6 +336,21 @@ export default function Conversations({
       setError(cause instanceof Error ? cause.message : 'Não foi possível enviar a mensagem.')
       // Se a recusa foi por janela fechada, a tela precisa refletir isso.
       setJanelaAte(await getReplyWindow(selectedId).catch(() => null))
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  async function enviarMenu() {
+    if (!selectedId || enviando) return
+    setEnviando(true)
+    setError('')
+    try {
+      await sendConversationMenu(selectedId)
+      setMessages(await listConversationMessages(selectedId))
+      void load(true)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível enviar o menu.')
     } finally {
       setEnviando(false)
     }
@@ -1008,6 +1025,20 @@ export default function Conversations({
                         <p className="text-[9px] font-semibold text-slate-400">
                           Enter envia · Shift+Enter quebra linha
                         </p>
+                        {/* Devolve a pessoa ao robo: manda o menu de opcoes e a
+                            conversa volta ao inicio. Util depois de um convite
+                            de retomada, quando a janela reabriu e a equipe nao
+                            quer conduzir a conversa a mao. */}
+                        <button
+                          type="button"
+                          disabled={enviando}
+                          onClick={() => void enviarMenu()}
+                          className="mr-auto inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-white px-3 py-2 text-[10px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c] disabled:opacity-40"
+                          title="Envia o menu de opções do robô e volta a conversa ao atendimento automático"
+                        >
+                          <ListIcon className="h-3.5 w-3.5" />
+                          Enviar menu de opções
+                        </button>
                         <button
                           type="button"
                           disabled={enviando || !resposta.trim()}

@@ -1,4 +1,6 @@
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
+import { mostrarMenu } from '../_shared/atendimento.ts'
+import { montarConteudo } from '../_shared/conteudo.ts'
 
 /**
  * Resposta livre da equipe para um paciente, a partir da tela de Conversas.
@@ -21,6 +23,12 @@ type ReplyRequest = {
    */
   automatico?: boolean
   text?: string
+  /**
+   * Em vez de texto, manda o menu do robo (a lista tocavel de opcoes) e volta
+   * a conversa para o estado "menu". Serve para quando a equipe reabriu a
+   * conversa e quer devolver a pessoa ao atendimento automatico.
+   */
+  menu?: boolean
 }
 
 Deno.serve(async (req) => {
@@ -32,9 +40,10 @@ Deno.serve(async (req) => {
     if (!authorization.startsWith('Bearer ')) return json({ error: 'Sessão obrigatória.' }, 401)
 
     const body = (await req.json()) as ReplyRequest
-    const texto = (body.text ?? '').trim()
+    const querMenu = body.menu === true
+    let texto = (body.text ?? '').trim()
     if (!body.conversationId) return json({ error: 'Conversa não informada.' }, 400)
-    if (!texto) return json({ error: 'Escreva a mensagem antes de enviar.' }, 400)
+    if (!texto && !querMenu) return json({ error: 'Escreva a mensagem antes de enviar.' }, 400)
     if (texto.length > LIMITE_CARACTERES) {
       return json({ error: `A mensagem passa de ${LIMITE_CARACTERES} caracteres.` }, 400)
     }
@@ -94,9 +103,19 @@ Deno.serve(async (req) => {
 
     const { data: settings } = await admin
       .from('clinic_settings')
-      .select('whatsapp_phone_number_id')
+      .select('whatsapp_phone_number_id,whatsapp_autoreply_text')
       .eq('clinic_id', visivel.clinic_id)
       .single()
+
+    // Menu do robo: o mesmo texto e a mesma lista que o paciente ve quando
+    // escreve "menu", e a conversa volta para o estado inicial. A partir daqui
+    // o robo responde ao que a pessoa tocar.
+    let toques: Parameters<typeof montarConteudo>[1] | undefined
+    if (querMenu) {
+      const menu = await mostrarMenu(admin, visivel.id, (settings?.whatsapp_autoreply_text ?? '').trim())
+      texto = menu?.resposta ?? ''
+      toques = menu?.lista ? { lista: menu.lista } : undefined
+    }
 
     if (!settings?.whatsapp_phone_number_id) {
       return json({ error: 'Configuração do WhatsApp incompleta.', code: 'INCOMPLETE' }, 409)
@@ -117,8 +136,7 @@ Deno.serve(async (req) => {
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
           to: visivel.wa_id,
-          type: 'text',
-          text: { preview_url: false, body: texto },
+          ...montarConteudo(texto, toques),
         }),
       },
     )
@@ -132,8 +150,8 @@ Deno.serve(async (req) => {
         conversation_id: visivel.id,
         patient_id: visivel.patient_id,
         direction: 'outbound',
-        automatic: body.automatico === true,
-        message_type: 'text',
+        automatic: body.automatico === true || querMenu,
+        message_type: toques ? 'interactive' : 'text',
         body: texto,
         status: 'failed',
         failed_at: agora,
@@ -150,8 +168,8 @@ Deno.serve(async (req) => {
         patient_id: visivel.patient_id,
         external_message_id: corpo?.messages?.[0]?.id ?? null,
         direction: 'outbound',
-        automatic: body.automatico === true,
-        message_type: 'text',
+        automatic: body.automatico === true || querMenu,
+        message_type: toques ? 'interactive' : 'text',
         body: texto,
         status: 'accepted',
         sent_at: agora,
