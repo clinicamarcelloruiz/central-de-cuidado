@@ -540,6 +540,67 @@ export async function deleteScheduleException(exceptionId: string) {
   if (error) fail(error)
 }
 
+// ---------------------------------------------------------------------------
+// Medico e clinica: o que sai em documentos (assinatura, receita, cadastros)
+// ---------------------------------------------------------------------------
+
+export interface DadosDaClinica {
+  /** Nome do medico como vai no documento assinado e na receita. */
+  medicoNome: string
+  crm: string
+  /** Telefone de contato da clinica, impresso na receita. */
+  telefone: string
+  /** E-mail do medico para cadastros externos (Memed). */
+  medicoEmail: string
+  /** Data de nascimento do medico (YYYY-MM-DD); a Memed exige. */
+  medicoNascimento: string
+}
+
+// Estas colunas existem no banco e os tipos gerados ainda nao as conhecem.
+// Enquanto os tipos nao forem regerados, a leitura e a escrita passam por
+// uma consulta sem tipo, como as receitas.
+type LinhaDaClinica = {
+  signer_name: string | null
+  signer_crm: string | null
+  clinic_phone: string | null
+  prescriber_email: string | null
+  prescriber_birth_date: string | null
+}
+
+export async function getDadosDaClinica(clinicId: string): Promise<DadosDaClinica> {
+  const { data, error } = await tabelaCrua('clinic_settings')
+    .select('signer_name,signer_crm,clinic_phone,prescriber_email,prescriber_birth_date')
+    .eq('clinic_id', clinicId)
+    .order('clinic_id', { ascending: true })
+  if (error) fail(error)
+  const linha = ((data ?? []) as LinhaDaClinica[])[0]
+  return {
+    medicoNome: linha?.signer_name ?? '',
+    crm: linha?.signer_crm ?? '',
+    telefone: linha?.clinic_phone ?? '',
+    medicoEmail: linha?.prescriber_email ?? '',
+    medicoNascimento: linha?.prescriber_birth_date ?? '',
+  }
+}
+
+export async function saveDadosDaClinica(clinicId: string, dados: DadosDaClinica) {
+  const atualizar = (supabase.from as unknown as (n: string) => {
+    update: (valores: Record<string, unknown>) => {
+      eq: (coluna: string, valor: string) => PromiseLike<{ error: { message: string } | null }>
+    }
+  })('clinic_settings')
+  const { error } = await atualizar
+    .update({
+      signer_name: dados.medicoNome.trim() || null,
+      signer_crm: dados.crm.trim() || null,
+      clinic_phone: dados.telefone.trim(),
+      prescriber_email: dados.medicoEmail.trim() || null,
+      prescriber_birth_date: dados.medicoNascimento || null,
+    })
+    .eq('clinic_id', clinicId)
+  if (error) fail(error)
+}
+
 export async function getSchedulePreferences(clinicId: string): Promise<SchedulePreferences> {
   const { data, error } = await supabase
     .from('clinic_settings')

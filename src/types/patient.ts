@@ -77,12 +77,6 @@ export interface Db {
  * tres jeitos de escrever o mesmo lugar obrigavam o sistema a adivinhar que
  * eram a mesma coisa.
  */
-export const UNIDADES = [
-  'Liferty · Santos',
-  'Livance · Santo André',
-  'Livance · Vila Mariana',
-  'Outra',
-] as const
 
 export const FOLLOWUP_LABEL: Record<FollowupKey, string> = {
   d30: '30 dias',

@@ -65,6 +65,7 @@ import {
   type NoteTemplate,
   type Receita,
   listUnits,
+  getDadosDaClinica,
 } from '@/lib/repository'
 import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco'
 import type {
@@ -73,7 +74,6 @@ import type {
   ConsultationType,
   Patient,
 } from '@/types/patient'
-import { UNIDADES } from '@/types/patient'
 import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
 import { abrirPrescricao, faltaParaPrescrever, guardarReceita, marcarReceitaExcluida, ultimoCadastro, type LocalDeAtendimento } from '@/lib/memed'
 
@@ -460,12 +460,6 @@ function normalizeEditorColor(value: string) {
   })?.value
 }
 
-/**
- * Telefone que sai no rodape da receita da Memed. E o fixo da clinica, que
- * atende em qualquer unidade; o WhatsApp de agendamento e do robo e nao deve
- * ir para o papel como telefone de contato com o medico.
- */
-const TELEFONE_DA_CLINICA = '(13) 3273-6828'
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[character] ?? character)
@@ -798,11 +792,11 @@ function editorValue(value: string) {
   return sanitized === value && !pareceHtml ? textToEditorHtml(value) : sanitized
 }
 
-function emptyConsultation(patient: Patient | null): ConsultationDraft {
+function emptyConsultation(patient: Patient | null, unidadePadrao = ''): ConsultationDraft {
   return {
     data: todayISO(),
     tipo: 'return',
-    unidade: patient?.unidade || UNIDADES[0],
+    unidade: patient?.unidade || unidadePadrao,
     peso: '',
     altura: '',
     queixa: '',
@@ -2130,14 +2124,30 @@ export default function PatientRecord({
     try {
       // Endereco da unidade, para o rodape da receita e para a identificacao
       // que a Memed exige. Vem da Agenda; se faltar, a Memed pede na tela.
-      let local: LocalDeAtendimento | null = null
-      if (clinicId && consultation?.unidade) {
-        try {
-          const unidade = (await listUnits(clinicId)).find((u) => u.name === consultation.unidade)
-          if (unidade) local = { nome: unidade.name, endereco: unidade.address || undefined, telefone: TELEFONE_DA_CLINICA }
-        } catch {
-          // Sem endereco a receita ainda sai; o medico completa na tela.
-        }
+      // A receita sai com o local de atendimento no cabecalho: endereco da
+      // unidade da consulta e telefone da clinica, os dois vindos das
+      // preferencias. Faltando, para aqui com a instrucao de onde preencher,
+      // em vez de deixar a Memed imprimir um cabecalho em branco.
+      if (!clinicId) throw new Error('Clínica não identificada.')
+      const [unidades, dadosDaClinica] = await Promise.all([listUnits(clinicId), getDadosDaClinica(clinicId)])
+      const nome = (consultation?.unidade ?? patient.unidade ?? '').trim().toLowerCase()
+      const unidade =
+        unidades.find((u) => u.name.trim().toLowerCase() === nome) ??
+        (unidades.length === 1 ? unidades[0] : undefined)
+      if (!unidade || !unidade.address.trim()) {
+        throw new Error(
+          unidade
+            ? `A unidade "${unidade.name}" está sem endereço. Preencha em Agenda → Unidades antes de prescrever.`
+            : `A unidade "${consultation?.unidade || patient.unidade || '(vazia)'}" não está cadastrada. Cadastre em Agenda → Unidades, com endereço, e escolha essa unidade na consulta.`,
+        )
+      }
+      if (!dadosDaClinica.telefone.trim()) {
+        throw new Error('Preencha o telefone da clínica em Preferências → Médico e clínica antes de prescrever.')
+      }
+      const local: LocalDeAtendimento = {
+        nome: unidade.name,
+        endereco: unidade.address,
+        telefone: dadosDaClinica.telefone,
       }
       await abrirPrescricao(patient, consultation, {
         onReceita: (dados) => {
@@ -2382,7 +2392,7 @@ export default function PatientRecord({
         .includes(termo),
     )
   })()
-  const [form, setForm] = useState<ConsultationDraft>(() => emptyConsultation(patient))
+  const [form, setForm] = useState<ConsultationDraft>(() => emptyConsultation(patient, unidadesDaClinica[0]))
   const [editingConsultationId, setEditingConsultationId] = useState<string | null>(null)
   const consultaEmEdicaoAssinada = Boolean(
     editingConsultationId &&
@@ -2418,7 +2428,7 @@ export default function PatientRecord({
   useEffect(() => {
     if (!open || !patient) return
     setMode(startInConsultationForm ? 'form' : 'history')
-    setForm(emptyConsultation(patient))
+    setForm(emptyConsultation(patient, unidadesDaClinica[0]))
     setEditingConsultationId(null)
     setFormError('')
     void load(patient.id)
@@ -2435,7 +2445,7 @@ export default function PatientRecord({
   }
 
   function startNewConsultation() {
-    setForm(emptyConsultation(patient))
+    setForm(emptyConsultation(patient, unidadesDaClinica[0]))
     setEditingConsultationId(null)
     setFormError('')
     setMode('form')
@@ -2481,7 +2491,7 @@ export default function PatientRecord({
       }
       setMode('history')
       setEditingConsultationId(null)
-      setForm(emptyConsultation(patient))
+      setForm(emptyConsultation(patient, unidadesDaClinica[0]))
       await load(patient.id)
     } catch (cause) {
       setFormError(cause instanceof Error ? cause.message : 'Não foi possível salvar esta consulta.')

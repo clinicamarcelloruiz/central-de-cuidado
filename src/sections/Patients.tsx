@@ -20,7 +20,7 @@ import type { Consultation, ConsultationDraft, Patient } from '@/types/patient'
 import type { PatientDraft } from '@/lib/store'
 import PatientRecord from '@/sections/PatientRecord'
 import { fmtBR, idade } from '@/lib/followup'
-import { FOLLOWUP_LABEL, UNIDADES } from '@/types/patient'
+import { FOLLOWUP_LABEL } from '@/types/patient'
 import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
 import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco'
 import {
@@ -89,7 +89,7 @@ function unidadeEquivalente(nomeDaAgenda: string, opcoes: string[]): string | nu
   return opcoes.find((opcao) => limpar(opcao) === alvo) ?? null
 }
 
-function emptyDraft(): PatientDraft {
+function emptyDraft(unidadePadrao = ''): PatientDraft {
   return {
     nome: '',
     responsavel: '',
@@ -102,7 +102,7 @@ function emptyDraft(): PatientDraft {
     bairro: '',
     convenio: '',
     cid: '',
-    unidade: UNIDADES[0],
+    unidade: unidadePadrao,
     dataConsulta: new Date().toISOString().slice(0, 10),
     observacoes: '',
   }
@@ -276,7 +276,7 @@ export default function Patients({
           ...((sexoPeloNome(preCadastro.nome) && { sexo: sexoPeloNome(preCadastro.nome)! }) || {}),
         }
       : {}
-    setForm({ ...emptyDraft(), ...sugerido })
+    setForm({ ...emptyDraft(unidadesDaClinica[0]), ...sugerido })
     setSexoSugerido(Boolean(preCadastro?.nome && sexoPeloNome(preCadastro.nome)))
     setError('')
     setFormOpen(true)
@@ -360,7 +360,7 @@ export default function Patients({
   function createNew() {
     setEditingId(null)
     setSexoSugerido(false)
-    setForm(emptyDraft())
+    setForm(emptyDraft(unidadesDaClinica[0]))
     setError('')
     setFormOpen(true)
   }
