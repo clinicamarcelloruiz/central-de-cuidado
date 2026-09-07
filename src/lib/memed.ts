@@ -16,8 +16,12 @@ import type { Consultation, Patient } from '@/types/patient'
 
 const URL_SCRIPT_HOMOLOGACAO =
   'https://integrations.memed.com.br/modulos/plataforma.sinapse-prescricao/build/sinapse-prescricao.min.js'
-const URL_SCRIPT_PRODUCAO =
-  'https://memed.com.br/modulos/plataforma.sinapse-prescricao/build/sinapse-prescricao.min.js'
+// Em producao a Memed serve o script por outro endereco (documentacao de
+// boas praticas, 2026). O de homologacao e o "sinapse-prescricao.min.js".
+const URL_SCRIPT_PRODUCAO = 'https://partners.memed.com.br/integration.js'
+// Id fixo exigido pela homologacao da Memed: e por ele que se garante que o
+// script entrou uma unica vez na pagina.
+const ID_SCRIPT = 'memed-prescricao-script'
 
 /** Os objetos que a Memed pendura no window quando o script carrega. */
 type MemedGlobal = {
@@ -58,9 +62,13 @@ const ouvintes: Ouvintes = {}
  */
 async function carregarScript(token: string, producao: boolean) {
   if (carregando) return carregando
+  // Guarda exigida pela Memed: se o script ja esta na pagina (por exemplo,
+  // depois de um hot reload), nao entra de novo.
+  if (document.getElementById(ID_SCRIPT) && janela().MdHub) return Promise.resolve()
 
   carregando = new Promise<void>((resolve, reject) => {
     const script = document.createElement('script')
+    script.id = ID_SCRIPT
     script.src = producao ? URL_SCRIPT_PRODUCAO : URL_SCRIPT_HOMOLOGACAO
     script.dataset.token = token
     script.async = true
@@ -87,9 +95,16 @@ async function carregarScript(token: string, producao: boolean) {
           const excluida = dados as { id?: string | number }
           if (excluida?.id !== undefined) ouvintes.onExcluida?.(String(excluida.id))
         })
-        hub.event.add('module:hide', () => ouvintes.onFechar?.())
 
         resolve()
+      })
+
+      // Fechamento do modulo e evento do MdSinapsePrescricao, nao do MdHub.
+      memed.MdSinapsePrescricao.event.add('core:moduleHide', (modulo) => {
+        const dados = modulo as { moduleName?: string; name?: string }
+        const nome = dados?.moduleName ?? dados?.name
+        if (nome && nome !== 'plataforma.prescricao') return
+        ouvintes.onFechar?.()
       })
     }
 
@@ -119,7 +134,10 @@ async function tokenDoPrescritor() {
     }
     throw new Error('Não foi possível conectar à Memed.')
   }
-  return (data as { token: string }).token
+  // O ambiente vem do servidor, que e quem tem as chaves: assim a tela nunca
+  // carrega o script de producao com token de homologacao, nem o contrario.
+  const resposta = data as { token: string; ambiente?: string }
+  return { token: resposta.token, producao: resposta.ambiente === 'producao' }
 }
 
 /**
@@ -156,8 +174,7 @@ export async function abrirPrescricao(
   consultation: Consultation | null,
   ouvir: Ouvintes,
 ) {
-  const producao = import.meta.env.VITE_MEMED_AMBIENTE === 'producao'
-  const token = await tokenDoPrescritor()
+  const { token, producao } = await tokenDoPrescritor()
   await carregarScript(token, producao)
 
   ouvintes.onReceita = ouvir.onReceita
@@ -170,7 +187,9 @@ export async function abrirPrescricao(
   const primeiroNome = patient.nome.trim().split(/\s+/)[0] ?? patient.nome
 
   await hub.command.send('plataforma.prescricao', 'setPaciente', {
-    idExterno: patient.id,
+    // Prefixo do parceiro, como a Memed pede: o id sozinho colidiria com o
+    // de outros sistemas no ambiente compartilhado de homologacao.
+    idExterno: `central-de-cuidado-${patient.id}`,
     nome: patient.nome,
     sexo: SEXO[patient.sexo] ?? 'Outro',
     cpf: patient.cpf?.replace(/\D/g, '') || undefined,
@@ -190,8 +209,10 @@ export async function abrirPrescricao(
   if (consultation?.unidade) {
     try {
       await hub.command.send('plataforma.prescricao', 'setWorkplace', {
-        externalId: consultation.unidade,
-        name: consultation.unidade,
+        id: `central-de-cuidado-${consultation.unidade}`,
+        nome: consultation.unidade,
+        cidade: consultation.unidade.split('·').pop()?.trim() || undefined,
+        uf: 'SP',
       })
     } catch {
       // Local e detalhe do rodape: se a Memed recusar, a receita ainda sai.
