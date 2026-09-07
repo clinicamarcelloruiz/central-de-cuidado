@@ -212,26 +212,10 @@ export async function abrirPrescricao(
 
   const primeiroNome = patient.nome.trim().split(/\s+/)[0] ?? patient.nome
 
-  await hub.command.send('plataforma.prescricao', 'setPaciente', {
-    // Prefixo do parceiro, como a Memed pede: o id sozinho colidiria com o
-    // de outros sistemas no ambiente compartilhado de homologacao.
-    idExterno: `central-de-cuidado-${patient.id}`,
-    nome: patient.nome,
-    sexo: SEXO[patient.sexo] ?? 'Outro',
-    cpf: patient.cpf?.replace(/\D/g, '') || undefined,
-    data_nascimento: patient.nascimento ? dataBR(patient.nascimento) : undefined,
-    telefone: patient.telefone?.replace(/\D/g, '') || undefined,
-    email: patient.email || undefined,
-    nome_mae: patient.responsavel || undefined,
-    peso: consultation?.peso ? Number(consultation.peso.replace(',', '.')) : undefined,
-    altura: consultation?.altura
-      ? Number(consultation.altura.replace(',', '.')) / 100
-      : undefined,
-    cidade: patient.cidade || undefined,
-  })
-
   // O local de atendimento sai impresso no rodape da receita, e a Memed passou
-  // a exigir endereco e telefone do local na identificacao. Vai o endereco da
+  // a exigir endereco e telefone do local na identificacao. Vai ANTES do
+  // paciente, na ordem que a Memed documenta: depois, o modulo ignorava e a
+  // receita saia sem endereco nem telefone. Vai o endereco da
   // unidade cadastrada na Agenda; sem ele o medico teria de digitar a cada
   // receita.
   const nomeDoLocal = local?.nome ?? consultation?.unidade
@@ -249,6 +233,24 @@ export async function abrirPrescricao(
       // Local e detalhe do rodape: se a Memed recusar, a receita ainda sai.
     }
   }
+
+  await hub.command.send('plataforma.prescricao', 'setPaciente', {
+    // Prefixo do parceiro, como a Memed pede: o id sozinho colidiria com o
+    // de outros sistemas no ambiente compartilhado de homologacao.
+    idExterno: `central-de-cuidado-${patient.id}`,
+    nome: patient.nome,
+    sexo: SEXO[patient.sexo] ?? 'Outro',
+    cpf: patient.cpf?.replace(/\D/g, '') || undefined,
+    data_nascimento: patient.nascimento ? dataBR(patient.nascimento) : undefined,
+    telefone: patient.telefone?.replace(/\D/g, '') || undefined,
+    email: patient.email || undefined,
+    nome_mae: patient.responsavel || undefined,
+    peso: consultation?.peso ? Number(consultation.peso.replace(',', '.')) : undefined,
+    altura: consultation?.altura
+      ? Number(consultation.altura.replace(',', '.')) / 100
+      : undefined,
+    cidade: patient.cidade || undefined,
+  })
 
   await hub.module.show('plataforma.prescricao')
   return primeiroNome

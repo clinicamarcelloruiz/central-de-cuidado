@@ -2143,7 +2143,12 @@ export default function PatientRecord({
           void (async () => {
             try {
               await guardarReceita(patient.id, consultation?.id ?? null, dados)
-              if (clinicId) setReceitas(await listPrescriptions(clinicId, patient.id))
+              let lista: Receita[] = []
+              if (clinicId) {
+                lista = await listPrescriptions(clinicId, patient.id)
+                setReceitas(lista)
+              }
+              await copiarReceitaParaPrescricao(consultation, lista)
               setAviso({ tipo: 'ok', texto: 'Receita emitida e guardada no prontuário.' })
             } catch (causa) {
               setAviso({
@@ -2168,6 +2173,44 @@ export default function PatientRecord({
     } finally {
       setPrescrevendo(false)
     }
+  }
+
+  /**
+   * Leva os itens da receita da Memed para o campo "Prescrição" da consulta.
+   *
+   * A receita ja fica arquivada a parte, com link; mas o medico espera ler o
+   * que prescreveu no proprio texto do atendimento, e e esse texto que sai na
+   * impressao e vai para a assinatura. Copia so o que ainda nao esta la, e
+   * nunca mexe em consulta assinada: o PDF assinado e o que vale.
+   */
+  async function copiarReceitaParaPrescricao(consultation: Consultation | null, lista: Receita[]) {
+    if (!patient || !consultation || consultation.assinadoEm) return
+    const receita = lista.find((r) => r.consultationId === consultation.id && !r.excluidaEm)
+    if (!receita || receita.itens.length === 0) return
+
+    const atual = editingConsultationId === consultation.id ? form.prescricao : consultation.prescricao
+    // O campo guarda HTML quando foi escrito no editor e texto puro quando
+    // veio de fora; a comparacao e o acrescimo respeitam o formato que ja esta.
+    const emHtml = /[<>]|&[a-z]+;|&#\d+;/i.test(atual)
+    const textoAtual = emHtml ? atual.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ') : atual
+    const linhas = receita.itens
+      .map((item) => (item.posologia ? `${item.nome}: ${item.posologia}` : item.nome))
+      .filter((linha) => !textoAtual.includes(linha))
+    if (linhas.length === 0) return
+
+    const titulo = `Receita Memed de ${fmtBR(receita.emitidaEm.slice(0, 10))}`
+    const texto = emHtml
+      ? `${atual}<p><strong>${escapeHtml(titulo)}</strong><br>${linhas.map(escapeHtml).join('<br>')}</p>`
+      : [atual.trim(), `${titulo}\n${linhas.join('\n')}`].filter(Boolean).join('\n\n')
+
+    if (editingConsultationId === consultation.id) {
+      set('prescricao', texto)
+    }
+    await updateConsultation(patient.id, consultation.id, {
+      ...consultationToDraft(consultation),
+      prescricao: texto,
+    })
+    await load(patient.id)
   }
 
   /**
