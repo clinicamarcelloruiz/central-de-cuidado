@@ -136,9 +136,16 @@ async function tokenDoPrescritor() {
   }
   // O ambiente vem do servidor, que e quem tem as chaves: assim a tela nunca
   // carrega o script de producao com token de homologacao, nem o contrario.
-  const resposta = data as { token: string; ambiente?: string }
-  return { token: resposta.token, producao: resposta.ambiente === 'producao' }
+  const resposta = data as {
+    token: string
+    ambiente?: string
+    cadastro?: { feito: boolean; detalhe?: string }
+  }
+  return { token: resposta.token, producao: resposta.ambiente === 'producao', cadastro: resposta.cadastro }
 }
+
+/** Resultado da ultima tentativa de completar o cadastro do medico na Memed. */
+export let ultimoCadastro: { feito: boolean; detalhe?: string } | undefined
 
 /**
  * O que a Memed precisa saber sobre o paciente.
@@ -169,12 +176,20 @@ const SEXO: Record<string, string> = { F: 'Feminino', M: 'Masculino', O: 'Outro'
  * alerta na hora de prescrever. E a parte da integracao que deixa de ser
  * conveniencia e vira seguranca.
  */
+export type LocalDeAtendimento = {
+  nome: string
+  endereco?: string
+  telefone?: string
+}
+
 export async function abrirPrescricao(
   patient: Patient,
   consultation: Consultation | null,
   ouvir: Ouvintes,
+  local?: LocalDeAtendimento | null,
 ) {
-  const { token, producao } = await tokenDoPrescritor()
+  const { token, producao, cadastro } = await tokenDoPrescritor()
+  ultimoCadastro = cadastro
   await carregarScript(token, producao)
 
   ouvintes.onReceita = ouvir.onReceita
@@ -183,6 +198,17 @@ export async function abrirPrescricao(
 
   const hub = janela().MdHub
   if (!hub) throw new Error('A prescrição da Memed não está pronta.')
+
+  // So o VIDaaS na lista de certificadoras: e o certificado que o medico ja
+  // usa para assinar o prontuario. Sem isto a Memed oferece sete opcoes e a
+  // pessoa tem de saber qual e a sua. O resto fica no padrao da Memed.
+  try {
+    await hub.command.send('plataforma.prescricao', 'setFeatureToggle', {
+      setAllowedSignatureProviders: ['vidaas'],
+    })
+  } catch {
+    // Preferencia de tela: se a Memed recusar, a prescricao segue igual.
+  }
 
   const primeiroNome = patient.nome.trim().split(/\s+/)[0] ?? patient.nome
 
@@ -204,14 +230,19 @@ export async function abrirPrescricao(
     cidade: patient.cidade || undefined,
   })
 
-  // O local de atendimento sai impresso no rodape da receita. Sem ele a receita
-  // do medico sai com "Não há endereço cadastrado", como saiu ate hoje.
-  if (consultation?.unidade) {
+  // O local de atendimento sai impresso no rodape da receita, e a Memed passou
+  // a exigir endereco e telefone do local na identificacao. Vai o endereco da
+  // unidade cadastrada na Agenda; sem ele o medico teria de digitar a cada
+  // receita.
+  const nomeDoLocal = local?.nome ?? consultation?.unidade
+  if (nomeDoLocal) {
     try {
       await hub.command.send('plataforma.prescricao', 'setWorkplace', {
-        id: `central-de-cuidado-${consultation.unidade}`,
-        nome: consultation.unidade,
-        cidade: consultation.unidade.split('·').pop()?.trim() || undefined,
+        id: `central-de-cuidado-${nomeDoLocal}`,
+        nome: nomeDoLocal,
+        endereco: local?.endereco || undefined,
+        telefone: local?.telefone || undefined,
+        cidade: nomeDoLocal.split('·').pop()?.trim() || undefined,
         uf: 'SP',
       })
     } catch {

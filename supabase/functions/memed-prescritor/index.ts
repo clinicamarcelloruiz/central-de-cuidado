@@ -61,6 +61,117 @@ function dataBR(iso: string) {
   return `${dia}/${mes}/${ano}`
 }
 
+type Ajustes = {
+  clinic_id: string
+  signer_name: string | null
+  signer_crm: string | null
+  prescriber_email: string | null
+  prescriber_birth_date: string | null
+  prescriber_specialty_id: number | null
+  prescriber_city_id: number | null
+  memed_cadastro_completo_em: string | null
+}
+
+/** Telefone que a Memed guarda no cadastro do prescritor: o fixo da clinica. */
+const TELEFONE_DA_CLINICA = '1332736828'
+
+/**
+ * Id da especialidade na tabela da Memed, procurado pelo nome.
+ *
+ * Pelo nome, e nao por numero fixo, porque os ids de homologacao e de
+ * producao nao sao garantidamente os mesmos.
+ */
+async function idDaEspecialidade(api: string, credenciais: string) {
+  const resposta = await fetch(`${api}/especialidades?${credenciais}`, { headers: CABECALHOS })
+  if (!resposta.ok) return null
+  const corpo = await resposta.json()
+  const lista = (corpo?.data ?? []) as { id: number; attributes?: { nome?: string } }[]
+  const alvo = lista.find((e) => /gastro.*pedi/i.test(e.attributes?.nome ?? ''))
+  return alvo?.id ?? null
+}
+
+/** Id de Santos/SP na tabela de cidades da Memed (paginada de 100 em 100). */
+async function idDaCidade(api: string, credenciais: string, nome: string, uf: string) {
+  for (let offset = 0; offset < 1000; offset += 100) {
+    const resposta = await fetch(
+      `${api}/cidades?${credenciais}&filter[uf]=${uf}&page[offset]=${offset}`,
+      { headers: CABECALHOS },
+    )
+    if (!resposta.ok) return null
+    const corpo = await resposta.json()
+    const lista = (corpo?.data ?? []) as { id: number; attributes?: { nome?: string } }[]
+    const alvo = lista.find((c) => (c.attributes?.nome ?? '').toLowerCase() === nome.toLowerCase())
+    if (alvo) return alvo.id
+    if (lista.length < 100) break
+  }
+  return null
+}
+
+/**
+ * Completa o cadastro do prescritor na Memed, uma vez so.
+ *
+ * A liberacao das chaves de producao exige e-mail, especialidade e cidade no
+ * cadastro; sem isso o medico teria de preencher dentro da plataforma deles.
+ * Roda uma unica vez (marca a data) e nao derruba a prescricao se falhar.
+ */
+async function completarCadastro(
+  api: string,
+  credenciais: string,
+  cpf: string,
+  ajustes: Ajustes,
+): Promise<{ feito: boolean; detalhe?: string }> {
+  if (ajustes.memed_cadastro_completo_em) return { feito: true, detalhe: 'ja estava completo' }
+
+  const especialidade = ajustes.prescriber_specialty_id ?? (await idDaEspecialidade(api, credenciais))
+  const cidade = ajustes.prescriber_city_id ?? (await idDaCidade(api, credenciais, 'Santos', 'SP'))
+
+  const relationships: Record<string, unknown> = {}
+  if (especialidade) relationships.especialidade = { data: { type: 'especialidades', id: especialidade } }
+  if (cidade) relationships.cidade = { data: { type: 'cidades', id: cidade } }
+
+  const resposta = await fetch(`${api}/sinapse-prescricao/usuarios/${cpf}?${credenciais}`, {
+    method: 'PATCH',
+    headers: CABECALHOS,
+    body: JSON.stringify({
+      data: {
+        type: 'usuarios',
+        attributes: {
+          ...(ajustes.prescriber_email ? { email: ajustes.prescriber_email } : {}),
+          telefone: TELEFONE_DA_CLINICA,
+          sexo: 'M',
+        },
+        ...(Object.keys(relationships).length ? { relationships } : {}),
+      },
+    }),
+  })
+
+  if (!resposta.ok) {
+    const texto = await resposta.text()
+    console.error('Memed recusou completar o cadastro', resposta.status, texto)
+    return { feito: false, detalhe: `${resposta.status}: ${texto.slice(0, 300)}` }
+  }
+
+  await adminClient()
+    .from('clinic_settings')
+    .update({
+      memed_cadastro_completo_em: new Date().toISOString(),
+      ...(especialidade ? { prescriber_specialty_id: especialidade } : {}),
+      ...(cidade ? { prescriber_city_id: cidade } : {}),
+    })
+    .eq('clinic_id', ajustes.clinic_id)
+  return { feito: true, detalhe: `especialidade ${especialidade ?? '?'}, cidade ${cidade ?? '?'}` }
+}
+
+/** Especialidade e cidade para o cadastro novo, no formato da Memed. */
+async function relacionamentosDoCadastro(api: string, credenciais: string, ajustes: Ajustes) {
+  const especialidade = ajustes.prescriber_specialty_id ?? (await idDaEspecialidade(api, credenciais))
+  const cidade = ajustes.prescriber_city_id ?? (await idDaCidade(api, credenciais, 'Santos', 'SP'))
+  const relationships: Record<string, unknown> = {}
+  if (especialidade) relationships.especialidade = { data: { type: 'especialidades', id: especialidade } }
+  if (cidade) relationships.cidade = { data: { type: 'cidades', id: cidade } }
+  return Object.keys(relationships).length ? { relationships } : {}
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'Método não permitido.' }, 405)
@@ -75,7 +186,7 @@ Deno.serve(async (req) => {
     // Sem membership ativo nao vem linha nenhuma, e a funcao para aqui.
     const { data: ajustes } = await escopo
       .from('clinic_settings')
-      .select('clinic_id,signer_name,signer_crm,prescriber_email,prescriber_birth_date')
+      .select('clinic_id,signer_name,signer_crm,prescriber_email,prescriber_birth_date,prescriber_specialty_id,prescriber_city_id,memed_cadastro_completo_em')
       .maybeSingle()
 
     if (!ajustes) return json({ error: 'Clínica não encontrada.', code: 'SEM_CLINICA' }, 403)
@@ -117,7 +228,17 @@ Deno.serve(async (req) => {
         }, 409)
       }
 
-      return json({ token, novo: false, ambiente: producaoAtiva() ? 'producao' : 'homologacao' })
+      // Cadastro ja existia (caso de hoje): completa o que a Memed exige
+      // para producao, sem atrapalhar a prescricao se algo falhar.
+      let cadastro: { feito: boolean; detalhe?: string }
+      try {
+        cadastro = await completarCadastro(env.api, credenciais, cpf, ajustes as Ajustes)
+      } catch (causa) {
+        console.error('Nao consegui completar o cadastro na Memed', causa)
+        cadastro = { feito: false, detalhe: causa instanceof Error ? causa.message : String(causa) }
+      }
+
+      return json({ token, novo: false, ambiente: producaoAtiva() ? 'producao' : 'homologacao', cadastro })
     }
 
     // Qualquer coisa que nao seja "nao encontrei" e problema de verdade, e
@@ -180,8 +301,11 @@ Deno.serve(async (req) => {
               board_state: 'SP',
             },
             ...(ajustes.prescriber_email ? { email: ajustes.prescriber_email } : {}),
+            telefone: TELEFONE_DA_CLINICA,
+            sexo: 'M',
             data_nascimento: dataBR(ajustes.prescriber_birth_date),
           },
+          ...(await relacionamentosDoCadastro(env.api, credenciais, ajustes as Ajustes)),
         },
       }),
     })

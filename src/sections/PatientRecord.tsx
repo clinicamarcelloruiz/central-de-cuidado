@@ -63,6 +63,7 @@ import {
   type Integridade,
   type NoteTemplate,
   type Receita,
+  listUnits,
 } from '@/lib/repository'
 import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco'
 import type {
@@ -73,7 +74,7 @@ import type {
 } from '@/types/patient'
 import { UNIDADES } from '@/types/patient'
 import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
-import { abrirPrescricao, faltaParaPrescrever, guardarReceita, marcarReceitaExcluida } from '@/lib/memed'
+import { abrirPrescricao, faltaParaPrescrever, guardarReceita, marcarReceitaExcluida, ultimoCadastro, type LocalDeAtendimento } from '@/lib/memed'
 
 interface PatientRecordProps {
   patient: Patient | null
@@ -457,6 +458,13 @@ function normalizeEditorColor(value: string) {
     return compact === hex || compact === `rgb(${red},${green},${blue})`
   })?.value
 }
+
+/**
+ * Telefone que sai no rodape da receita da Memed. E o fixo da clinica, que
+ * atende em qualquer unidade; o WhatsApp de agendamento e do robo e nao deve
+ * ir para o papel como telefone de contato com o medico.
+ */
+const TELEFONE_DA_CLINICA = '(13) 3273-6828'
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[character] ?? character)
@@ -2119,6 +2127,17 @@ export default function PatientRecord({
 
     setPrescrevendo(true)
     try {
+      // Endereco da unidade, para o rodape da receita e para a identificacao
+      // que a Memed exige. Vem da Agenda; se faltar, a Memed pede na tela.
+      let local: LocalDeAtendimento | null = null
+      if (clinicId && consultation?.unidade) {
+        try {
+          const unidade = (await listUnits(clinicId)).find((u) => u.name === consultation.unidade)
+          if (unidade) local = { nome: unidade.name, endereco: unidade.address || undefined, telefone: TELEFONE_DA_CLINICA }
+        } catch {
+          // Sem endereco a receita ainda sai; o medico completa na tela.
+        }
+      }
       await abrirPrescricao(patient, consultation, {
         onReceita: (dados) => {
           void (async () => {
@@ -2135,7 +2154,12 @@ export default function PatientRecord({
           })()
         },
         onExcluida: (id) => void marcarReceitaExcluida(id),
-      })
+      }, local)
+      // Diagnostico do cadastro do medico na Memed, enquanto a liberacao de
+      // producao esta em andamento. Some sozinho quando estiver completo.
+      if (ultimoCadastro && !ultimoCadastro.feito) {
+        setAviso({ tipo: 'erro', texto: `Cadastro do médico na Memed não foi completado: ${ultimoCadastro.detalhe ?? 'sem detalhe'}` })
+      }
     } catch (causa) {
       setAviso({
         tipo: 'erro',
