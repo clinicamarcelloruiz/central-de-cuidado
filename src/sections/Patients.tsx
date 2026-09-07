@@ -21,6 +21,7 @@ import PatientRecord from '@/sections/PatientRecord'
 import { fmtBR, idade } from '@/lib/followup'
 import { FOLLOWUP_LABEL, UNIDADES } from '@/types/patient'
 import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
+import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco'
 import {
   Sheet,
   SheetContent,
@@ -300,15 +301,13 @@ export default function Patients({
    * com o numero do pedido, depois de concluir a assinatura.
    */
   useEffect(() => {
-    const endereco = new URL(window.location.href)
-    const paciente = endereco.searchParams.get('paciente')
+    const paciente = parametrosDoEndereco().get('paciente')
     if (!paciente) return
 
     setRecordPatientId(paciente)
     // Limpa depois de usar: sem isto, um F5 reabriria o prontuario sozinho
     // toda vez, e a pessoa nao entenderia por que.
-    endereco.searchParams.delete('paciente')
-    window.history.replaceState({}, '', endereco.toString())
+    apagarParametrosDoEndereco(['paciente'])
   }, [])
 
   function set<K extends keyof PatientDraft>(key: K, value: PatientDraft[K]) {

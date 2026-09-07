@@ -1711,9 +1711,13 @@ export async function iniciarAssinatura(consultationId: string, voltarPara: stri
   if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível pedir a autorização.'))
   // "recuperado": havia um documento assinado e arquivado que so faltava
   // registrar. Nao ha celular nem aba nova neste caso - ja esta assinado.
+  // "sessaoAtiva": o medico ja aprovou neste turno; o pedido assina direto,
+  // sem VIDaaS. "recuperado": havia documento assinado que so faltava
+  // registrar. Nos dois casos nao ha celular nem aba nova.
   return data as
-    | { pedido: string; autorizarEm: string; expiraEm?: string; recuperado?: false }
-    | { recuperado: true; assinadoEm: string; pedido?: undefined; autorizarEm?: undefined; expiraEm?: undefined }
+    | { pedido: string; autorizarEm: string; expiraEm?: string; recuperado?: false; sessaoAtiva?: false }
+    | { pedido: string; sessaoAtiva: true; expiraEm?: string; autorizarEm?: undefined; recuperado?: false }
+    | { recuperado: true; assinadoEm: string; pedido?: undefined; autorizarEm?: undefined; expiraEm?: undefined; sessaoAtiva?: false }
 }
 
 export type ResultadoDaAssinatura =
