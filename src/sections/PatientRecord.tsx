@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from 'react'
+import { Ajuda } from '@/components/Ajuda'
 import { invokeWithFormData } from '@/lib/supabase'
 import {
   AlertTriangle,
@@ -2635,6 +2636,12 @@ export default function PatientRecord({
                         ? 'Integridade violada'
                         : 'Íntegro'}
                   </button>
+                )}
+                {integridade && (
+                  <Ajuda
+                    className="-ml-1 self-center"
+                    texto="Cada registro do prontuário recebe uma impressão digital encadeada ao anterior. 'Íntegro' quer dizer que a corrente foi conferida agora e nada foi alterado fora do sistema. Clique no selo para conferir de novo."
+                  />
                 )}
                 <button
                   type="button"
