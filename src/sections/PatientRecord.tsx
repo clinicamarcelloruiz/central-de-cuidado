@@ -622,31 +622,50 @@ async function imprimirProntuario(
   const digital = await impressaoDigital(`${cabecalhoPaciente}||${corpo}`)
   const parVisivel = (v: string) => v.replace(/(.{8})/g, '$1 ').trim()
 
-  const selo = `
-    <div class="selo">
-      <div><span>Impressão digital deste documento</span><code>${parVisivel(digital)}</code></div>
+  // Linhas de codigo que provam que o papel corresponde ao registro. Sao as
+  // mesmas nos dois desenhos abaixo; muda so o peso que recebem.
+  const linhasDeIntegridade = `
+      <div class="h">Impressão digital <code>${parVisivel(digital)}</code></div>
       ${
         integridade?.selo
-          ? `<div><span>Selo do acervo neste instante</span><code>${parVisivel(integridade.selo.slice(0, 32))}…</code></div>
-             <div><span>Cadeia de auditoria</span><code>${
-               integridade.quebradoNoId
-                 ? `ADULTERAÇÃO DETECTADA no registro ${integridade.quebradoNoId}`
-                 : `${integridade.encadeados} registros conferidos, íntegra`
-             }</code></div>`
+          ? `<div class="h">Acervo <code>${parVisivel(integridade.selo.slice(0, 32))}…</code> · ${
+              integridade.quebradoNoId
+                ? `<b class="alerta">ADULTERAÇÃO DETECTADA no registro ${integridade.quebradoNoId}</b>`
+                : `${integridade.encadeados} registros conferidos, íntegra`
+            }</div>`
           : ''
-      }
-      ${
-        assinadas.length > 0
-          ? `<div><span>Assinatura digital ICP-Brasil</span><code>${assinadas
-              .map((c) => `${fmtBR(c.data)} · ${c.assinadoPor ?? 'certificado do médico'}`)
-              .join('<br>')}</code></div>`
-          : ''
-      }
-      <p class="aviso">${
-        assinadas.length === consultasImpressas.length && consultasImpressas.length > 0
-          ? 'Documento assinado digitalmente com certificado ICP-Brasil. A impressão digital comprova que ele não foi alterado depois de emitido.'
-          : 'A impressão digital comprova que este documento não foi alterado depois de emitido. Não substitui assinatura digital ICP-Brasil.'
-      }</p>
+      }`
+
+  const quemAssinou = assinadas[0]?.assinadoPor ?? 'certificado do médico'
+  const todasAssinadas = assinadas.length === consultasImpressas.length && consultasImpressas.length > 0
+
+  // Chancela (proposta 2, escolhida em 06/09/2026): a assinatura em primeiro
+  // plano - quem, quando, com que certificado - e os codigos em segundo. Quem
+  // recebe o papel pergunta primeiro "quem assinou?"; o hash e para quem
+  // quiser conferir depois. Sem assinatura, o bloco volta a ser neutro: nao
+  // pode parecer carimbo o que nao e.
+  const selo = assinadas.length > 0
+    ? `
+    <div class="carimbo">
+      <div class="marca">✓</div>
+      <div>
+        <p class="t">Documento assinado digitalmente${todasAssinadas ? '' : ' (em parte)'}</p>
+        <p class="quem">${escapeHtml(quemAssinou)}</p>
+        <p class="quando">${assinadas
+          .map((c) => `Consulta de ${fmtBR(c.data)} · assinada em ${c.assinadoEm ? fmtBR(c.assinadoEm.slice(0, 10)) : 'sem data'}`)
+          .join('<br>')} · certificado ICP-Brasil (VIDaaS)</p>
+        ${linhasDeIntegridade}
+        ${
+          todasAssinadas
+            ? ''
+            : `<p class="aviso">As consultas não listadas acima ainda não foram assinadas digitalmente.</p>`
+        }
+      </div>
+    </div>`
+    : `
+    <div class="selo">
+      ${linhasDeIntegridade}
+      <p class="aviso">A impressão digital comprova que este documento não foi alterado depois de emitido. Não substitui assinatura digital ICP-Brasil.</p>
     </div>`
 
   const documento = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
@@ -676,10 +695,17 @@ async function imprimirProntuario(
       footer { margin-top: 32px; border-top: 1px solid #d4d9de; padding-top: 10px; font-size: 9pt; color: #7b858e; }
       footer p { margin: 0 0 8px; }
       .selo { border: 1px solid #d4d9de; border-radius: 4px; padding: 8px 10px; font-size: 8pt; break-inside: avoid; page-break-inside: avoid; }
-      .selo div { display: flex; gap: 8px; margin-bottom: 3px; }
-      .selo span { min-width: 175px; color: #7b858e; }
-      .selo code { font-family: 'Courier New', monospace; color: #14202c; letter-spacing: .02em; word-break: break-all; }
       .selo .aviso { margin: 6px 0 0; font-size: 7.5pt; font-style: italic; }
+      .h { font-size: 7pt; color: #7b858e; margin: 0 0 2px; }
+      .h code { font-family: 'Courier New', monospace; color: #55606b; letter-spacing: .02em; word-break: break-all; }
+      .h .alerta { color: #b42318; }
+      .carimbo { display: grid; grid-template-columns: auto 1fr; gap: 14px; border: 1.5px solid #1c6b3a; border-radius: 8px; padding: 12px 14px; font-size: 8pt; break-inside: avoid; page-break-inside: avoid; color: #14202c; }
+      .carimbo .marca { width: 46px; height: 46px; border-radius: 50%; border: 1.5px solid #1c6b3a; display: flex; align-items: center; justify-content: center; color: #1c6b3a; font-size: 22px; }
+      .carimbo .t { font-family: Arial, Helvetica, sans-serif; font-size: 8pt; letter-spacing: .14em; text-transform: uppercase; color: #1c6b3a; font-weight: bold; margin: 0 0 2px; }
+      .carimbo .quem { font-size: 12pt; margin: 0; }
+      .carimbo .quando { font-size: 9pt; color: #55606b; margin: 2px 0 6px; }
+      .carimbo .aviso { margin: 6px 0 0; font-size: 7.5pt; font-style: italic; color: #7b858e; }
+      @media print { .carimbo, .carimbo .marca, .carimbo .t { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
       @page { margin: 16mm; }
     </style></head><body>
     <header>
@@ -2490,7 +2516,7 @@ export default function PatientRecord({
                 <button
                   type="button"
                   onClick={startNewConsultation}
-                  className="flex items-center justify-center gap-2 rounded-[14px] bg-[#dc8e5f] px-4 py-2.5 text-[11px] font-extrabold text-white shadow-[0_8px_18px_rgba(220,142,95,.2)] transition hover:-translate-y-0.5 hover:bg-[#cf7f50]"
+                  className="flex items-center justify-center gap-2 rounded-[14px] bg-[#1f4f78] px-4 py-2.5 text-[11px] font-extrabold text-white shadow-[0_8px_18px_rgba(31,79,120,.22)] transition hover:-translate-y-0.5 hover:bg-[#183f61]"
                 >
                   <Plus className="h-3.5 w-3.5" /> Nova consulta
                 </button>

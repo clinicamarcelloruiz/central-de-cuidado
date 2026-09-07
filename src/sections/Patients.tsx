@@ -420,7 +420,7 @@ export default function Patients({
             <button
               type="button"
               onClick={createNew}
-              className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-[#dc8e5f] px-5 py-3 text-xs font-extrabold text-white shadow-[0_10px_24px_rgba(220,142,95,.22)] transition hover:-translate-y-0.5 hover:bg-[#cf7f50]"
+              className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-[#1f4f78] px-5 py-3 text-xs font-extrabold text-white shadow-[0_10px_24px_rgba(31,79,120,.24)] transition hover:-translate-y-0.5 hover:bg-[#183f61]"
             >
               <Plus className="h-4 w-4 transition-transform group-hover:rotate-90" />
               Cadastrar paciente
