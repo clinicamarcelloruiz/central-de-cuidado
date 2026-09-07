@@ -70,10 +70,14 @@ type Ajustes = {
   prescriber_specialty_id: number | null
   prescriber_city_id: number | null
   memed_cadastro_completo_em: string | null
+  clinic_phone: string | null
 }
 
-/** Telefone que a Memed guarda no cadastro do prescritor: o fixo da clinica. */
-const TELEFONE_DA_CLINICA = '1332736828'
+/** Telefone da clinica como a Memed guarda: so digitos. Vem de Preferencias. */
+function telefoneDaClinica(ajustes: Ajustes) {
+  const digitos = soDigitos(ajustes.clinic_phone ?? '')
+  return digitos || undefined
+}
 
 /**
  * Id da especialidade na tabela da Memed, procurado pelo nome.
@@ -137,7 +141,7 @@ async function completarCadastro(
         type: 'usuarios',
         attributes: {
           ...(ajustes.prescriber_email ? { email: ajustes.prescriber_email } : {}),
-          telefone: TELEFONE_DA_CLINICA,
+          ...(telefoneDaClinica(ajustes) ? { telefone: telefoneDaClinica(ajustes) } : {}),
           sexo: 'M',
         },
         ...(Object.keys(relationships).length ? { relationships } : {}),
@@ -186,7 +190,7 @@ Deno.serve(async (req) => {
     // Sem membership ativo nao vem linha nenhuma, e a funcao para aqui.
     const { data: ajustes } = await escopo
       .from('clinic_settings')
-      .select('clinic_id,signer_name,signer_crm,prescriber_email,prescriber_birth_date,prescriber_specialty_id,prescriber_city_id,memed_cadastro_completo_em')
+      .select('clinic_id,signer_name,signer_crm,prescriber_email,prescriber_birth_date,prescriber_specialty_id,prescriber_city_id,memed_cadastro_completo_em,clinic_phone')
       .maybeSingle()
 
     if (!ajustes) return json({ error: 'Clínica não encontrada.', code: 'SEM_CLINICA' }, 403)
@@ -301,7 +305,7 @@ Deno.serve(async (req) => {
               board_state: 'SP',
             },
             ...(ajustes.prescriber_email ? { email: ajustes.prescriber_email } : {}),
-            telefone: TELEFONE_DA_CLINICA,
+            ...(telefoneDaClinica(ajustes as Ajustes) ? { telefone: telefoneDaClinica(ajustes as Ajustes) } : {}),
             sexo: 'M',
             data_nascimento: dataBR(ajustes.prescriber_birth_date),
           },

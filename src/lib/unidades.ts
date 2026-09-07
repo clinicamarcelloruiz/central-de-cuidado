@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { getCurrentMembership, listUnits } from '@/lib/repository'
-import { UNIDADES } from '@/types/patient'
 
 /**
  * As unidades da clinica, vindas do banco.
@@ -11,8 +10,7 @@ import { UNIDADES } from '@/types/patient'
  * oferecer o certo e o cadastro continuou oferecendo o antigo - porque so um
  * dos dois lados sabia da mudanca.
  *
- * Agora ha uma fonte so. A constante `UNIDADES` continua existindo apenas como
- * rede de seguranca para o instante entre abrir a tela e a resposta chegar.
+ * Agora ha uma fonte so: a tabela de unidades, editada em Agenda.
  */
 export function useUnidades() {
   const [nomes, setNomes] = useState<string[]>([])
@@ -47,8 +45,7 @@ export function useUnidades() {
  * reescreveria a historia sem ninguem pedir.
  */
 export function opcoesDeUnidade(daClinica: string[], valorAtual?: string) {
-  const base = daClinica.length ? daClinica : [...UNIDADES].filter((u) => u !== 'Outra')
-  const lista = [...base, 'Outra']
+  const lista = [...daClinica, 'Outra']
   const atual = (valorAtual ?? '').trim()
   return atual && !lista.includes(atual) ? [atual, ...lista] : lista
 }

@@ -229,8 +229,11 @@ export async function abrirPrescricao(
         cidade: nomeDoLocal.split('·').pop()?.trim() || undefined,
         uf: 'SP',
       })
-    } catch {
+    } catch (causa) {
       // Local e detalhe do rodape: se a Memed recusar, a receita ainda sai.
+      // Mas fica registrado, porque "endereco em branco" sem pista custou
+      // uma tarde de teste.
+      console.warn('[Memed] setWorkplace recusado', causa)
     }
   }
 

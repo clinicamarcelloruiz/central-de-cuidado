@@ -16,6 +16,7 @@ import {
 import type { Db, FollowupKey } from '@/types/patient'
 import { DEFAULT_TEMPLATES } from '@/lib/store'
 import { atualizarFotoDoPerfil, situacaoDoWhatsApp, type SituacaoDoNumero } from '@/lib/repository'
+import DadosDaClinica from '@/sections/DadosDaClinica'
 
 const inputClass =
   'mt-3 min-h-[138px] w-full resize-y rounded-[18px] border border-[#081b2c]/10 bg-[#fafaf8] p-4 text-xs font-medium leading-relaxed text-[#203546] outline-none transition placeholder:text-slate-300 focus:border-[#dc8e5f] focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10'
@@ -123,6 +124,8 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_350px]">
+      <div className="space-y-5">
+      <DadosDaClinica />
       <section className="surface-card overflow-hidden rounded-[26px]">
         <div className="border-b border-[#081b2c]/[0.06] bg-gradient-to-r from-white to-[#fbf4ef] p-5 sm:p-6">
           <div className="flex items-start gap-3">
@@ -196,6 +199,7 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
           </div>
         </div>
       </section>
+      </div>
 
       <aside className="space-y-4">
         <section className="soft-grid relative overflow-hidden rounded-[26px] bg-[#081b2c] p-5 text-white shadow-[0_18px_40px_rgba(8,27,44,.14)]">
