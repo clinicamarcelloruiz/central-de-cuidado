@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Ajuda } from '@/components/Ajuda'
 import {
   AlertTriangle,
   Building2,
@@ -935,13 +936,32 @@ export default function Agenda({
                 </p>
                 <div className="mt-3 grid grid-cols-3 gap-2">
                   {[
-                    { chave: 'slotMinutes' as const, rotulo: 'Duração (min)', min: 5, max: 240 },
-                    { chave: 'horizonDays' as const, rotulo: 'Janela (dias)', min: 1, max: 180 },
-                    { chave: 'minNoticeHours' as const, rotulo: 'Antecedência (h)', min: 0, max: 168 },
+                    {
+                      chave: 'slotMinutes' as const,
+                      rotulo: 'Duração (min)',
+                      min: 5,
+                      max: 240,
+                      ajuda: 'Quanto dura cada consulta. É o tamanho de cada horário que o bot oferece pelo WhatsApp e que a agenda desenha.',
+                    },
+                    {
+                      chave: 'horizonDays' as const,
+                      rotulo: 'Janela (dias)',
+                      min: 1,
+                      max: 180,
+                      ajuda: 'Até quantos dias à frente a família pode marcar pelo WhatsApp. Com 45, o bot só oferece datas dentro dos próximos 45 dias.',
+                    },
+                    {
+                      chave: 'minNoticeHours' as const,
+                      rotulo: 'Antecedência (h)',
+                      min: 0,
+                      max: 168,
+                      ajuda: 'Antecedência mínima para marcar pelo WhatsApp. Com 2, o bot só oferece horários que comecem pelo menos 2 horas depois do momento em que a família está marcando.',
+                    },
                   ].map((campo) => (
                     <label key={campo.chave} className="block">
-                      <span className="text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
+                      <span className="flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
                         {campo.rotulo}
+                        <Ajuda texto={campo.ajuda} />
                       </span>
                       <input
                         type="number"
@@ -957,7 +977,7 @@ export default function Agenda({
                   ))}
                 </div>
                 <p className="mt-2 text-[10px] text-slate-500">
-                  A antecedência impede o paciente de marcar para daqui a poucos minutos.
+                  Valem para o agendamento pelo WhatsApp; a recepção continua marcando qualquer horário.
                 </p>
 
                 {/* Lembrete de consulta. Fica junto das preferencias porque e
