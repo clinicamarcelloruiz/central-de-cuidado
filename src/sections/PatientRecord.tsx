@@ -525,6 +525,23 @@ function formatarVariacao(atual: number | null, anterior: number | null) {
  * com rolagem propria, e mandar imprimir a pagina como esta cortaria o
  * conteudo. Aqui o documento nasce ja no formato de papel.
  */
+/**
+ * Data e hora de um instante, no fuso da clinica.
+ *
+ * O banco guarda em UTC. Cortar os dez primeiros caracteres dava o dia de
+ * Londres: uma assinatura as 22:40 de 06/09 saia impressa como 07/09.
+ */
+function dataHoraLocal(iso: string) {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(iso)).replace(',', ' às')
+}
+
 /** SHA-256 em hexadecimal, com a criptografia que o proprio navegador oferece. */
 async function impressaoDigital(texto: string) {
   const bytes = new TextEncoder().encode(texto)
@@ -652,7 +669,7 @@ async function imprimirProntuario(
         <p class="t">Documento assinado digitalmente${todasAssinadas ? '' : ' (em parte)'}</p>
         <p class="quem">${escapeHtml(quemAssinou)}</p>
         <p class="quando">${assinadas
-          .map((c) => `Consulta de ${fmtBR(c.data)} · assinada em ${c.assinadoEm ? fmtBR(c.assinadoEm.slice(0, 10)) : 'sem data'}`)
+          .map((c) => `Consulta de ${fmtBR(c.data)} · assinada em ${c.assinadoEm ? dataHoraLocal(c.assinadoEm) : 'sem data'}`)
           .join('<br>')} · certificado ICP-Brasil (VIDaaS)</p>
         ${linhasDeIntegridade}
         ${
@@ -1589,7 +1606,7 @@ function ConsultationCard({
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e8f5ec] px-3 py-1 text-[11px] font-extrabold text-[#1c6b3a]">
                 <ShieldCheck className="h-3.5 w-3.5" />
-                Assinado em {fmtBR(consultation.assinadoEm.slice(0, 10))}
+                Assinado em {dataHoraLocal(consultation.assinadoEm)}
                 {consultation.assinadoPor ? ` por ${consultation.assinadoPor}` : ''}
               </span>
               {consultation.arquivoAssinado && (

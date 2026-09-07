@@ -120,6 +120,19 @@ async function gerarLink(env: Ambiente, token: string, cpf: string, redirectUri:
   return { url: dados.url, credencial: Boolean(dados.token) }
 }
 
+/** Campos de identificacao do corpo do JWT, sem nada sensivel. */
+function identidadeDoToken(token: string): Record<string, unknown> {
+  try {
+    const corpo = token.split('.')[1]
+    const json = atob(corpo.replace(/-/g, '+').replace(/_/g, '/'))
+    const dados = JSON.parse(json) as Record<string, unknown>
+    const chaves = ['sub', 'client_id', 'clientId', 'azp', 'name', 'preferred_username', 'email', 'account', 'conta', 'aud', 'iss']
+    return Object.fromEntries(chaves.filter((k) => k in dados).map((k) => [k, dados[k]]))
+  } catch {
+    return { aviso: 'token nao decodificavel' }
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -221,10 +234,18 @@ Deno.serve(async (req) => {
       })
     }
 
+    // De quem e o token? O JWT da BRy traz a identificacao da aplicacao e da
+    // conta no corpo. Mostrar isso (sem o segredo, que nao esta no token)
+    // responde na hora "as chaves sao da conta do medico?" - em 06/09/2026 a
+    // duvida surgiu porque o saldo nao mexeu depois de uma assinatura.
+    const conta = identidadeDoToken(autenticacao.token)
+
     return json({
       ok: true,
       ambiente: env.nome,
       tokenObtido: true,
+      conta,
+      clientIdConfigurado: (Deno.env.get('BRY_CLIENT_ID') ?? '').trim().slice(0, 8) + '…',
       expiraEmSegundos: autenticacao.expiraEm,
       certificadoras: nomes,
       vidaasDisponivel: temVidaas,
