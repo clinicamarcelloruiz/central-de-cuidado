@@ -432,7 +432,7 @@ const AVISO_FALHA =
 // Menu principal
 // ---------------------------------------------------------------
 
-async function mostrarMenu(
+export async function mostrarMenu(
   admin: Admin,
   conversationId: string,
   saudacao: string,
