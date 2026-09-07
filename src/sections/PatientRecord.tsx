@@ -3,6 +3,8 @@ import { invokeWithFormData } from '@/lib/supabase'
 import {
   AlertTriangle,
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   BookmarkPlus,
   Bold,
   Building2,
@@ -665,7 +667,7 @@ async function imprimirProntuario(
     ? `
     <div class="carimbo">
       <div class="marca">✓</div>
-      <div>
+      <div class="corpo">
         <p class="t">Documento assinado digitalmente${todasAssinadas ? '' : ' (em parte)'}</p>
         <p class="quem">${escapeHtml(quemAssinou)}</p>
         <p class="quando">${assinadas
@@ -677,6 +679,16 @@ async function imprimirProntuario(
             ? ''
             : `<p class="aviso">As consultas não listadas acima ainda não foram assinadas digitalmente.</p>`
         }
+      </div>
+      <!-- Selo no espirito do que o validador do ITI mostra, mas sem a marca
+           do ITI: o instituto valida a assinatura, nao emite este documento,
+           e o logo dele aqui sugeriria o contrario. O que esta escrito e
+           publico e verdadeiro: o tipo da assinatura e as normas. -->
+      <div class="qualificada">
+        <div class="q1">Assinatura eletrônica</div>
+        <div class="q2">Qualificada</div>
+        <div class="q3">ICP-Brasil · MP 2.200-2/01<br>e Lei 14.063/20</div>
+        <div class="q4">Confira em validar.iti.gov.br</div>
       </div>
     </div>`
     : `
@@ -716,13 +728,18 @@ async function imprimirProntuario(
       .h { font-size: 7pt; color: #7b858e; margin: 0 0 2px; }
       .h code { font-family: 'Courier New', monospace; color: #55606b; letter-spacing: .02em; word-break: break-all; }
       .h .alerta { color: #b42318; }
-      .carimbo { display: grid; grid-template-columns: auto 1fr; gap: 14px; border: 1.5px solid #1c6b3a; border-radius: 8px; padding: 12px 14px; font-size: 8pt; break-inside: avoid; page-break-inside: avoid; color: #14202c; }
+      .carimbo { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; border: 1.5px solid #1c6b3a; border-radius: 8px; padding: 12px 14px; font-size: 8pt; break-inside: avoid; page-break-inside: avoid; color: #14202c; }
       .carimbo .marca { width: 46px; height: 46px; border-radius: 50%; border: 1.5px solid #1c6b3a; display: flex; align-items: center; justify-content: center; color: #1c6b3a; font-size: 22px; }
       .carimbo .t { font-family: Arial, Helvetica, sans-serif; font-size: 8pt; letter-spacing: .14em; text-transform: uppercase; color: #1c6b3a; font-weight: bold; margin: 0 0 2px; }
       .carimbo .quem { font-size: 12pt; margin: 0; }
       .carimbo .quando { font-size: 9pt; color: #55606b; margin: 2px 0 6px; }
       .carimbo .aviso { margin: 6px 0 0; font-size: 7.5pt; font-style: italic; color: #7b858e; }
-      @media print { .carimbo, .carimbo .marca, .carimbo .t { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+      .qualificada { width: 128px; border-radius: 8px; overflow: hidden; background: #0b1f3a; color: #fff; text-align: center; font-family: Arial, Helvetica, sans-serif; padding: 8px 6px 0; align-self: center; }
+      .qualificada .q1 { font-size: 6.5pt; letter-spacing: .06em; text-transform: uppercase; }
+      .qualificada .q2 { font-size: 8pt; font-weight: bold; letter-spacing: .08em; text-transform: uppercase; color: #5cc8ff; margin: 1px 0 5px; }
+      .qualificada .q3 { font-size: 5.5pt; line-height: 1.35; color: rgba(255,255,255,.85); padding-bottom: 6px; }
+      .qualificada .q4 { background: #1a9be0; font-size: 5.6pt; font-weight: bold; letter-spacing: .04em; padding: 4px 2px; }
+      @media print { .carimbo, .carimbo .marca, .carimbo .t, .qualificada, .qualificada .q4 { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
       @page { margin: 16mm; }
     </style></head><body>
     <header>
@@ -1461,6 +1478,7 @@ function ConsultationCard({
   onAssinar,
   onAbrirAssinado,
   onPrescrever,
+  onImprimir,
   prescrevendo,
   receitas,
   assinando,
@@ -1472,6 +1490,8 @@ function ConsultationCard({
   onAssinar: (consultation: Consultation) => void
   onAbrirAssinado: (consultation: Consultation) => void
   onPrescrever: (consultation: Consultation) => void
+  /** Imprime so este atendimento, sem o resto do historico. */
+  onImprimir: (consultation: Consultation) => void
   prescrevendo: boolean
   /** Receitas emitidas neste atendimento. */
   receitas: Receita[]
@@ -1510,7 +1530,8 @@ function ConsultationCard({
   return (
     <AccordionItem
       value={consultation.id}
-      className="overflow-hidden rounded-[18px] border border-[#081b2c]/[0.09] bg-white shadow-[0_6px_20px_rgba(8,27,44,.04)]"
+      id={`consulta-${consultation.id}`}
+      className="overflow-hidden rounded-[18px] border border-[#081b2c]/[0.09] bg-white shadow-[0_6px_20px_rgba(8,27,44,.04)] scroll-mt-24"
     >
       <AccordionTrigger className="group gap-3 px-4 py-4 hover:no-underline sm:px-5">
         <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -1654,6 +1675,17 @@ function ConsultationCard({
               >
                 {prescrevendo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pill className="h-3.5 w-3.5" />}
                 Prescrever
+              </button>
+              {/* Um atendimento so, para entregar ao paciente ou anexar ao
+                  convenio. O botao de cima imprime o historico inteiro. */}
+              <button
+                type="button"
+                onClick={() => onImprimir(consultation)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-white px-3 py-2 text-[10px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c]"
+                title="Imprime apenas esta consulta"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                Imprimir esta
               </button>
             </div>
           )}
@@ -1874,6 +1906,9 @@ export default function PatientRecord({
   const [buscaConsulta, setBuscaConsulta] = useState('')
   const [assinando, setAssinando] = useState<string | null>(null)
   const [assinaturaConcluida, setAssinaturaConcluida] = useState(0)
+  // Qual cartao esta aberto. Controlado aqui (e nao dentro do Accordion) para
+  // que as setas "anterior / proxima" consigam abrir o vizinho.
+  const [consultaAberta, setConsultaAberta] = useState<string>('')
   // Pedido de assinatura em aberto: o medico foi aprovar no celular e a tela
   // fica perguntando a BRy se ja pode assinar. Morre ao concluir, ao expirar
   // ou quando a pessoa desiste.
@@ -2650,7 +2685,58 @@ export default function PatientRecord({
                       Nenhuma consulta menciona "{buscaConsulta}".
                     </p>
                   ) : (
-                    <Accordion type="single" collapsible className="space-y-3">
+                    <>
+                    {/* Setas para andar pelas consultas uma a uma. Abre a
+                        vizinha e rola ate ela; o cartao aberto e a posicao no
+                        historico ficam sempre visiveis. So aparece quando ha
+                        mais de uma consulta - com uma, nao ha para onde ir. */}
+                    {consultasFiltradas.length > 1 && (() => {
+                      const indice = consultasFiltradas.findIndex((c) => c.id === consultaAberta)
+                      const irPara = (destino: number) => {
+                        const alvo = consultasFiltradas[destino]
+                        if (!alvo) return
+                        setConsultaAberta(alvo.id)
+                        window.setTimeout(() => {
+                          document.getElementById(`consulta-${alvo.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                        }, 60)
+                      }
+                      const temAnterior = indice === -1 || indice > 0
+                      const temProxima = indice < consultasFiltradas.length - 1
+                      return (
+                        <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl border border-[#081b2c]/[0.08] bg-white px-3 py-2">
+                          <button
+                            type="button"
+                            onClick={() => irPara(indice === -1 ? 0 : indice - 1)}
+                            disabled={!temAnterior}
+                            className="inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[11px] font-extrabold text-slate-600 transition hover:bg-[#f4f4f1] hover:text-[#081b2c] disabled:opacity-30"
+                            title="Consulta mais recente"
+                          >
+                            <ChevronLeft className="h-4 w-4" /> Mais recente
+                          </button>
+                          <span className="text-[11px] font-bold text-slate-500">
+                            {indice === -1
+                              ? `${consultasFiltradas.length} consultas`
+                              : `Consulta ${indice + 1} de ${consultasFiltradas.length} · ${fmtBR(consultasFiltradas[indice].data)}`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => irPara(indice === -1 ? 0 : indice + 1)}
+                            disabled={indice !== -1 && !temProxima}
+                            className="inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[11px] font-extrabold text-slate-600 transition hover:bg-[#f4f4f1] hover:text-[#081b2c] disabled:opacity-30"
+                            title="Consulta mais antiga"
+                          >
+                            Mais antiga <ChevronRight className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )
+                    })()}
+                    <Accordion
+                      type="single"
+                      collapsible
+                      className="space-y-3"
+                      value={consultaAberta}
+                      onValueChange={setConsultaAberta}
+                    >
                       {consultasFiltradas.map((consultation) => (
                         <ConsultationCard
                           key={consultation.id}
@@ -2666,12 +2752,14 @@ export default function PatientRecord({
                           onAssinar={(item) => void pedirAssinatura(item)}
                           onAbrirAssinado={(item) => void abrirAssinado(item)}
                           onPrescrever={(item) => void prescrever(item)}
+                          onImprimir={(item) => void imprimirProntuario(patient, [item], integridade)}
                           prescrevendo={prescrevendo}
                           receitas={receitas.filter((r) => r.consultationId === consultation.id)}
                           assinando={assinando}
                         />
                       ))}
                     </Accordion>
+                    </>
                   )}
                 </>
               )}
