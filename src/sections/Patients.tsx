@@ -12,7 +12,8 @@ import {
   Plus,
   Search,
   Stethoscope,
-  Trash2,
+  Archive,
+  ArchiveRestore,
   UsersRound,
 } from 'lucide-react'
 import type { Consultation, ConsultationDraft, Patient } from '@/types/patient'
@@ -163,6 +164,9 @@ interface Props {
   addPatient: (draft: PatientDraft) => Promise<Patient>
   updatePatient: (id: string, patch: Partial<Patient>) => Promise<void>
   removePatient: (id: string) => Promise<void>
+  /** Pacientes arquivados, para a gaveta de arquivados. */
+  listArchived: () => Promise<Patient[]>
+  restorePatient: (id: string) => Promise<void>
   listConsultations: (patientId: string) => Promise<Consultation[]>
   addConsultation: (patientId: string, draft: ConsultationDraft) => Promise<void>
   updateConsultation: (patientId: string, consultationId: string, draft: ConsultationDraft) => Promise<void>
@@ -189,6 +193,8 @@ export default function Patients({
   addPatient,
   updatePatient,
   removePatient,
+  listArchived,
+  restorePatient,
   listConsultations,
   addConsultation,
   updateConsultation,
@@ -201,6 +207,43 @@ export default function Patients({
   // Lista simples e o padrao: cabe mais paciente na tela e a busca visual e
   // mais rapida. O modo de cartoes continua a um clique.
   const [visao, setVisao] = useState<'lista' | 'cartoes'>('lista')
+  // Gaveta de arquivados. Arquivar nao apaga (prontuario se guarda por 20
+  // anos), entao precisa existir um lugar para ver quem esta la e trazer de
+  // volta - sem isso "arquivar" parece "apagar" e ninguem clica.
+  const [mostrandoArquivados, setMostrandoArquivados] = useState(false)
+  const [arquivados, setArquivados] = useState<Patient[] | null>(null)
+  const [restaurando, setRestaurando] = useState<string | null>(null)
+
+  async function abrirArquivados() {
+    setMostrandoArquivados(true)
+    try {
+      setArquivados(await listArchived())
+    } catch (cause) {
+      alert(cause instanceof Error ? cause.message : 'Não foi possível listar os arquivados.')
+      setMostrandoArquivados(false)
+    }
+  }
+
+  async function arquivar(patient: Patient) {
+    if (!confirm(`Arquivar o cadastro de ${patient.nome}?\n\nEle sai das listas, mas nada é apagado: dá para restaurar em "Arquivados".`)) return
+    try {
+      await removePatient(patient.id)
+    } catch (cause) {
+      alert(cause instanceof Error ? cause.message : 'Não foi possível arquivar o paciente.')
+    }
+  }
+
+  async function restaurar(patient: Patient) {
+    setRestaurando(patient.id)
+    try {
+      await restorePatient(patient.id)
+      setArquivados((atual) => (atual ?? []).filter((item) => item.id !== patient.id))
+    } catch (cause) {
+      alert(cause instanceof Error ? cause.message : 'Não foi possível restaurar o paciente.')
+    } finally {
+      setRestaurando(null)
+    }
+  }
   const [ordem, setOrdem] = useState<'nome' | 'consulta'>('nome')
   const [mesFiltro, setMesFiltro] = useState('')
   const [anoFiltro, setAnoFiltro] = useState('')
@@ -482,6 +525,20 @@ export default function Patients({
             {visao === 'lista' ? 'Blocos' : 'Lista'}
           </button>
 
+          <button
+            type="button"
+            onClick={() => (mostrandoArquivados ? setMostrandoArquivados(false) : void abrirArquivados())}
+            className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[10px] font-extrabold transition ${
+              mostrandoArquivados
+                ? 'bg-[#081b2c] text-white'
+                : 'bg-[#f3f1ec] text-slate-500 hover:bg-[#ebe8e1] hover:text-[#081b2c]'
+            }`}
+            title="Pacientes arquivados"
+          >
+            <Archive className="h-3.5 w-3.5" />
+            {mostrandoArquivados ? 'Voltar aos ativos' : 'Arquivados'}
+          </button>
+
           <p className="px-1 text-[10px] font-bold text-slate-400">
             {filtered.length} {filtered.length === 1 ? 'resultado' : 'resultados'}
           </p>
@@ -541,7 +598,7 @@ export default function Patients({
         </div>
       )}
 
-      {filtered.length === 0 ? (
+      {filtered.length === 0 && !mostrandoArquivados ? (
         <section className="surface-card rounded-[26px] px-6 py-14 text-center">
           <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#f5e7dd] text-[#c87543]">
             <CircleUserRound className="h-7 w-7" />
@@ -560,6 +617,45 @@ export default function Patients({
             </button>
           )}
         </section>
+      ) : mostrandoArquivados ? (
+        <div className="surface-card overflow-hidden rounded-[22px]">
+          {arquivados === null ? (
+            <p className="px-4 py-8 text-center text-[11px] font-semibold text-slate-400">Carregando arquivados...</p>
+          ) : arquivados.length === 0 ? (
+            <p className="px-4 py-8 text-center text-[11px] font-semibold text-slate-400">Nenhum paciente arquivado.</p>
+          ) : (
+            arquivados.map((patient, indice) => (
+              <div
+                key={patient.id}
+                className={`flex flex-wrap items-center gap-3 px-4 py-2.5 ${indice > 0 ? 'border-t border-[#081b2c]/[0.06]' : ''}`}
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[11px] bg-[#f3f1ec] text-[10px] font-extrabold text-slate-400">
+                  {initials(patient.nome)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-extrabold text-slate-500">{patient.nome}</p>
+                  <p className="truncate text-[10px] text-slate-400">
+                    {[
+                      patient.dataConsulta ? `Consulta ${fmtBR(patient.dataConsulta)}` : null,
+                      [patient.cidade, patient.bairro].filter(Boolean).join(' · ') || null,
+                    ]
+                      .filter(Boolean)
+                      .join('  ·  ')}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void restaurar(patient)}
+                  disabled={restaurando === patient.id}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#eef3f2] px-2.5 py-1.5 text-[10px] font-extrabold text-[#557f75] transition hover:bg-[#e2ece9] disabled:opacity-50"
+                >
+                  <ArchiveRestore className="h-3.5 w-3.5" />
+                  {restaurando === patient.id ? 'Restaurando...' : 'Restaurar'}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
       ) : visao === 'lista' ? (
         <div className="surface-card overflow-hidden rounded-[22px]">
           {filtered.map((patient, indice) => (
@@ -608,6 +704,15 @@ export default function Patients({
                 >
                   <Edit3 className="h-3.5 w-3.5" />
                 </button>
+                <button
+                  type="button"
+                  onClick={() => void arquivar(patient)}
+                  className="rounded-lg p-1.5 text-slate-300 transition hover:bg-[#f3f1ec] hover:text-[#081b2c]"
+                  aria-label={`Arquivar ${patient.nome}`}
+                  title="Arquivar (não apaga; fica em Arquivados)"
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                </button>
               </div>
             </div>
           ))}
@@ -642,17 +747,11 @@ export default function Patients({
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (confirm(`Arquivar o cadastro de ${patient.nome}?`)) {
-                            void removePatient(patient.id).catch((cause) => {
-                              alert(cause instanceof Error ? cause.message : 'Não foi possível arquivar o paciente.')
-                            })
-                          }
-                        }}
-                        title="Apagar paciente"
-                        className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-300 transition hover:bg-red-50 hover:text-red-500"
+                        onClick={() => void arquivar(patient)}
+                        title="Arquivar (não apaga; fica em Arquivados)"
+                        className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-300 transition hover:bg-[#f3f1ec] hover:text-[#081b2c]"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Archive className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>

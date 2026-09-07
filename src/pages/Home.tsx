@@ -106,6 +106,8 @@ export default function Home() {
     addPatient,
     updatePatient,
     removePatient,
+    listArchived,
+    restorePatient,
     getConsultations,
     addConsultation,
     updateConsultation,
@@ -434,6 +436,8 @@ export default function Home() {
                 addPatient={addPatient}
                 updatePatient={updatePatient}
                 removePatient={removePatient}
+            listArchived={listArchived}
+            restorePatient={restorePatient}
                 listConsultations={getConsultations}
                 addConsultation={addConsultation}
                 updateConsultation={updateConsultation}
