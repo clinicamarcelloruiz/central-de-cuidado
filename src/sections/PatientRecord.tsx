@@ -62,6 +62,7 @@ import {
   type NoteTemplate,
   type Receita,
 } from '@/lib/repository'
+import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco'
 import type {
   Consultation,
   ConsultationDraft,
@@ -535,6 +536,15 @@ async function imprimirProntuario(
   patient: Patient,
   consultas: Consultation[],
   integridade: Integridade | null,
+  /**
+   * Chamar a impressao sozinho ou so mostrar.
+   *
+   * Ler o prontuario e mais frequente do que imprimir - conferir a consulta
+   * anterior antes de atender, por exemplo. Com um botao so, toda leitura
+   * passava pela caixa de impressao do navegador, que a pessoa fechava sem
+   * imprimir nada. O documento e o mesmo nos dois casos.
+   */
+  imprimirDireto = true,
 ) {
   const campos: [string, keyof Consultation][] = [
     ['Queixa principal', 'queixa'],
@@ -693,7 +703,7 @@ async function imprimirProntuario(
   janela.document.close()
   janela.focus()
   // Espera o conteudo assentar antes de chamar a impressao.
-  window.setTimeout(() => janela.print(), 350)
+  if (imprimirDireto) window.setTimeout(() => janela.print(), 350)
 }
 
 /** Texto puro de um campo do editor, para comparar e para buscar. */
@@ -1727,7 +1737,8 @@ function EsperaDaAssinatura({ espera, onDesistir }: EsperaDaAssinaturaProps) {
       <div className="flex-1 space-y-1">
         <p className="font-extrabold">Aguardando a autorização no celular</p>
         <p className="font-medium text-[#1c6b3a]/80">
-          Abra o aplicativo VIDaaS no celular e aprove a assinatura. Esta tela confere sozinha a cada
+          Abra o aplicativo VIDaaS no celular e aprove. Esta aprovação vale pelas próximas 4 horas: as
+          outras consultas do turno assinam direto, sem celular. Esta tela confere sozinha a cada
           poucos segundos{espera.tentativas > 0 ? ` (${espera.tentativas} vez${espera.tentativas > 1 ? 'es' : ''} até agora)` : ''}.
           O pedido vale por {minutos} min.
         </p>
@@ -1886,17 +1897,14 @@ export default function PatientRecord({
    * que nao e erro.
    */
   useEffect(() => {
-    const endereco = new URL(window.location.href)
-    const pedido = endereco.searchParams.get('state')
+    const pedido = parametrosDoEndereco().get('state')
     if (!pedido) return
 
-    endereco.searchParams.delete('state')
-    endereco.searchParams.delete('code')
     // O "paciente" NAO sai aqui: quem o le e a lista de pacientes, e no React
     // o efeito do filho roda antes do efeito do pai. Apagando neste ponto, o
     // prontuario concluia a assinatura e nao abria, porque a lista ja nao
     // achava o paciente no endereco.
-    window.history.replaceState({}, '', endereco.toString())
+    apagarParametrosDoEndereco(['state', 'code'])
 
     void (async () => {
       setAssinando(pedido)
@@ -2103,6 +2111,29 @@ export default function PatientRecord({
         setAviso({ tipo: 'ok', texto: 'Atendimento assinado e arquivado.' })
         return
       }
+      if (inicio.sessaoAtiva) {
+        // Turno ja aprovado: assina agora, sem aba e sem celular.
+        aba?.close()
+        const resultado = await concluirAssinatura(inicio.pedido)
+        if (resultado.situacao === 'assinado') {
+          setAssinando(null)
+          setAssinaturaConcluida((n) => n + 1)
+          setAviso({ tipo: 'ok', texto: 'Atendimento assinado e arquivado.' })
+          return
+        }
+        // Raro: a BRy diz que a sessao ja nao esta pronta. Entra na espera
+        // normal, que vai avisar se nao resolver.
+        setEspera({
+          pedido: inicio.pedido,
+          consultaId: consultation.id,
+          autorizarEm: '',
+          expiraEm: Date.now() + 2 * 60 * 1000,
+          tentativas: 0,
+          minutosRestantes: 2,
+        })
+        return
+      }
+
       const { pedido, autorizarEm, expiraEm } = inicio
       if (aba) aba.location.href = autorizarEm
       setEspera({
@@ -2404,14 +2435,27 @@ export default function PatientRecord({
               </div>
               <div className="flex items-center gap-2">
                 {consultations.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade)}
-                    className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/10 bg-white px-3.5 py-2.5 text-[11px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c]"
-                    title="Abre a versão para impressão ou para salvar em PDF"
-                  >
-                    <Printer className="h-3.5 w-3.5" /> Imprimir
-                  </button>
+                  <>
+                    {/* Visualizar vem antes de Imprimir porque ler e o que se
+                        faz com mais frequencia. E o mesmo documento; a
+                        diferenca e a caixa de impressao aparecer ou nao. */}
+                    <button
+                      type="button"
+                      onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade, false)}
+                      className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/10 bg-white px-3.5 py-2.5 text-[11px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c]"
+                      title="Abre o prontuário completo em outra aba, sem pedir impressão"
+                    >
+                      <FileText className="h-3.5 w-3.5" /> Visualizar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade)}
+                      className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/10 bg-white px-3.5 py-2.5 text-[11px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c]"
+                      title="Abre a versão para impressão ou para salvar em PDF"
+                    >
+                      <Printer className="h-3.5 w-3.5" /> Imprimir
+                    </button>
+                  </>
                 )}
                 {/* A corrente de auditoria so vale se alguem puder conferi-la.
                     Um selo que ninguem checa e enfeite. */}

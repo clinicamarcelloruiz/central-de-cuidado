@@ -155,6 +155,54 @@ async function recuperarAssinaturaArquivada(admin: Admin, consultaId: string) {
   return assinadoEm
 }
 
+/** Duracao da sessao de assinatura: um turno. */
+const SESSAO_SEGUNDOS = 4 * 60 * 60
+
+/**
+ * Sessao do usuario que ainda assina: existe, foi aprovada, nao venceu.
+ *
+ * A BRy e quem responde se a credencial continua pronta - o prazo guardado
+ * aqui e uma estimativa, e o certificado pode ter sido revogado no meio.
+ * Sessao que a BRy nao reconhece mais e fechada na hora, para nao ser
+ * tentada de novo a cada clique.
+ */
+async function sessaoAtiva(admin: Admin, integra: string, jwt: string, usuarioId: string) {
+  const { data: sessao } = await admin
+    .from('signature_sessions')
+    .select('id,psc_credential,expires_at,ready_at')
+    .eq('user_id', usuarioId)
+    .is('revoked_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (!sessao) return null
+
+  const situacao = await situacaoDaCredencial(integra, jwt, sessao.psc_credential)
+  if (!situacao.ok || !situacao.pronta) {
+    // Nunca aprovada (o medico desistiu no celular) ou ja invalida: encerra.
+    // Uma sessao recem-criada e ainda nao aprovada tambem cai aqui, e tudo
+    // bem: o clique gera outra, e a anterior nao vale nada.
+    await admin.from('signature_sessions').update({ revoked_at: new Date().toISOString() }).eq('id', sessao.id)
+    return null
+  }
+
+  const expiraEm = situacao.dados.expiration
+    ? new Date(situacao.dados.expiration * 1000).toISOString()
+    : sessao.expires_at
+  if (new Date(expiraEm).getTime() < Date.now()) {
+    await admin.from('signature_sessions').update({ revoked_at: new Date().toISOString() }).eq('id', sessao.id)
+    return null
+  }
+  if (!sessao.ready_at || expiraEm !== sessao.expires_at) {
+    await admin
+      .from('signature_sessions')
+      .update({ ready_at: sessao.ready_at ?? new Date().toISOString(), expires_at: expiraEm })
+      .eq('id', sessao.id)
+  }
+  return { psc_credential: sessao.psc_credential as string, expires_at: expiraEm }
+}
+
 /** Marca de "alguem ja esta assinando este pedido". Some ao concluir. */
 const EM_ANDAMENTO = 'em andamento'
 
@@ -215,11 +263,35 @@ Deno.serve(async (req) => {
       if (!cpf) return json({ error: 'CPF do certificado não configurado.', code: 'SEM_CPF' }, 503)
 
       const token = await tokenDaBry(env.cloud)
+      const { data: usuario } = await escopo.auth.getUser()
+      const usuarioId = usuario?.user?.id ?? null
 
       // O id do pedido e gerado antes da chamada porque a BRy devolve o "state"
       // sem alteracao: e por ele que a volta do VIDaaS sabe qual atendimento
       // estava sendo assinado.
       const pedidoId = crypto.randomUUID()
+
+      // Sessao aberta? Uma aprovacao no celular vale por um turno (4 horas).
+      // Se a credencial do turno ainda esta pronta, o pedido nasce ligado a
+      // ela e a tela assina na hora, sem VIDaaS.
+      const sessao = usuarioId ? await sessaoAtiva(admin, env.integra, token, usuarioId) : null
+      if (sessao) {
+        const { error: erroPedido } = await admin.from('signature_requests').insert({
+          id: pedidoId,
+          clinic_id: consulta.clinic_id,
+          consultation_id: consulta.id,
+          patient_id: consulta.patient_id,
+          requested_by: usuarioId,
+          psc_credential: sessao.psc_credential,
+          expires_at: sessao.expires_at,
+        })
+        if (erroPedido) {
+          console.error('Falha ao guardar o pedido', erroPedido)
+          return json({ error: 'Falha ao registrar o pedido de assinatura.' }, 500)
+        }
+        return json({ ok: true, pedido: pedidoId, sessaoAtiva: true, expiraEm: sessao.expires_at })
+      }
+
       const destino = corpo.voltarPara ||
         Deno.env.get('BRY_REDIRECT_URI')?.trim() ||
         'https://clinicamarcelloruiz.github.io/central-de-cuidado/'
@@ -231,12 +303,12 @@ Deno.serve(async (req) => {
           pscName: 'Vidaas',
           redirectUri: destino,
           state: pedidoId,
-          // Uma assinatura por autorizacao, por escolha do medico. Trocar para
-          // 'signature_session' (com lifetime maior) faz ele aprovar uma vez
-          // por periodo em vez de uma vez por atendimento.
-          scope: 'single_signature',
-          numberOfDocuments: 1,
-          lifetime: 900,
+          // Sessao por turno, por escolha do medico (06/09/2026): aprova uma
+          // vez, assina o resto das 4 horas sem celular. O PSC pode encurtar
+          // o prazo; o valor real vem do auth/info depois da primeira vez.
+          scope: 'signature_session',
+          numberOfDocuments: 100,
+          lifetime: SESSAO_SEGUNDOS,
           cpf,
         }),
       })
@@ -256,15 +328,23 @@ Deno.serve(async (req) => {
         return json({ error: 'A certificadora respondeu incompleta.', code: 'PSC_INCOMPLETO' }, 502)
       }
 
-      const { data: usuario } = await escopo.auth.getUser()
+      const expiraEm = new Date(Date.now() + SESSAO_SEGUNDOS * 1000).toISOString()
 
-      const expiraEm = new Date(Date.now() + 900 * 1000).toISOString()
+      if (usuarioId) {
+        await admin.from('signature_sessions').insert({
+          clinic_id: consulta.clinic_id,
+          user_id: usuarioId,
+          psc_credential: dados.token,
+          expires_at: expiraEm,
+        })
+      }
+
       const { error: erroPedido } = await admin.from('signature_requests').insert({
         id: pedidoId,
         clinic_id: consulta.clinic_id,
         consultation_id: consulta.id,
         patient_id: consulta.patient_id,
-        requested_by: usuario?.user?.id ?? null,
+        requested_by: usuarioId,
         psc_credential: dados.token,
         expires_at: expiraEm,
       })
@@ -357,6 +437,18 @@ Deno.serve(async (req) => {
         }, 202)
       }
 
+      // Aprovada: a sessao do turno passa a valer, com o prazo que a BRy diz.
+      await admin
+        .from('signature_sessions')
+        .update({
+          ready_at: new Date().toISOString(),
+          ...(credencial.dados.expiration
+            ? { expires_at: new Date(credencial.dados.expiration * 1000).toISOString() }
+            : {}),
+        })
+        .eq('psc_credential', pedido.psc_credential)
+        .is('ready_at', null)
+
       // Duas telas podem chegar aqui ao mesmo tempo: a que ficou perguntando
       // e a aba que o VIDaaS devolveu com o numero do pedido. Sem esta marca,
       // as duas assinariam - duas cobrancas e dois arquivos para um mesmo
@@ -446,6 +538,35 @@ Deno.serve(async (req) => {
           // registro de prontuario, nao um formulario.
           tipoRestricao: 'DESABILITAR_QUALQUER_ALTERACAO',
         }),
+      )
+
+      // Carimbo visivel na ultima pagina. A assinatura em si e invisivel e
+      // esta dentro do arquivo - e o que vale e o que o validador do ITI le.
+      // Mas quem recebe o papel espera VER quem assinou e quando; sem o bloco,
+      // o documento assinado parecia igual ao nao assinado. Canto inferior
+      // direito, acima do rodape que o proprio PDF ja traz. Sem CPF impresso:
+      // o certificado ja o carrega, e nao ha razao para imprimi-lo.
+      formulario.append(
+        'configuracao_imagem',
+        JSON.stringify([{
+          altura: 22,
+          largura: 95,
+          coordenadaX: -12,
+          coordenadaY: 22,
+          pagina: 'ULTIMA',
+          posicao: 'INFERIOR_DIREITO',
+          proporcaoImagem: 0,
+        }]),
+      )
+      formulario.append(
+        'configuracao_texto',
+        JSON.stringify([{
+          texto: `Assinado digitalmente em ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}\nCertificado ICP-Brasil (VIDaaS). Confira em validar.iti.gov.br`,
+          incluirCN: true,
+          incluirCPF: false,
+          fonte: 'HELVETICA',
+          tamanhoFonte: '7',
+        }]),
       )
 
       let assinatura: Response | null = null

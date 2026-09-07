@@ -33,6 +33,7 @@ import Settings from '@/sections/Settings'
 import AccessAdmin from '@/sections/AccessAdmin'
 import logo from '@/assets/logo.webp'
 import { useAuth } from '@/auth/AuthProvider'
+import { parametrosDoEndereco } from '@/lib/endereco'
 
 type Tab = 'dashboard' | 'agenda' | 'followups' | 'conversas' | 'pacientes' | 'config' | 'admin'
 type Icon = ComponentType<{ className?: string; strokeWidth?: number }>
@@ -123,7 +124,7 @@ export default function Home() {
    * assinatura ficava pela metade em silencio: autorizada e nunca concluida.
    */
   const [tab, setTab] = useState<Tab>(() => {
-    const endereco = new URLSearchParams(window.location.search)
+    const endereco = parametrosDoEndereco()
     return endereco.get('state') || endereco.get('paciente') ? 'pacientes' : 'followups'
   })
   // Paciente cuja conversa deve abrir ao entrar em Respostas pelo atalho.
