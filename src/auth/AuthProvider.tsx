@@ -28,6 +28,12 @@ export interface AuthContextValue {
   requestAccess: (fullName: string, email: string, password: string) => Promise<AuthActionResult>
   signOut: () => Promise<AuthActionResult>
   clearAuthError: () => void
+  /** Manda o e-mail com o link para criar uma senha nova. */
+  sendPasswordReset: (email: string) => Promise<AuthActionResult>
+  /** Verdadeiro enquanto a pessoa esta voltando pelo link de redefinicao. */
+  recovering: boolean
+  /** Grava a senha nova e encerra a recuperacao. */
+  updatePassword: (password: string) => Promise<AuthActionResult>
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -52,16 +58,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(isSupabaseConfigured)
   const [authError, setAuthError] = useState<string | null>(null)
+  // Volta pelo link de "esqueci a senha". O Supabase abre uma sessao
+  // temporaria e avisa com o evento PASSWORD_RECOVERY; enquanto isso for
+  // verdadeiro, a unica tela e a de criar a senha nova.
+  const [recovering, setRecovering] = useState(false)
 
   useEffect(() => {
     if (!isSupabaseConfigured) return
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession)
       setLoading(false)
       if (nextSession) setAuthError(null)
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true)
     })
 
     return () => subscription.unsubscribe()
@@ -145,6 +156,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null }
   }, [])
 
+  const sendPasswordReset = useCallback(async (email: string): Promise<AuthActionResult> => {
+    if (!isSupabaseConfigured) {
+      const message = supabaseConfigurationError ?? 'O Supabase não está configurado.'
+      setAuthError(message)
+      return { error: message }
+    }
+    setAuthError(null)
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo: `${window.location.origin}${window.location.pathname}`,
+    })
+    if (error) {
+      const message = friendlyAuthError(error)
+      setAuthError(message)
+      return { error: message }
+    }
+    return { error: null }
+  }, [])
+
+  const updatePassword = useCallback(async (password: string): Promise<AuthActionResult> => {
+    setAuthError(null)
+    const { error } = await supabase.auth.updateUser({ password })
+    if (error) {
+      const message = friendlyAuthError(error)
+      setAuthError(message)
+      return { error: message }
+    }
+    setRecovering(false)
+    return { error: null }
+  }, [])
+
   const value = useMemo<AuthContextValue>(
     () => ({
       session,
@@ -156,8 +197,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       requestAccess,
       signOut,
       clearAuthError,
+      sendPasswordReset,
+      recovering,
+      updatePassword,
     }),
-    [authError, clearAuthError, loading, requestAccess, session, signIn, signOut],
+    [authError, clearAuthError, loading, requestAccess, session, signIn, signOut, sendPasswordReset, recovering, updatePassword],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

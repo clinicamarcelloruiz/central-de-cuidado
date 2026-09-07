@@ -3,9 +3,10 @@ import { HeartHandshake } from 'lucide-react'
 import { useAuth } from '@/auth/AuthProvider'
 import Home from './pages/Home'
 import Login from './pages/Login'
+import NovaSenha from './pages/NovaSenha'
 
 export default function App() {
-  const { session, loading } = useAuth()
+  const { session, loading, recovering } = useAuth()
 
   if (loading) {
     return (
@@ -21,6 +22,10 @@ export default function App() {
       </main>
     )
   }
+
+  // Veio pelo link de "esqueci a senha": antes de qualquer outra tela, a
+  // senha nova. A sessao temporaria do link nao deve abrir o sistema.
+  if (recovering) return <NovaSenha />
 
   if (!session) return <Login />
 

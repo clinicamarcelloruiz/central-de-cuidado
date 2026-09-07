@@ -18,8 +18,9 @@ const inputClass =
   'w-full rounded-2xl border border-[#081b2c]/10 bg-[#fafaf8] py-3.5 pl-11 pr-4 text-sm font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#dc8e5f] focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10 disabled:cursor-not-allowed disabled:opacity-60'
 
 export default function Login() {
-  const { signIn, requestAccess, authError, configurationError, clearAuthError } = useAuth()
-  const [mode, setMode] = useState<'login' | 'request'>('login')
+  const { signIn, requestAccess, sendPasswordReset, authError, configurationError, clearAuthError } = useAuth()
+  const [mode, setMode] = useState<'login' | 'request' | 'reset'>('login')
+  const [resetSent, setResetSent] = useState(false)
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -32,6 +33,22 @@ export default function Login() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     clearAuthError()
+
+    if (mode === 'reset') {
+      if (!email.trim()) {
+        setValidationError('Informe o e-mail da sua conta.')
+        return
+      }
+      setValidationError(null)
+      setSubmitting(true)
+      try {
+        const result = await sendPasswordReset(email)
+        if (!result.error) setResetSent(true)
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
 
     if (!email.trim() || !password || (mode === 'request' && !fullName.trim())) {
       setValidationError('Preencha todos os campos obrigatórios.')
@@ -70,11 +87,12 @@ export default function Login() {
   const visibleError = configurationError ?? validationError ?? authError
   const disabled = submitting || Boolean(configurationError)
 
-  function switchMode(nextMode: 'login' | 'request') {
+  function switchMode(nextMode: 'login' | 'request' | 'reset') {
     setMode(nextMode)
     setValidationError(null)
     clearAuthError()
     setRequestSent(false)
+    setResetSent(false)
     setPassword('')
     setConfirmPassword('')
   }
@@ -147,24 +165,41 @@ export default function Login() {
             <div className="surface-card rounded-[30px] p-6 shadow-[0_24px_70px_rgba(8,27,44,.11)] sm:p-8">
               <div className="flex items-start gap-3">
                 <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] bg-[#f5e7dd] text-[#c87543]">
-                  {mode === 'login' ? <LockKeyhole className="h-5 w-5" /> : <UserRoundPlus className="h-5 w-5" />}
+                  {mode === 'request' ? <UserRoundPlus className="h-5 w-5" /> : <LockKeyhole className="h-5 w-5" />}
                 </span>
                 <div>
                   <p className="text-[9px] font-extrabold uppercase tracking-[0.17em] text-[#c87543]">
-                    {mode === 'login' ? 'Área restrita' : 'Solicitação de acesso'}
+                    {mode === 'login' ? 'Área restrita' : mode === 'reset' ? 'Recuperar acesso' : 'Solicitação de acesso'}
                   </p>
                   <h2 className="mt-1.5 text-2xl font-extrabold tracking-[-0.04em] text-[#081b2c]">
-                    {mode === 'login' ? 'Acesse sua conta' : 'Peça seu acesso'}
+                    {mode === 'login' ? 'Acesse sua conta' : mode === 'reset' ? 'Esqueceu a senha?' : 'Peça seu acesso'}
                   </h2>
                   <p className="mt-2 text-xs leading-relaxed text-slate-400">
                     {mode === 'login'
                       ? 'Entre com suas credenciais para acessar os dados da clínica.'
-                      : 'Seu cadastro só terá acesso depois da aprovação do administrador.'}
+                      : mode === 'reset'
+                        ? 'Informe o e-mail da sua conta. Enviamos um link para criar uma senha nova.'
+                        : 'Seu cadastro só terá acesso depois da aprovação do administrador.'}
                   </p>
                 </div>
               </div>
 
-              {requestSent ? (
+              {resetSent ? (
+                <div className="mt-7 rounded-2xl border border-[#9fc2b8]/40 bg-[#edf7f3] p-5 text-center">
+                  <ShieldCheck className="mx-auto h-7 w-7 text-[#4d8d7c]" />
+                  <h3 className="mt-3 text-sm font-extrabold text-[#173b35]">Verifique seu e-mail</h3>
+                  <p className="mt-2 text-xs leading-relaxed text-[#4d6e67]">
+                    Se existir uma conta com este e-mail, o link para criar a senha nova chega em instantes. Olhe também na caixa de spam.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => switchMode('login')}
+                    className="mt-4 text-xs font-extrabold text-[#1a5f50] underline underline-offset-4"
+                  >
+                    Voltar para entrar
+                  </button>
+                </div>
+              ) : requestSent ? (
                 <div className="mt-7 rounded-2xl border border-[#9fc2b8]/40 bg-[#edf7f3] p-5 text-center">
                   <ShieldCheck className="mx-auto h-7 w-7 text-[#4d8d7c]" />
                   <h3 className="mt-3 text-sm font-extrabold text-[#173b35]">Solicitação enviada</h3>
@@ -220,6 +255,7 @@ export default function Login() {
                   </div>
                 </label>
 
+                {mode !== 'reset' && (
                 <label className="block">
                   <span className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-slate-500">
                     Senha
@@ -250,6 +286,19 @@ export default function Login() {
                     </button>
                   </div>
                 </label>
+                )}
+
+                {mode === 'login' && (
+                  <div className="-mt-1 text-right">
+                    <button
+                      type="button"
+                      onClick={() => switchMode('reset')}
+                      className="text-[11px] font-semibold text-[#416f65] underline underline-offset-4"
+                    >
+                      Esqueci minha senha
+                    </button>
+                  </div>
+                )}
 
                 {mode === 'request' && (
                   <label className="block">
@@ -287,11 +336,11 @@ export default function Login() {
                   {submitting ? (
                     <>
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/25 border-t-white" />
-                      {mode === 'login' ? 'Entrando...' : 'Enviando pedido...'}
+                      {mode === 'login' ? 'Entrando...' : mode === 'reset' ? 'Enviando link...' : 'Enviando pedido...'}
                     </>
                   ) : (
                     <>
-                      {mode === 'login' ? 'Entrar com segurança' : 'Solicitar aprovação'}
+                      {mode === 'login' ? 'Entrar com segurança' : mode === 'reset' ? 'Enviar link' : 'Solicitar aprovação'}
                       <ArrowRight className="h-4 w-4 text-[#e6a47b] transition-transform group-hover:translate-x-0.5" />
                     </>
                   )}
@@ -299,7 +348,7 @@ export default function Login() {
               </form>
               )}
 
-              {!requestSent && <div className="mt-6 flex items-center gap-2 border-t border-[#081b2c]/[0.06] pt-5 text-[10px] leading-relaxed text-slate-400">
+              {!requestSent && !resetSent && <div className="mt-6 flex items-center gap-2 border-t border-[#081b2c]/[0.06] pt-5 text-[10px] leading-relaxed text-slate-400">
                 <ShieldCheck className="h-4 w-4 shrink-0 text-[#6f9d91]" />
                 {mode === 'login' ? (
                   <button type="button" onClick={() => switchMode('request')} className="text-left font-semibold text-[#416f65] underline underline-offset-4">
