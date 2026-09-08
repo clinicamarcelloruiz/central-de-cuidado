@@ -15,7 +15,7 @@ import { useAuth } from '@/auth/AuthProvider'
 import logo from '@/assets/logo.webp'
 
 const inputClass =
-  'w-full rounded-2xl border border-[#081b2c]/10 bg-[#fafaf8] py-3.5 pl-11 pr-4 text-sm font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#dc8e5f] focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10 disabled:cursor-not-allowed disabled:opacity-60'
+  'w-full rounded-2xl border border-[#081b2c]/10 bg-[#fafaf8] py-3.5 pl-11 pr-4 text-sm font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#2f7fc1] focus:bg-white focus:ring-4 focus:ring-[#2f7fc1]/10 disabled:cursor-not-allowed disabled:opacity-60'
 
 export default function Login() {
   const { signIn, requestAccess, sendPasswordReset, authError, configurationError, clearAuthError } = useAuth()
@@ -100,11 +100,11 @@ export default function Login() {
   return (
     <main className="relative min-h-dvh overflow-hidden bg-[#f7f5f1] text-[#081b2c]">
       <div className="pointer-events-none absolute -left-32 -top-40 h-[440px] w-[440px] rounded-full bg-[#9fc2b8]/20 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-52 -right-32 h-[520px] w-[520px] rounded-full bg-[#e9b18f]/25 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-52 -right-32 h-[520px] w-[520px] rounded-full bg-[#86bce4]/25 blur-3xl" />
 
       <div className="relative mx-auto grid min-h-dvh max-w-[1500px] lg:grid-cols-[minmax(0,1.08fr)_minmax(440px,.92fr)]">
         <section className="soft-grid relative hidden overflow-hidden bg-[#081b2c] p-12 text-white lg:flex lg:flex-col lg:justify-between">
-          <div className="absolute -right-24 top-20 h-80 w-80 rounded-full bg-[#dc8e5f]/15 blur-3xl" />
+          <div className="absolute -right-24 top-20 h-80 w-80 rounded-full bg-[#2f7fc1]/15 blur-3xl" />
           <div className="absolute -bottom-28 -left-20 h-72 w-72 rounded-full bg-[#6f9d91]/15 blur-3xl" />
 
           <div className="relative">
@@ -114,13 +114,13 @@ export default function Login() {
               className="h-14 w-auto max-w-[220px] brightness-0 invert"
             />
             <div className="mt-6 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.24em] text-white/45">
-              <HeartHandshake className="h-4 w-4 text-[#e2a077]" />
+              <HeartHandshake className="h-4 w-4 text-[#6aa8d9]" />
               Central de cuidado
             </div>
           </div>
 
           <div className="relative max-w-2xl py-12">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#efb28e]">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#8dbde4]">
               <Sparkles className="h-3.5 w-3.5" />
               Cuidado contínuo
             </div>
@@ -133,7 +133,7 @@ export default function Login() {
 
             <div className="mt-9 grid max-w-xl grid-cols-2 gap-3">
               <div className="rounded-[22px] border border-white/10 bg-white/[0.06] p-4 backdrop-blur">
-                <ShieldCheck className="h-5 w-5 text-[#e4a078]" />
+                <ShieldCheck className="h-5 w-5 text-[#6aa8d9]" />
                 <p className="mt-3 text-xs font-extrabold text-white/90">Acesso protegido</p>
                 <p className="mt-1 text-[10px] leading-relaxed text-white/40">Somente para a equipe autorizada</p>
               </div>
@@ -164,11 +164,11 @@ export default function Login() {
 
             <div className="surface-card rounded-[30px] p-6 shadow-[0_24px_70px_rgba(8,27,44,.11)] sm:p-8">
               <div className="flex items-start gap-3">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] bg-[#f5e7dd] text-[#c87543]">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] bg-[#dceaf7] text-[#1f4f78]">
                   {mode === 'request' ? <UserRoundPlus className="h-5 w-5" /> : <LockKeyhole className="h-5 w-5" />}
                 </span>
                 <div>
-                  <p className="text-[9px] font-extrabold uppercase tracking-[0.17em] text-[#c87543]">
+                  <p className="text-[9px] font-extrabold uppercase tracking-[0.17em] text-[#1f4f78]">
                     {mode === 'login' ? 'Área restrita' : mode === 'reset' ? 'Recuperar acesso' : 'Solicitação de acesso'}
                   </p>
                   <h2 className="mt-1.5 text-2xl font-extrabold tracking-[-0.04em] text-[#081b2c]">
@@ -279,7 +279,7 @@ export default function Login() {
                       type="button"
                       onClick={() => setShowPassword((current) => !current)}
                       disabled={disabled}
-                      className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-slate-400 transition hover:bg-[#f3eee9] hover:text-[#c87543] disabled:pointer-events-none"
+                      className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-slate-400 transition hover:bg-[#f3eee9] hover:text-[#1f4f78] disabled:pointer-events-none"
                       aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                     >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -341,7 +341,7 @@ export default function Login() {
                   ) : (
                     <>
                       {mode === 'login' ? 'Entrar com segurança' : mode === 'reset' ? 'Enviar link' : 'Solicitar aprovação'}
-                      <ArrowRight className="h-4 w-4 text-[#e6a47b] transition-transform group-hover:translate-x-0.5" />
+                      <ArrowRight className="h-4 w-4 text-[#6fadde] transition-transform group-hover:translate-x-0.5" />
                     </>
                   )}
                 </button>

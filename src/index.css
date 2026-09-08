@@ -67,12 +67,12 @@
   }
 
   :focus-visible {
-    outline: 3px solid rgba(224, 148, 100, 0.32);
+    outline: 3px solid rgba(47, 127, 193, 0.32);
     outline-offset: 2px;
   }
 
   ::selection {
-    background: #efc2a7;
+    background: #cfe4f6;
     color: #081b2c;
   }
 }

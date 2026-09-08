@@ -109,7 +109,7 @@ function emptyDraft(unidadePadrao = ''): PatientDraft {
 }
 
 const inputClass =
-  'mt-1.5 w-full rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-xs font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#dc8e5f] focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10'
+  'mt-1.5 w-full rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-xs font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#2f7fc1] focus:bg-white focus:ring-4 focus:ring-[#2f7fc1]/10'
 
 function Field({
   label,
@@ -126,7 +126,7 @@ function Field({
     <label className={`block ${className}`}>
       <span className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-slate-500">
         {label}
-        {required && <span className="ml-1 text-[#d37543]">*</span>}
+        {required && <span className="ml-1 text-[#2f7fc1]">*</span>}
       </span>
       {children}
     </label>
@@ -135,7 +135,7 @@ function Field({
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, { text: string; className: string }> = {
-    pendente: { text: 'Pendente', className: 'bg-[#fff4df] text-[#a96d1d]' },
+    pendente: { text: 'Pendente', className: 'bg-[#e4f0fb] text-[#1f5c88]' },
     enviado: { text: 'Aberto', className: 'bg-[#e8f0f8] text-[#4d6f91]' },
     concluido: { text: 'Concluído', className: 'bg-[#e7f3ef] text-[#4d7c70]' },
   }
@@ -446,11 +446,11 @@ export default function Patients({
         <div className="grid md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
           <div className="p-5 sm:p-6">
             <div className="flex items-start gap-3">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] bg-[#f5e7dd] text-[#c87543]">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] bg-[#dceaf7] text-[#1f4f78]">
                 <UsersRound className="h-5 w-5" />
               </span>
               <div>
-                <p className="text-[9px] font-extrabold uppercase tracking-[0.15em] text-[#c87543]">Base ativa</p>
+                <p className="text-[9px] font-extrabold uppercase tracking-[0.15em] text-[#1f4f78]">Base ativa</p>
                 <div className="mt-1 flex items-baseline gap-2">
                   <span className="text-3xl font-extrabold tracking-[-0.05em] text-[#081b2c]">{patients.length}</span>
                   <span className="text-xs font-semibold text-slate-400">{patients.length === 1 ? 'paciente cadastrado' : 'pacientes cadastrados'}</span>
@@ -476,7 +476,7 @@ export default function Patients({
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
-            className="w-full rounded-2xl border border-[#081b2c]/[0.08] bg-white/80 py-3 pl-11 pr-4 text-xs font-semibold text-[#081b2c] shadow-sm outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:border-[#dc8e5f]/60 focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10"
+            className="w-full rounded-2xl border border-[#081b2c]/[0.08] bg-white/80 py-3 pl-11 pr-4 text-xs font-semibold text-[#081b2c] shadow-sm outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:border-[#2f7fc1]/60 focus:bg-white focus:ring-4 focus:ring-[#2f7fc1]/10"
             placeholder="Buscar por nome, responsável, cidade, CID ou convênio"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -600,7 +600,7 @@ export default function Patients({
 
       {filtered.length === 0 && !mostrandoArquivados ? (
         <section className="surface-card rounded-[26px] px-6 py-14 text-center">
-          <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#f5e7dd] text-[#c87543]">
+          <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#dceaf7] text-[#1f4f78]">
             <CircleUserRound className="h-7 w-7" />
           </span>
           <h2 className="mt-4 text-base font-extrabold text-[#081b2c]">
@@ -741,7 +741,7 @@ export default function Patients({
                         type="button"
                         onClick={() => setRecordPatientId(patient.id)}
                         title="Abrir prontuário completo"
-                        className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 transition hover:bg-[#f3eee9] hover:text-[#c87543]"
+                        className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 transition hover:bg-[#f3eee9] hover:text-[#1f4f78]"
                       >
                         <Edit3 className="h-3.5 w-3.5" />
                       </button>
@@ -758,7 +758,7 @@ export default function Patients({
 
                   <div className="mt-3 flex flex-wrap gap-2">
                     <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#f7f6f3] px-2.5 py-1.5 text-[9px] font-bold text-slate-500">
-                      <CalendarDays className="h-3 w-3 text-[#d98e5f]" />
+                      <CalendarDays className="h-3 w-3 text-[#2f7fc1]" />
                       Consulta {fmtBR(patient.dataConsulta)}
                     </span>
                     {(patient.cidade || patient.bairro) && (
@@ -818,7 +818,7 @@ export default function Patients({
         >
           <SheetHeader className="border-b border-[#081b2c]/[0.07] bg-white px-5 pb-5 pt-6 sm:px-7">
             <div className="flex items-center gap-3 pr-8">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] bg-[#f5e7dd] text-[#c87543]">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] bg-[#dceaf7] text-[#1f4f78]">
                 {editingId ? <Edit3 className="h-5 w-5" /> : <FileHeart className="h-5 w-5" />}
               </span>
               <div>
@@ -893,7 +893,7 @@ export default function Patients({
                   <option value="O">Outro / não informado</option>
                 </select>
                 {sexoSugerido && (
-                  <span className="mt-1 block text-[10px] font-semibold text-[#8a4b1d]">
+                  <span className="mt-1 block text-[10px] font-semibold text-[#16456b]">
                     Sugerido pelo nome. Confira antes de salvar.
                   </span>
                 )}
@@ -959,7 +959,7 @@ export default function Patients({
               disabled={saving}
               className="flex flex-1 items-center justify-center gap-2 rounded-[14px] bg-[#081b2c] px-5 py-3 text-xs font-extrabold text-white shadow-[0_10px_22px_rgba(8,27,44,.16)] transition hover:bg-[#102d47]"
             >
-              <Check className="h-4 w-4 text-[#e3a078]" strokeWidth={3} />
+              <Check className="h-4 w-4 text-[#6aa8d9]" strokeWidth={3} />
               {saving ? 'Salvando...' : editingId ? 'Salvar alterações' : 'Cadastrar'}
             </button>
             {/* Segundo caminho, para quem vai atender agora. Fica ao lado e nao
@@ -969,7 +969,7 @@ export default function Patients({
                 type="button"
                 onClick={() => void save(true)}
                 disabled={saving}
-                className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/15 bg-white px-4 py-3 text-xs font-bold text-[#081b2c] transition hover:border-[#dc8e5f] hover:text-[#8a4b1d] disabled:opacity-40"
+                className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/15 bg-white px-4 py-3 text-xs font-bold text-[#081b2c] transition hover:border-[#2f7fc1] hover:text-[#16456b] disabled:opacity-40"
               >
                 <Stethoscope className="h-4 w-4" />
                 Cadastrar e abrir prontuário
