@@ -78,15 +78,29 @@ function hora(iso: string) {
   )
 }
 
-/** Junta horarios livres e consultas marcadas num unico calendario por dia. */
-function agruparPorDia(slots: string[], appointments: Appointment[]) {
-  const dias = new Map<string, { livres: string[]; marcados: Appointment[] }>()
+/**
+ * Reserva de horario sem paciente: a equipe ocupou a vaga para o proprio
+ * medico (outro consultorio, compromisso). Nasce pela tela, sem cadastro nem
+ * telefone - e isso que a distingue de uma solicitacao pelo WhatsApp.
+ */
+function ehReserva(item: Appointment) {
+  return item.source === 'clinic' && !item.patientId && !item.contactName && !item.contactPhone
+}
+
+/**
+ * Junta horarios livres, consultas marcadas e dias bloqueados num unico
+ * calendario por dia. O dia bloqueado entra para ser visto e liberado dali
+ * mesmo; sem isso ele so sumia da lista e ninguem sabia por que.
+ */
+function agruparPorDia(slots: string[], appointments: Appointment[], bloqueios: ScheduleException[]) {
+  const dias = new Map<string, { livres: string[]; marcados: Appointment[]; bloqueio: ScheduleException | null }>()
   const garantir = (chave: string) => {
-    if (!dias.has(chave)) dias.set(chave, { livres: [], marcados: [] })
+    if (!dias.has(chave)) dias.set(chave, { livres: [], marcados: [], bloqueio: null })
     return dias.get(chave)!
   }
   for (const slot of slots) garantir(slot.slice(0, 10)).livres.push(slot)
   for (const item of appointments) garantir(item.startsAt.slice(0, 10)).marcados.push(item)
+  for (const bloqueio of bloqueios) garantir(bloqueio.date).bloqueio = bloqueio
   return [...dias.entries()].sort((a, b) => a[0].localeCompare(b[0]))
 }
 
@@ -315,6 +329,9 @@ export default function Agenda({
     { id: string; paciente: string; quando: string } | null
   >(null)
   const [slotEscolhido, setSlotEscolhido] = useState<string | null>(null)
+  const [motivoReserva, setMotivoReserva] = useState('')
+  // Dia que o usuario mandou bloquear e ainda espera o motivo.
+  const [bloqueandoDia, setBloqueandoDia] = useState<{ dia: string; motivo: string } | null>(null)
 
   // Formularios
   const [novaUnidade, setNovaUnidade] = useState({ nome: '', endereco: '' })
@@ -372,7 +389,14 @@ export default function Agenda({
     void carregarUnidade()
   }, [carregarUnidade])
 
-  const dias = useMemo(() => agruparPorDia(slots, appointments), [slots, appointments])
+  const dias = useMemo(() => {
+    const limite = new Date()
+    limite.setDate(limite.getDate() + prefs.horizonDays)
+    const bloqueios = exceptions.filter(
+      (e) => e.isClosed && (e.unitId === null || e.unitId === unitId) && e.date <= limite.toISOString().slice(0, 10),
+    )
+    return agruparPorDia(slots, appointments, bloqueios)
+  }, [slots, appointments, exceptions, unitId, prefs.horizonDays])
   const unidadeAtual = units.find((u) => u.id === unitId) ?? null
 
   // ---- Painel de edicao de uma consulta ----
@@ -620,15 +644,100 @@ export default function Agenda({
                 </div>
               )}
 
-              {dias.map(([dia, { livres, marcados }]) => (
-                <div key={dia} className="surface-card rounded-[20px] p-4">
-                  <p className="text-xs font-extrabold capitalize text-[#081b2c]">
-                    {diaLegivel(dia + 'T12:00:00')}
-                  </p>
+              {dias.map(([dia, { livres, marcados, bloqueio }]) => (
+                <div key={dia} className={`surface-card rounded-[20px] p-4 ${bloqueio ? 'opacity-80' : ''}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-extrabold capitalize text-[#081b2c]">
+                      {diaLegivel(dia + 'T12:00:00')}
+                    </p>
+                    {bloqueio ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void acao(() => deleteScheduleException(bloqueio.id), 'Dia liberado.')
+                        }
+                        className="rounded-lg border border-[#081b2c]/10 px-2.5 py-1 text-[10px] font-bold text-[#557f75] transition hover:bg-[#eef3f2]"
+                      >
+                        Liberar dia
+                      </button>
+                    ) : bloqueandoDia?.dia === dia ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <input
+                          autoFocus
+                          value={bloqueandoDia.motivo}
+                          onChange={(e) => setBloqueandoDia({ dia, motivo: e.target.value })}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') setBloqueandoDia(null)
+                          }}
+                          placeholder="Motivo (ex.: outro consultório)"
+                          className="w-52 rounded-lg border border-[#081b2c]/10 bg-white px-2.5 py-1 text-[10px] outline-none focus:border-[#1f4f78]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const motivo = bloqueandoDia.motivo
+                            setBloqueandoDia(null)
+                            void acao(
+                              () => createScheduleException(clinicId!, dia, motivo, unitId),
+                              'Dia bloqueado. Ele não é mais oferecido no WhatsApp.',
+                            )
+                          }}
+                          className="rounded-lg bg-[#1f4f78] px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-[#183f61]"
+                        >
+                          Bloquear
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBloqueandoDia(null)}
+                          className="rounded-lg px-2 py-1 text-[10px] font-bold text-slate-400 hover:text-slate-600"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        title="Ninguém consegue marcar neste dia; as consultas já marcadas continuam"
+                        onClick={() => setBloqueandoDia({ dia, motivo: '' })}
+                        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold text-slate-400 transition hover:bg-[#f3f4f6] hover:text-[#081b2c]"
+                      >
+                        <CalendarOff className="h-3 w-3" /> Bloquear dia
+                      </button>
+                    )}
+                  </div>
+                  {bloqueio && (
+                    <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-[#e9edf1] px-3 py-1.5 text-[10px] font-bold text-[#081b2c]">
+                      <CalendarOff className="h-3 w-3" /> Dia bloqueado{bloqueio.reason ? ` · ${bloqueio.reason}` : ''}
+                      {bloqueio.unitId === null ? ' · todas as unidades' : ''}
+                    </p>
+                  )}
 
                   {marcados.length > 0 && (
                     <div className="mt-2.5 space-y-1.5">
-                      {marcados.map((item) => (
+                      {marcados.map((item) => ehReserva(item) ? (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between gap-2 rounded-xl border border-dashed border-[#081b2c]/20 bg-[#e9edf1] px-3 py-2"
+                        >
+                          <p className="min-w-0 flex-1 truncate text-[11px] font-bold text-[#081b2c]">
+                            {hora(item.startsAt)} · Reservado{item.staffNote ? ` · ${item.staffNote}` : ''}
+                            <span className="ml-1 font-semibold text-slate-500">(não aparece no WhatsApp)</span>
+                          </p>
+                          <button
+                            type="button"
+                            title="Liberar horário"
+                            onClick={() =>
+                              void acao(
+                                () => cancelAppointment(item.id, 'Reserva liberada', false, false),
+                                'Horário liberado.',
+                              )
+                            }
+                            className="shrink-0 rounded-lg p-1.5 text-slate-500 transition hover:bg-white hover:text-[#081b2c]"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
                         <div
                           key={item.id}
                           className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 ${
@@ -1108,17 +1217,55 @@ export default function Agenda({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#081b2c]/40 p-4">
           <div className="w-full max-w-sm rounded-[22px] bg-white p-5 shadow-xl">
             <p className="flex items-center gap-1.5 text-sm font-extrabold text-[#081b2c]">
-              <CalendarPlus className="h-4 w-4 text-[#dc8e5f]" />
+              <CalendarPlus className="h-4 w-4 text-[#1f4f78]" />
               Marcar consulta
             </p>
             <p className="mt-1 text-[11px] text-slate-500">
               {diaLegivel(slotEscolhido)} às {hora(slotEscolhido)} · {unidadeAtual?.name}
             </p>
 
+            {/* Reservar sem paciente: o medico tem outro compromisso e a vaga
+                nao pode ser oferecida no WhatsApp. Fica aqui em cima, curto,
+                porque e o caso mais comum de clique num horario vazio depois
+                de marcar consulta. */}
+            <div className="mt-4 rounded-[14px] border border-dashed border-[#081b2c]/15 bg-[#f6f7f9] p-3">
+              <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">
+                Reservar sem paciente
+              </p>
+              <div className="mt-2 flex gap-2">
+                <input
+                  value={motivoReserva}
+                  onChange={(e) => setMotivoReserva(e.target.value)}
+                  placeholder="Motivo (ex.: outro consultório)"
+                  className="min-w-0 flex-1 rounded-xl border border-[#081b2c]/10 bg-white px-3 py-2 text-xs outline-none focus:border-[#1f4f78]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const inicio = slotEscolhido
+                    const motivo = motivoReserva.trim()
+                    setSlotEscolhido(null)
+                    setMotivoReserva('')
+                    void acao(async () => {
+                      if (!clinicId || !unitId) return
+                      await createAppointment(clinicId, unitId, null, inicio, prefs.slotMinutes, motivo)
+                    }, 'Horário reservado. Ele não é mais oferecido no WhatsApp.')
+                  }}
+                  className="shrink-0 rounded-xl bg-[#1f4f78] px-3 py-2 text-[11px] font-bold text-white transition hover:bg-[#183f61]"
+                >
+                  Reservar
+                </button>
+              </div>
+            </div>
+
+            <p className="mt-4 text-[10px] font-extrabold uppercase tracking-wide text-slate-500">
+              Ou marcar consulta
+            </p>
+
             <select
               id="paciente-agenda"
               defaultValue=""
-              className="mt-4 w-full rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3 py-2 text-xs outline-none focus:border-[#dc8e5f]"
+              className="mt-2 w-full rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3 py-2 text-xs outline-none focus:border-[#1f4f78]"
             >
               <option value="">Selecione o paciente</option>
               {patients.map((p) => (
@@ -1131,7 +1278,10 @@ export default function Agenda({
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setSlotEscolhido(null)}
+                onClick={() => {
+                  setSlotEscolhido(null)
+                  setMotivoReserva('')
+                }}
                 className="rounded-xl bg-[#eef3f2] px-3 py-2 text-[11px] font-bold text-[#557f75]"
               >
                 Cancelar
