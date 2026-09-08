@@ -101,9 +101,9 @@ export default function DadosDaClinica() {
         <label className="block">
           <span className="flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
             Telefone da clínica
-            <Ajuda texto="Telefone de contato impresso na receita, para a farmácia ou a família falarem com a clínica." />
+            <Ajuda texto="Telefone de contato impresso na receita. Pode ter dois, separados por barra: (13) 3273-6828 / (13) 99999-0000. O cadastro do médico na Memed leva só o primeiro." />
           </span>
-          <input className={campo} value={dados.telefone} onChange={(e) => set('telefone', e.target.value)} placeholder="(13) 0000-0000" inputMode="tel" />
+          <input className={campo} value={dados.telefone} onChange={(e) => set('telefone', e.target.value)} placeholder="(13) 0000-0000 / (13) 90000-0000" inputMode="tel" />
         </label>
         <label className="block">
           <span className="flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wide text-slate-400">

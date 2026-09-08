@@ -73,9 +73,14 @@ type Ajustes = {
   clinic_phone: string | null
 }
 
-/** Telefone da clinica como a Memed guarda: so digitos. Vem de Preferencias. */
+/**
+ * Telefone da clinica como a Memed guarda no cadastro: um numero, so digitos.
+ * Em Preferencias pode haver dois ("fixo / WhatsApp"); o cadastro leva o
+ * primeiro, a receita leva os dois.
+ */
 function telefoneDaClinica(ajustes: Ajustes) {
-  const digitos = soDigitos(ajustes.clinic_phone ?? '')
+  const primeiro = (ajustes.clinic_phone ?? '').split(/[/;,]|\se\s/)[0] ?? ''
+  const digitos = soDigitos(primeiro)
   return digitos || undefined
 }
 
