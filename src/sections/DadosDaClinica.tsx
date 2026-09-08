@@ -9,7 +9,7 @@ import {
 } from '@/lib/repository'
 
 const campo =
-  'mt-1.5 w-full rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-xs font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#dc8e5f] focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10'
+  'mt-1.5 w-full rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-xs font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#2f7fc1] focus:bg-white focus:ring-4 focus:ring-[#2f7fc1]/10'
 
 const vazio: Dados = { medicoNome: '', crm: '', telefone: '', medicoEmail: '', medicoNascimento: '' }
 
@@ -130,7 +130,7 @@ export default function DadosDaClinica() {
               salvo ? 'bg-[#6f9d91]' : 'bg-[#081b2c] hover:bg-[#102d47]'
             }`}
           >
-            {salvo ? <Check className="h-4 w-4" strokeWidth={3} /> : <Save className="h-4 w-4 text-[#e3a078]" />}
+            {salvo ? <Check className="h-4 w-4" strokeWidth={3} /> : <Save className="h-4 w-4 text-[#6aa8d9]" />}
             {salvando ? 'Salvando...' : salvo ? 'Dados salvos' : 'Salvar dados'}
           </button>
         </div>

@@ -13,7 +13,7 @@ export function Ajuda({ texto, className = '' }: { texto: string; className?: st
           type="button"
           aria-label="O que é isto?"
           onClick={(evento) => evento.preventDefault()}
-          className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-slate-300 text-[9px] font-extrabold leading-none text-slate-400 transition hover:border-[#dc8e5f] hover:text-[#dc8e5f] ${className}`}
+          className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-slate-300 text-[9px] font-extrabold leading-none text-slate-400 transition hover:border-[#2f7fc1] hover:text-[#2f7fc1] ${className}`}
         >
           ?
         </button>

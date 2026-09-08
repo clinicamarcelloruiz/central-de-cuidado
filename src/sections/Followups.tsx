@@ -22,7 +22,7 @@ import {
 import { supabase } from '@/lib/supabase'
 
 const NAVY = '#081b2c'
-const PEACH = '#dc8e5f'
+const AZUL = '#2f7fc1'
 
 interface Props {
   patients: Patient[]
@@ -36,7 +36,7 @@ type Accent = 'danger' | 'today' | 'upcoming' | 'scheduled'
 
 const GROUP_STYLE: Record<Accent, { text: string; bg: string; icon: typeof AlertCircle }> = {
   danger: { text: 'text-[#c64d4a]', bg: 'bg-[#c64d4a]', icon: AlertCircle },
-  today: { text: 'text-[#c87543]', bg: 'bg-[#dc8e5f]', icon: Sparkles },
+  today: { text: 'text-[#1f4f78]', bg: 'bg-[#2f7fc1]', icon: Sparkles },
   upcoming: { text: 'text-[#557f75]', bg: 'bg-[#6f9d91]', icon: CalendarClock },
   scheduled: { text: 'text-slate-500', bg: 'bg-slate-400', icon: Clock3 },
 }
@@ -185,7 +185,7 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
     const isSending = sending === sendingKey
     const isOverdue = item.urgencia === 'atrasado'
     const isToday = item.urgencia === 'hoje'
-    const accent = isOverdue ? '#c94f4c' : isToday ? PEACH : item.key === 'd30' ? '#6f9d91' : NAVY
+    const accent = isOverdue ? '#c94f4c' : isToday ? AZUL : item.key === 'd30' ? '#6f9d91' : NAVY
 
     return (
       <article
@@ -295,10 +295,10 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
       <div className="space-y-6">
         <section className="soft-grid relative overflow-hidden rounded-[28px] bg-[#081b2c] p-5 text-white shadow-[0_18px_42px_rgba(8,27,44,.15)] sm:p-7">
-          <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-[#dc8e5f]/20 blur-3xl" />
+          <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-[#2f7fc1]/20 blur-3xl" />
           <div className="relative grid gap-6 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
             <div>
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-[0.14em] text-[#efb28e]">
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-[0.14em] text-[#8dbde4]">
                 <HeartHandshake className="h-3.5 w-3.5" />
                 Fila inteligente
               </div>
@@ -315,7 +315,7 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
                 <p className="text-[9px] font-bold uppercase tracking-wider text-white/35">Abertas</p>
                 <p className="mt-1 text-2xl font-extrabold tracking-[-0.04em]">{items.length}</p>
               </div>
-              <div className="min-w-[92px] rounded-[18px] bg-[#e39a6d] p-3.5 text-[#081b2c]">
+              <div className="min-w-[92px] rounded-[18px] bg-[#5b9fd5] p-3.5 text-[#081b2c]">
                 <p className="text-[9px] font-bold uppercase tracking-wider text-[#081b2c]/50">Concluídas</p>
                 <p className="mt-1 text-2xl font-extrabold tracking-[-0.04em]">{completed}</p>
               </div>
@@ -351,16 +351,16 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
         <section className="surface-card rounded-[24px] p-5">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#c87543]">Jornada do paciente</p>
+              <p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#1f4f78]">Jornada do paciente</p>
               <h2 className="mt-1.5 text-sm font-extrabold text-[#081b2c]">Três pontos de cuidado</h2>
             </div>
-            <Stethoscope className="h-5 w-5 text-[#d98e5f]" />
+            <Stethoscope className="h-5 w-5 text-[#2f7fc1]" />
           </div>
 
           <div className="relative mt-6 space-y-5">
-            <div className="absolute bottom-5 left-[17px] top-5 w-px bg-gradient-to-b from-[#d98e5f] via-[#6f9d91] to-[#081b2c]/20" />
+            <div className="absolute bottom-5 left-[17px] top-5 w-px bg-gradient-to-b from-[#2f7fc1] via-[#6f9d91] to-[#081b2c]/20" />
             {[
-              { icon: Stethoscope, label: 'Consulta', detail: 'Cadastro clínico inicial', color: '#dc8e5f' },
+              { icon: Stethoscope, label: 'Consulta', detail: 'Cadastro clínico inicial', color: '#2f7fc1' },
               { icon: Send, label: '30 dias', detail: 'Primeiro contato de evolução', color: '#6f9d91' },
               { icon: HeartHandshake, label: '90 dias', detail: 'Continuidade e suporte', color: '#081b2c' },
             ].map((step) => {

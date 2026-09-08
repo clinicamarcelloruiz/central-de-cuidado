@@ -169,7 +169,7 @@ function CaixaDeCancelamento({
                 O paciente foi avisado pelo WhatsApp.
               </p>
             ) : (
-              <p className="mt-3 flex items-start gap-2 rounded-xl bg-[#fdf3e7] px-3.5 py-3 text-[11px] font-bold leading-relaxed text-[#96591a]">
+              <p className="mt-3 flex items-start gap-2 rounded-xl bg-[#ebf4fd] px-3.5 py-3 text-[11px] font-bold leading-relaxed text-[#1a5079]">
                 <MessageCircleOff className="mt-px h-4 w-4 shrink-0" />
                 <span>
                   O paciente NÃO foi avisado. {resultado.motivoDoSilencio}
@@ -200,7 +200,7 @@ function CaixaDeCancelamento({
                   key={opcao}
                   className={`flex cursor-pointer items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-[11px] font-bold transition ${
                     motivo === opcao
-                      ? 'border-[#dc8e5f] bg-[#fdf4ef] text-[#081b2c]'
+                      ? 'border-[#2f7fc1] bg-[#eff6fd] text-[#081b2c]'
                       : 'border-[#081b2c]/10 bg-white text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -209,7 +209,7 @@ function CaixaDeCancelamento({
                     name="motivo"
                     checked={motivo === opcao}
                     onChange={() => setMotivo(opcao)}
-                    className="h-3.5 w-3.5 accent-[#c87543]"
+                    className="h-3.5 w-3.5 accent-[#1f4f78]"
                   />
                   {opcao}
                 </label>
@@ -223,7 +223,7 @@ function CaixaDeCancelamento({
                 onChange={(evento) => setOutro(evento.target.value)}
                 maxLength={140}
                 placeholder="O que o paciente vai ler como motivo"
-                className="mt-2 w-full rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-[11px] font-semibold text-[#081b2c] outline-none focus:border-[#dc8e5f] focus:bg-white"
+                className="mt-2 w-full rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-[11px] font-semibold text-[#081b2c] outline-none focus:border-[#2f7fc1] focus:bg-white"
               />
             )}
 
@@ -232,7 +232,7 @@ function CaixaDeCancelamento({
                 type="checkbox"
                 checked={avisar}
                 onChange={(evento) => setAvisar(evento.target.checked)}
-                className="mt-0.5 h-3.5 w-3.5 accent-[#c87543]"
+                className="mt-0.5 h-3.5 w-3.5 accent-[#1f4f78]"
               />
               <span>
                 Avisar o paciente pelo WhatsApp
@@ -250,7 +250,7 @@ function CaixaDeCancelamento({
                   type="checkbox"
                   checked={sugerir}
                   onChange={(evento) => setSugerir(evento.target.checked)}
-                  className="mt-0.5 h-3.5 w-3.5 accent-[#c87543]"
+                  className="mt-0.5 h-3.5 w-3.5 accent-[#1f4f78]"
                 />
                 <span>
                   Sugerir 3 horários da mesma unidade
@@ -562,13 +562,13 @@ export default function Agenda({
               value={novaUnidade.nome}
               onChange={(e) => setNovaUnidade({ ...novaUnidade, nome: e.target.value })}
               placeholder="Nome da unidade"
-              className="rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3 py-2 text-xs outline-none focus:border-[#dc8e5f]"
+              className="rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3 py-2 text-xs outline-none focus:border-[#2f7fc1]"
             />
             <input
               value={novaUnidade.endereco}
               onChange={(e) => setNovaUnidade({ ...novaUnidade, endereco: e.target.value })}
               placeholder="Endereço (opcional)"
-              className="rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3 py-2 text-xs outline-none focus:border-[#dc8e5f]"
+              className="rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3 py-2 text-xs outline-none focus:border-[#2f7fc1]"
             />
             <button
               type="button"
@@ -629,7 +629,7 @@ export default function Agenda({
           {aba === 'calendario' ? (
             <div className="space-y-3">
               {rules.length === 0 && (
-                <div className="flex items-start gap-2 rounded-[16px] border border-[#dc8e5f]/40 bg-[#fdf3ec] p-3 text-[11px] font-bold text-[#8a4b1d]">
+                <div className="flex items-start gap-2 rounded-[16px] border border-[#2f7fc1]/40 bg-[#eef5fd] p-3 text-[11px] font-bold text-[#16456b]">
                   <Clock className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>
                     Esta unidade ainda não tem horário de atendimento definido, então não há
@@ -743,7 +743,7 @@ export default function Agenda({
                           className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 ${
                             item.confirmedByClinic
                               ? 'bg-[#081b2c]'
-                              : 'border border-[#dc8e5f] bg-[#8a4b1d]'
+                              : 'border border-[#2f7fc1] bg-[#16456b]'
                           }`}
                         >
                           <button
@@ -766,7 +766,7 @@ export default function Agenda({
                               </span>
                             )}
                             {item.rescheduleRequestedAt && !item.confirmedAt && (
-                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#dc8e5f] px-2 py-0.5 text-[9px] font-extrabold text-white">
+                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#2f7fc1] px-2 py-0.5 text-[9px] font-extrabold text-white">
                                 Pediu para remarcar
                               </span>
                             )}
@@ -783,7 +783,7 @@ export default function Agenda({
                               <span
                                 className={`mt-1 ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
                                   item.rescheduleCount >= 2
-                                    ? 'bg-[#dc8e5f] text-white'
+                                    ? 'bg-[#2f7fc1] text-white'
                                     : 'bg-white/15 text-white/70'
                                 }`}
                               >
@@ -860,7 +860,7 @@ export default function Agenda({
                           key={slot}
                           type="button"
                           onClick={() => setSlotEscolhido(slot)}
-                          className="rounded-lg border border-[#081b2c]/10 bg-[#fafaf8] px-2.5 py-1.5 text-[10px] font-bold text-[#081b2c] transition hover:border-[#dc8e5f] hover:bg-white"
+                          className="rounded-lg border border-[#081b2c]/10 bg-[#fafaf8] px-2.5 py-1.5 text-[10px] font-bold text-[#081b2c] transition hover:border-[#2f7fc1] hover:bg-white"
                         >
                           {hora(slot)}
                         </button>
@@ -875,7 +875,7 @@ export default function Agenda({
               {/* Horarios de atendimento */}
               <div className="surface-card rounded-[20px] p-4">
                 <p className="flex items-center gap-1.5 text-xs font-extrabold text-[#081b2c]">
-                  <Clock className="h-3.5 w-3.5 text-[#dc8e5f]" />
+                  <Clock className="h-3.5 w-3.5 text-[#2f7fc1]" />
                   Horários de atendimento
                 </p>
                 <p className="mt-1 text-[10px] text-slate-500">
@@ -960,7 +960,7 @@ export default function Agenda({
               {/* Datas bloqueadas */}
               <div className="surface-card rounded-[20px] p-4">
                 <p className="flex items-center gap-1.5 text-xs font-extrabold text-[#081b2c]">
-                  <CalendarOff className="h-3.5 w-3.5 text-[#dc8e5f]" />
+                  <CalendarOff className="h-3.5 w-3.5 text-[#2f7fc1]" />
                   Datas bloqueadas
                 </p>
                 <p className="mt-1 text-[10px] text-slate-500">
@@ -1040,7 +1040,7 @@ export default function Agenda({
               {/* Preferencias */}
               <div className="surface-card rounded-[20px] p-4">
                 <p className="flex items-center gap-1.5 text-xs font-extrabold text-[#081b2c]">
-                  <Settings2 className="h-3.5 w-3.5 text-[#dc8e5f]" />
+                  <Settings2 className="h-3.5 w-3.5 text-[#2f7fc1]" />
                   Preferências da agenda
                 </p>
                 <div className="mt-3 grid grid-cols-3 gap-2">
@@ -1080,7 +1080,7 @@ export default function Agenda({
                         onChange={(e) =>
                           setPrefs({ ...prefs, [campo.chave]: Number(e.target.value) })
                         }
-                        className="mt-1 w-full rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none focus:border-[#dc8e5f]"
+                        className="mt-1 w-full rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none focus:border-[#2f7fc1]"
                       />
                     </label>
                   ))}
@@ -1098,7 +1098,7 @@ export default function Agenda({
                       type="checkbox"
                       checked={prefs.reminderEnabled}
                       onChange={(e) => setPrefs({ ...prefs, reminderEnabled: e.target.checked })}
-                      className="h-3.5 w-3.5 accent-[#dc8e5f]"
+                      className="h-3.5 w-3.5 accent-[#2f7fc1]"
                     />
                     <span className="text-[11px] font-bold text-[#081b2c]">
                       Enviar lembrete de consulta pelo WhatsApp
@@ -1112,7 +1112,7 @@ export default function Agenda({
                       disabled={!prefs.reminderEnabled}
                       value={prefs.reminderDays}
                       onChange={(e) => setPrefs({ ...prefs, reminderDays: Number(e.target.value) })}
-                      className="w-16 rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none focus:border-[#dc8e5f] disabled:bg-slate-50 disabled:text-slate-400"
+                      className="w-16 rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none focus:border-[#2f7fc1] disabled:bg-slate-50 disabled:text-slate-400"
                     />
                     <span className="text-[11px] text-slate-600">
                       {prefs.reminderDays === 0
@@ -1145,7 +1145,7 @@ export default function Agenda({
               {/* Unidades */}
               <div className="surface-card rounded-[20px] p-4">
                 <p className="flex items-center gap-1.5 text-xs font-extrabold text-[#081b2c]">
-                  <Building2 className="h-3.5 w-3.5 text-[#dc8e5f]" />
+                  <Building2 className="h-3.5 w-3.5 text-[#2f7fc1]" />
                   Unidades
                 </p>
                 <div className="mt-3 space-y-1.5">
@@ -1392,7 +1392,7 @@ export default function Agenda({
                         value={buscaPaciente}
                         onChange={(e) => setBuscaPaciente(e.target.value)}
                         placeholder="Buscar entre os pacientes cadastrados"
-                        className="mt-2 w-full rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-[11px] outline-none focus:border-[#dc8e5f]"
+                        className="mt-2 w-full rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-[11px] outline-none focus:border-[#2f7fc1]"
                       />
                       <div className="mt-2 space-y-1">
                         {encontrados.slice(0, MAX_SUGESTOES).map((p) => (
@@ -1400,7 +1400,7 @@ export default function Agenda({
                             key={p.id}
                             type="button"
                             onClick={() => setFormConsulta({ ...formConsulta, patientId: p.id })}
-                            className="flex w-full items-center justify-between gap-2 rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-left transition hover:border-[#dc8e5f]"
+                            className="flex w-full items-center justify-between gap-2 rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-left transition hover:border-[#2f7fc1]"
                           >
                             <span className="truncate text-[11px] font-bold text-[#081b2c]">
                               {p.nome}
@@ -1445,7 +1445,7 @@ export default function Agenda({
                               unidade: unidadeAtual?.name,
                             })
                           }
-                          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-[#081b2c]/15 bg-white px-3 py-2.5 text-[10px] font-extrabold text-[#081b2c] transition hover:border-[#dc8e5f] hover:text-[#8a4b1d]"
+                          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-[#081b2c]/15 bg-white px-3 py-2.5 text-[10px] font-extrabold text-[#081b2c] transition hover:border-[#2f7fc1] hover:text-[#16456b]"
                         >
                           <Plus className="h-3.5 w-3.5" />
                           Cadastrar como paciente novo
@@ -1465,7 +1465,7 @@ export default function Agenda({
                       setFormConsulta({ ...formConsulta, contactName: e.target.value })
                     }
                     placeholder="Nome informado no contato"
-                    className="mt-1 w-full rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-[11px] outline-none focus:border-[#dc8e5f]"
+                    className="mt-1 w-full rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-[11px] outline-none focus:border-[#2f7fc1]"
                   />
                   <input
                     value={formConsulta.contactPhone}
@@ -1473,7 +1473,7 @@ export default function Agenda({
                       setFormConsulta({ ...formConsulta, contactPhone: e.target.value })
                     }
                     placeholder="Telefone"
-                    className="mt-2 w-full rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-[11px] outline-none focus:border-[#dc8e5f]"
+                    className="mt-2 w-full rounded-[12px] border border-[#081b2c]/10 bg-white px-3 py-2 text-[11px] outline-none focus:border-[#2f7fc1]"
                   />
                 </div>
 
@@ -1488,7 +1488,7 @@ export default function Agenda({
                     }
                     rows={4}
                     placeholder="Recado interno sobre esta consulta"
-                    className="mt-1 w-full resize-y rounded-[12px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
+                    className="mt-1 w-full resize-y rounded-[12px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#2f7fc1]"
                   />
                 </div>
               </div>

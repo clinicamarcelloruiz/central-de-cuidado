@@ -200,7 +200,7 @@ export default function Home() {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-[#f7f5f1] text-[#081b2c]">
         <div className="text-center">
-          <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#081b2c] text-[#e6a47b] shadow-[0_18px_45px_rgba(8,27,44,.18)]">
+          <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#081b2c] text-[#6fadde] shadow-[0_18px_45px_rgba(8,27,44,.18)]">
             <HeartHandshake className="h-6 w-6 animate-pulse" />
           </span>
           <p className="mt-4 text-xs font-extrabold uppercase tracking-[0.16em] text-slate-400">
@@ -244,12 +244,12 @@ export default function Home() {
     <div className="min-h-dvh bg-[#f7f5f1] text-[#081b2c]">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[286px] flex-col overflow-hidden bg-[#081b2c] text-white lg:flex">
         <div className="soft-grid absolute inset-0 opacity-40" />
-        <div className="absolute -right-24 top-24 h-64 w-64 rounded-full bg-[#d98e5f]/10 blur-3xl" />
+        <div className="absolute -right-24 top-24 h-64 w-64 rounded-full bg-[#2f7fc1]/10 blur-3xl" />
         <div className="relative flex h-full flex-col">
           <div className="px-7 pb-7 pt-8">
             <img src={logo} alt="Dr. Marcello Ruiz" className="h-12 w-auto max-w-[190px] brightness-0 invert" />
             <div className="mt-5 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-white/45">
-              <HeartHandshake className="h-3.5 w-3.5 text-[#e2a077]" />
+              <HeartHandshake className="h-3.5 w-3.5 text-[#6aa8d9]" />
               Central de cuidado
             </div>
             {/* Versao publicada, logo abaixo do nome: e o que responde, sem
@@ -285,7 +285,7 @@ export default function Home() {
                 >
                   <span
                     className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors ${
-                      active ? 'bg-[#f6e4d8] text-[#c87543]' : 'bg-white/[0.055] text-white/60 group-hover:text-white'
+                      active ? 'bg-[#d9e8f7] text-[#1f4f78]' : 'bg-white/[0.055] text-white/60 group-hover:text-white'
                     }`}
                   >
                     <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
@@ -301,12 +301,12 @@ export default function Home() {
                     </span>
                   ) : item.key === 'followups' && pendentes > 0 ? (
                     <span className={`min-w-6 rounded-full px-1.5 py-1 text-center text-[10px] font-extrabold ${
-                      active ? 'bg-[#081b2c] text-white' : 'bg-[#df8e5f] text-white'
+                      active ? 'bg-[#081b2c] text-white' : 'bg-[#3585c6] text-white'
                     }`}>
                       {pendentes}
                     </span>
                   ) : active ? (
-                    <ChevronRight className="h-4 w-4 text-[#d98e5f]" />
+                    <ChevronRight className="h-4 w-4 text-[#2f7fc1]" />
                   ) : null}
                 </button>
               )
@@ -314,9 +314,9 @@ export default function Home() {
           </nav>
 
           <div className="relative mx-4 mb-4 overflow-hidden rounded-[22px] border border-white/10 bg-white/[0.055] p-4">
-            <div className="absolute -right-5 -top-5 h-20 w-20 rounded-full bg-[#d98e5f]/15 blur-2xl" />
+            <div className="absolute -right-5 -top-5 h-20 w-20 rounded-full bg-[#2f7fc1]/15 blur-2xl" />
             <div className="relative flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#d98e5f] text-[#081b2c]">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#2f7fc1] text-white">
                 <ShieldCheck className="h-5 w-5" />
               </span>
               <div>
@@ -358,7 +358,7 @@ export default function Home() {
           >
             <Bell className="h-[18px] w-[18px] text-white/75" />
             {pendentes > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#e29363] px-1 text-[9px] font-extrabold text-white ring-2 ring-[#081b2c]">
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#4a94cf] px-1 text-[9px] font-extrabold text-white ring-2 ring-[#081b2c]">
                 {pendentes}
               </span>
             )}
@@ -368,14 +368,14 @@ export default function Home() {
 
       <main className="relative min-h-dvh pb-28 lg:ml-[286px] lg:pb-12">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-80 overflow-hidden">
-          <div className="absolute -right-20 -top-32 h-96 w-96 rounded-full bg-[#e9b18f]/10 blur-3xl" />
+          <div className="absolute -right-20 -top-32 h-96 w-96 rounded-full bg-[#86bce4]/10 blur-3xl" />
           <div className="absolute left-1/3 -top-48 h-80 w-80 rounded-full bg-[#9fc2b8]/10 blur-3xl" />
         </div>
 
         <div className="relative mx-auto max-w-[1460px] px-4 py-6 sm:px-7 lg:px-10 lg:py-9 xl:px-12">
           <div className="mb-7 flex flex-col gap-5 xl:mb-8 xl:flex-row xl:items-end xl:justify-between">
             <div>
-              <div className="mb-2 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.2em] text-[#c87543]">
+              <div className="mb-2 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.2em] text-[#1f4f78]">
                 <Sparkles className="h-3.5 w-3.5" />
                 {meta.eyebrow}
               </div>
@@ -387,7 +387,7 @@ export default function Home() {
 
             <div className="flex items-center gap-3">
               <div className="hidden items-center gap-2.5 rounded-2xl border border-[#081b2c]/[0.07] bg-white/70 px-4 py-3 text-xs font-semibold text-slate-500 shadow-sm backdrop-blur sm:flex">
-                <CalendarDays className="h-4 w-4 text-[#d98e5f]" />
+                <CalendarDays className="h-4 w-4 text-[#2f7fc1]" />
                 {formatToday()}
               </div>
               <button
@@ -395,7 +395,7 @@ export default function Home() {
                 onClick={createPatient}
                 className="group flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#081b2c] px-5 py-3 text-xs font-bold text-white shadow-[0_12px_26px_rgba(8,27,44,.18)] transition hover:-translate-y-0.5 hover:bg-[#102d47] sm:flex-none"
               >
-                <Plus className="h-4 w-4 text-[#e6a47b] transition-transform group-hover:rotate-90" />
+                <Plus className="h-4 w-4 text-[#6fadde] transition-transform group-hover:rotate-90" />
                 Novo paciente
               </button>
             </div>
@@ -479,10 +479,10 @@ export default function Home() {
                 active ? 'bg-[#081b2c] text-white' : 'text-slate-400'
               }`}
             >
-              <Icon className={`h-[18px] w-[18px] ${active ? 'text-[#e6a47b]' : ''}`} strokeWidth={2} />
+              <Icon className={`h-[18px] w-[18px] ${active ? 'text-[#6fadde]' : ''}`} strokeWidth={2} />
               <span>{item.shortLabel}</span>
               {item.key === 'followups' && pendentes > 0 && !active && (
-                <span className="absolute right-[25%] top-1.5 h-2 w-2 rounded-full bg-[#d97745] ring-2 ring-white" />
+                <span className="absolute right-[25%] top-1.5 h-2 w-2 rounded-full bg-[#2f7fc1] ring-2 ring-white" />
               )}
             </button>
           )

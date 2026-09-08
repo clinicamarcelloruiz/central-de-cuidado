@@ -72,13 +72,13 @@ const MOTIVO_ATENCAO: Record<
 > = {
   atendente: {
     rotulo: 'Quer falar com a equipe',
-    classe: 'bg-[#8a4b1d] text-white',
-    borda: 'border-[#8a4b1d] ring-1 ring-[#8a4b1d]/30',
+    classe: 'bg-[#16456b] text-white',
+    borda: 'border-[#16456b] ring-1 ring-[#16456b]/30',
   },
   remarcacao: {
     rotulo: 'Pediu para remarcar',
-    classe: 'bg-[#fdf3ec] text-[#8a4b1d]',
-    borda: 'border-[#dc8e5f]',
+    classe: 'bg-[#eef5fd] text-[#16456b]',
+    borda: 'border-[#2f7fc1]',
   },
   cancelamento: {
     rotulo: 'Cancelou a consulta',
@@ -87,13 +87,13 @@ const MOTIVO_ATENCAO: Record<
   },
   ajuda: {
     rotulo: 'Pediu ajuda',
-    classe: 'bg-[#fdf3ec] text-[#8a4b1d]',
-    borda: 'border-[#dc8e5f]',
+    classe: 'bg-[#eef5fd] text-[#16456b]',
+    borda: 'border-[#2f7fc1]',
   },
   cancelou_sozinho: {
     rotulo: 'Cancelou pelo WhatsApp',
-    classe: 'bg-[#fdf3ec] text-[#8a4b1d]',
-    borda: 'border-[#dc8e5f]',
+    classe: 'bg-[#eef5fd] text-[#16456b]',
+    borda: 'border-[#2f7fc1]',
   },
   falha: {
     rotulo: 'Falha no atendimento automático',
@@ -508,7 +508,7 @@ export default function Conversations({
         <button
           type="button"
           onClick={() => void openConversation(querAtendente[0])}
-          className="flex w-full items-center gap-2 rounded-[16px] border-2 border-[#8a4b1d] bg-[#8a4b1d] p-3 text-left text-[11px] font-bold text-white transition hover:bg-[#763f18]"
+          className="flex w-full items-center gap-2 rounded-[16px] border-2 border-[#16456b] bg-[#16456b] p-3 text-left text-[11px] font-bold text-white transition hover:bg-[#123852]"
         >
           <MessageSquareText className="h-4 w-4 shrink-0" />
           {querAtendente.length === 1
@@ -518,7 +518,7 @@ export default function Conversations({
       )}
 
       {outrasAtencoes.length > 0 && (
-        <div className="flex items-center gap-2 rounded-[16px] border border-[#dc8e5f]/40 bg-[#fdf3ec] p-3 text-[11px] font-bold text-[#8a4b1d]">
+        <div className="flex items-center gap-2 rounded-[16px] border border-[#2f7fc1]/40 bg-[#eef5fd] p-3 text-[11px] font-bold text-[#16456b]">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           {outrasAtencoes.length === 1
             ? '1 paciente respondeu e está aguardando retorno da equipe.'
@@ -536,7 +536,7 @@ export default function Conversations({
           className="flex w-full items-center justify-between gap-2 text-left"
         >
           <span className="flex items-center gap-2 text-[11px] font-extrabold text-[#081b2c]">
-            <Sparkles className="h-3.5 w-3.5 text-[#dc8e5f]" />
+            <Sparkles className="h-3.5 w-3.5 text-[#2f7fc1]" />
             Menu automático do WhatsApp
           </span>
           <span
@@ -557,7 +557,7 @@ export default function Conversations({
                 type="checkbox"
                 checked={autoReply.enabled}
                 onChange={(e) => setAutoReply({ ...autoReply, enabled: e.target.checked })}
-                className="h-3.5 w-3.5 accent-[#dc8e5f]"
+                className="h-3.5 w-3.5 accent-[#2f7fc1]"
               />
               <span className="text-[11px] font-bold text-[#081b2c]">
                 Responder automaticamente quem escreve para a clínica
@@ -591,7 +591,7 @@ export default function Conversations({
               value={autoReply.text}
               onChange={(e) => setAutoReply({ ...autoReply, text: e.target.value })}
               rows={2}
-              className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
+              className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#2f7fc1]"
             />
 
             <p className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
@@ -601,7 +601,7 @@ export default function Conversations({
               value={autoReply.knownText}
               onChange={(e) => setAutoReply({ ...autoReply, knownText: e.target.value })}
               rows={2}
-              className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
+              className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#2f7fc1]"
             />
             <p className="mt-2 text-[10px] text-slate-500">
               O sistema identifica o paciente pelo telefone. Escreva <strong>{'{nome}'}</strong> onde
@@ -615,7 +615,7 @@ export default function Conversations({
               value={autoReply.infoText}
               onChange={(e) => setAutoReply({ ...autoReply, infoText: e.target.value })}
               rows={12}
-              className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#dc8e5f]"
+              className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#2f7fc1]"
             />
             <p className="mt-2 text-[10px] text-slate-500">
               Valores, formas de contato e orientações. É o que o paciente recebe ao responder 1.
@@ -650,7 +650,7 @@ export default function Conversations({
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
               placeholder="Buscar por nome, telefone ou algo que foi dito"
-              className="w-full rounded-[12px] border border-[#081b2c]/10 bg-white py-2 pl-9 pr-3 text-[11px] outline-none focus:border-[#dc8e5f]"
+              className="w-full rounded-[12px] border border-[#081b2c]/10 bg-white py-2 pl-9 pr-3 text-[11px] outline-none focus:border-[#2f7fc1]"
             />
           </div>
           <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
@@ -659,7 +659,7 @@ export default function Conversations({
               type="date"
               value={de}
               onChange={(e) => setDe(e.target.value)}
-              className="rounded-[12px] border border-[#081b2c]/10 bg-white px-2 py-2 text-[11px] outline-none focus:border-[#dc8e5f]"
+              className="rounded-[12px] border border-[#081b2c]/10 bg-white px-2 py-2 text-[11px] outline-none focus:border-[#2f7fc1]"
             />
           </label>
           <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
@@ -668,7 +668,7 @@ export default function Conversations({
               type="date"
               value={ate}
               onChange={(e) => setAte(e.target.value)}
-              className="rounded-[12px] border border-[#081b2c]/10 bg-white px-2 py-2 text-[11px] outline-none focus:border-[#dc8e5f]"
+              className="rounded-[12px] border border-[#081b2c]/10 bg-white px-2 py-2 text-[11px] outline-none focus:border-[#2f7fc1]"
             />
           </label>
           {filtrando && (
@@ -738,7 +738,7 @@ export default function Conversations({
               const contorno = motivo
                 ? `${motivo.borda} bg-white`
                 : active
-                  ? 'border-[#dc8e5f] bg-white shadow-[0_10px_28px_rgba(8,27,44,.10)]'
+                  ? 'border-[#2f7fc1] bg-white shadow-[0_10px_28px_rgba(8,27,44,.10)]'
                   : 'border-[#081b2c]/10 bg-white/70 hover:border-[#081b2c]/20 hover:bg-white'
               const semCadastro = !conversation.patientId
               // Sem cadastro, o nome do WhatsApp e melhor do que "Contato sem
@@ -784,7 +784,7 @@ export default function Conversations({
                         {motivo.rotulo}
                       </span>
                     ) : conversation.needsAttention ? (
-                      <span className="rounded-full bg-[#fdf3ec] px-2 py-0.5 text-[9px] font-extrabold text-[#8a4b1d]">
+                      <span className="rounded-full bg-[#eef5fd] px-2 py-0.5 text-[9px] font-extrabold text-[#16456b]">
                         Aguardando retorno
                       </span>
                     ) : null}
@@ -838,7 +838,7 @@ export default function Conversations({
                           telefone: conversation.phone,
                         })
                       }
-                      className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-[#081b2c]/15 bg-white px-3 py-2 text-[10px] font-extrabold text-[#081b2c] transition hover:border-[#dc8e5f] hover:text-[#8a4b1d]"
+                      className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-[#081b2c]/15 bg-white px-3 py-2 text-[10px] font-extrabold text-[#081b2c] transition hover:border-[#2f7fc1] hover:text-[#16456b]"
                     >
                       <UserPlus className="h-3.5 w-3.5" />
                       Cadastrar como paciente
@@ -908,15 +908,15 @@ export default function Conversations({
                     vai poder, em vez de rolar a conversa inteira ate esbarrar
                     no aviso. */}
                 {!janelaAberta && (
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-[#dc8e5f]/30 bg-[#fdf5ef] px-3.5 py-2.5">
-                    <p className="text-[10px] font-extrabold text-[#8a4b1d]">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-[#2f7fc1]/30 bg-[#f0f6fd] px-3.5 py-2.5">
+                    <p className="text-[10px] font-extrabold text-[#16456b]">
                       Janela de resposta fechada. Só dá para enviar um convite.
                     </p>
                     <button
                       type="button"
                       disabled={reabrindo}
                       onClick={() => void reabrirConversa()}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#8a4b1d] px-3 py-1.5 text-[10px] font-extrabold text-white transition hover:bg-[#733c15] disabled:cursor-wait disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#16456b] px-3 py-1.5 text-[10px] font-extrabold text-white transition hover:bg-[#10344f] disabled:cursor-wait disabled:opacity-50"
                     >
                       <MessageSquareText className="h-3.5 w-3.5" />
                       {reabrindo ? 'Enviando...' : 'Enviar convite'}
@@ -1019,7 +1019,7 @@ export default function Conversations({
                         rows={3}
                         maxLength={4096}
                         placeholder="Escreva sua resposta..."
-                        className="mt-2 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[12px] leading-relaxed outline-none focus:border-[#dc8e5f]"
+                        className="mt-2 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[12px] leading-relaxed outline-none focus:border-[#2f7fc1]"
                       />
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                         <p className="text-[9px] font-semibold text-slate-400">
@@ -1056,13 +1056,13 @@ export default function Conversations({
                        aprovado" e nao tinha por onde enviar um. O botao manda o
                        modelo de utilidade que reabre a conversa - ele nao
                        resolve o assunto, abre a porta para resolver. */
-                    <div className="rounded-[14px] border border-[#dc8e5f]/30 bg-[#fdf5ef] px-4 py-3">
-                      <p className="text-[11px] font-extrabold text-[#8a4b1d]">
+                    <div className="rounded-[14px] border border-[#2f7fc1]/30 bg-[#f0f6fd] px-4 py-3">
+                      <p className="text-[11px] font-extrabold text-[#16456b]">
                         {janelaAte
                           ? `A janela de resposta fechou em ${formatWhen(janelaAte)}`
                           : 'Este contato ainda não escreveu para a clínica'}
                       </p>
-                      <p className="mt-1 text-[10px] font-semibold text-[#8a4b1d]/80">
+                      <p className="mt-1 text-[10px] font-semibold text-[#16456b]/80">
                         A Meta só permite texto livre nas 24 horas seguintes à mensagem do
                         paciente. Dá para enviar um convite para o paciente responder. Quando ele
                         responder, a janela reabre e você escreve normalmente.
@@ -1071,7 +1071,7 @@ export default function Conversations({
                         type="button"
                         disabled={reabrindo}
                         onClick={() => void reabrirConversa()}
-                        className="mt-2.5 inline-flex items-center gap-1.5 rounded-xl bg-[#8a4b1d] px-4 py-2 text-[10px] font-extrabold text-white transition hover:bg-[#733c15] disabled:cursor-wait disabled:opacity-50"
+                        className="mt-2.5 inline-flex items-center gap-1.5 rounded-xl bg-[#16456b] px-4 py-2 text-[10px] font-extrabold text-white transition hover:bg-[#10344f] disabled:cursor-wait disabled:opacity-50"
                       >
                         <MessageSquareText className="h-3.5 w-3.5" />
                         {reabrindo ? 'Enviando...' : 'Enviar convite para retomar a conversa'}

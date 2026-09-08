@@ -96,7 +96,7 @@ const consultationLabels: Record<ConsultationType, string> = {
 }
 
 const inputClass =
-  'mt-1.5 w-full rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-xs font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#dc8e5f] focus:bg-white focus:ring-4 focus:ring-[#dc8e5f]/10 disabled:cursor-not-allowed disabled:opacity-60'
+  'mt-1.5 w-full rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-xs font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#2f7fc1] focus:bg-white focus:ring-4 focus:ring-[#2f7fc1]/10 disabled:cursor-not-allowed disabled:opacity-60'
 
 /**
  * Formatos que o navegador pode usar para gravar. O Chrome prefere webm/opus,
@@ -174,7 +174,7 @@ const editorColors = [
   { label: 'Vermelho', value: '#c02626' },
   { label: 'Azul', value: '#2563eb' },
   { label: 'Verde', value: '#557f75' },
-  { label: 'Laranja', value: '#c87543' },
+  { label: 'Cinza', value: '#5b6b7a' },
 ]
 
 const editorTags = new Set(['B', 'BR', 'DIV', 'EM', 'FONT', 'I', 'LI', 'OL', 'P', 'SPAN', 'STRONG', 'U', 'UL'])
@@ -336,7 +336,7 @@ function BarraDeFormatacao() {
             ativo?.gravando
               ? 'bg-red-50 text-red-600'
               : ativo?.transcrevendo
-                ? 'bg-[#fdf3ec] text-[#8a4b1d]'
+                ? 'bg-[#eef5fd] text-[#16456b]'
                 : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'
           }`}
           title={ativo?.gravando ? 'Clique para parar e transcrever' : 'Gravar e transcrever'}
@@ -370,7 +370,7 @@ function BarraDeFormatacao() {
 
       {/* Em qual campo a barra esta agindo. E o que impede o negrito de cair no
           lugar errado quando o cursor esta num campo e o olho noutro. */}
-      <p className={`mt-1 text-[10px] font-bold ${parado ? 'text-slate-400' : 'text-[#b96535]'}`}>
+      <p className={`mt-1 text-[10px] font-bold ${parado ? 'text-slate-400' : 'text-[#2a6ea8]'}`}>
         {parado ? 'Clique num campo para escrever e formatar' : `Formatando: ${ativo.rotulo}`}
       </p>
 
@@ -431,7 +431,7 @@ function BarraDeFormatacao() {
               }}
               maxLength={80}
               placeholder="Salvar o texto atual como modelo. Dê um nome..."
-              className="min-w-0 flex-1 rounded-lg border border-[#081b2c]/10 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-[#081b2c] outline-none placeholder:text-slate-300 focus:border-[#dc8e5f]"
+              className="min-w-0 flex-1 rounded-lg border border-[#081b2c]/10 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-[#081b2c] outline-none placeholder:text-slate-300 focus:border-[#2f7fc1]"
             />
             <button
               type="button"
@@ -853,7 +853,7 @@ function Field({
     <label className={`block ${className}`}>
       <span className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-slate-500">
         {label}
-        {required && <span className="ml-1 text-[#d37543]">*</span>}
+        {required && <span className="ml-1 text-[#2f7fc1]">*</span>}
       </span>
       {children}
     </label>
@@ -1354,7 +1354,7 @@ function RichTextField({
 
   return (
     <Field label={label} required={required} className={className}>
-      <div className="mt-1.5 overflow-hidden rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] transition focus-within:border-[#dc8e5f] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#dc8e5f]/10">
+      <div className="mt-1.5 overflow-hidden rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] transition focus-within:border-[#2f7fc1] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#2f7fc1]/10">
         <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder={placeholder} onFocus={() => ativar(controle())} onInput={syncEditor} onPaste={pasteAsText} className="min-h-[92px] px-3.5 py-2.5 text-[14px] font-medium leading-[1.6] text-[#081b2c] outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)] [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5" />
       </div>
       {speechError && (
@@ -1467,7 +1467,7 @@ const SELO_DO_ESTADO: Record<EstadoDaConsulta, { texto: string; classe: string }
   },
   'sem-registro': {
     texto: 'Sem registro',
-    classe: 'bg-[#fdf3e7] text-[#96591a]',
+    classe: 'bg-[#ebf4fd] text-[#1a5079]',
   },
   // Realizada nao ganha selo: e o caso normal, e etiquetar o normal so gera
   // ruido. O que precisa de destaque e o que foge dele.
@@ -1542,7 +1542,7 @@ function ConsultationCard({
     >
       <AccordionTrigger className="group gap-3 px-4 py-4 hover:no-underline sm:px-5">
         <div className="flex min-w-0 flex-1 items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-[#f5e7dd] text-[#c87543]">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-[#dceaf7] text-[#1f4f78]">
             <ConsultationTypeIcon type={consultation.tipo} />
           </span>
           <div className="min-w-0 flex-1">
@@ -1669,7 +1669,7 @@ function ConsultationCard({
               <button
                 type="button"
                 onClick={() => onEdit(consultation)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-[#c87543]/20 bg-[#fdf4ef] px-3 py-2 text-[10px] font-extrabold text-[#b96535] transition hover:bg-[#f8e6dc]"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#1f4f78]/20 bg-[#eff6fd] px-3 py-2 text-[10px] font-extrabold text-[#2a6ea8] transition hover:bg-[#dceaf8]"
               >
                 <Edit3 className="h-3.5 w-3.5" />
                 {estado === 'realizada' ? 'Editar consulta' : 'Escrever atendimento'}
@@ -1698,11 +1698,11 @@ function ConsultationCard({
           )}
         </div>
         {mudancas.length > 0 && (
-          <div className="mt-3 rounded-[14px] border border-[#dc8e5f]/30 bg-[#fdf5ef] px-4 py-3">
-            <p className="text-[11px] font-extrabold text-[#8a4b1d]">
+          <div className="mt-3 rounded-[14px] border border-[#2f7fc1]/30 bg-[#f0f6fd] px-4 py-3">
+            <p className="text-[11px] font-extrabold text-[#16456b]">
               Mudou desde a consulta de {fmtBR(anterior!.data)}
             </p>
-            <p className="mt-1 text-[13px] font-semibold text-[#8a4b1d]/80">{mudancas.join(' · ')}</p>
+            <p className="mt-1 text-[13px] font-semibold text-[#16456b]/80">{mudancas.join(' · ')}</p>
           </div>
         )}
         {/* Uma coluna so, com largura de leitura limitada (~66 caracteres). Em
@@ -2526,7 +2526,7 @@ export default function PatientRecord({
               <FileHeart className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-[9px] font-extrabold uppercase tracking-[0.15em] text-[#c87543]">
+              <p className="text-[9px] font-extrabold uppercase tracking-[0.15em] text-[#1f4f78]">
                 Prontuário do paciente
               </p>
               <SheetTitle className="mt-1 truncate text-left text-lg font-extrabold tracking-[-0.03em] text-[#081b2c]">
@@ -2565,7 +2565,7 @@ export default function PatientRecord({
                 <button
                   type="button"
                   onClick={() => onEditRegistration(patient)}
-                  className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-[#fbfaf8] px-3 py-2 text-[10px] font-extrabold text-slate-500 transition hover:border-[#c87543]/30 hover:text-[#c87543]"
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-[#fbfaf8] px-3 py-2 text-[10px] font-extrabold text-slate-500 transition hover:border-[#1f4f78]/30 hover:text-[#1f4f78]"
                 >
                   <Edit3 className="h-3.5 w-3.5" /> Editar dados cadastrais
                 </button>
@@ -2670,7 +2670,7 @@ export default function PatientRecord({
                   idade ou responsavel no meio de uma leitura. */}
               <div className="grid gap-4 lg:grid-cols-[minmax(0,270px)_minmax(0,1fr)] lg:items-start">
                 <aside className="surface-card rounded-[20px] p-4 lg:sticky lg:top-0">
-                  <p className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-[#c87543]">
+                  <p className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-[#1f4f78]">
                     Dados do paciente
                   </p>
                   <p className="mt-2 text-sm font-extrabold leading-tight text-[#081b2c]">{patient.nome}</p>
@@ -2703,7 +2703,7 @@ export default function PatientRecord({
                   <button
                     type="button"
                     onClick={() => onEditRegistration(patient)}
-                    className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-[#fbfaf8] px-3 py-2 text-[10px] font-extrabold text-slate-500 transition hover:border-[#c87543]/30 hover:text-[#c87543]"
+                    className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-[#fbfaf8] px-3 py-2 text-[10px] font-extrabold text-slate-500 transition hover:border-[#1f4f78]/30 hover:text-[#1f4f78]"
                   >
                     <Edit3 className="h-3.5 w-3.5" /> Editar cadastro
                   </button>
@@ -2713,7 +2713,7 @@ export default function PatientRecord({
               {loading ? (
                 <div className="flex min-h-[280px] items-center justify-center text-center">
                   <div>
-                    <Loader2 className="mx-auto h-6 w-6 animate-spin text-[#c87543]" />
+                    <Loader2 className="mx-auto h-6 w-6 animate-spin text-[#1f4f78]" />
                     <p className="mt-3 text-xs font-bold text-slate-400">Carregando prontuário...</p>
                   </div>
                 </div>
@@ -2733,7 +2733,7 @@ export default function PatientRecord({
               ) : consultations.length === 0 ? (
                 <div className="flex min-h-[320px] items-center justify-center text-center">
                   <div className="max-w-sm">
-                    <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#f5e7dd] text-[#c87543]">
+                    <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#dceaf7] text-[#1f4f78]">
                       <ClipboardList className="h-7 w-7" />
                     </span>
                     <h2 className="mt-4 text-sm font-extrabold text-[#081b2c]">Prontuário pronto para começar</h2>
@@ -2745,7 +2745,7 @@ export default function PatientRecord({
                       onClick={startNewConsultation}
                       className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#081b2c] px-4 py-2.5 text-[10px] font-extrabold text-white"
                     >
-                      <Plus className="h-3.5 w-3.5 text-[#e3a078]" /> Registrar primeira consulta
+                      <Plus className="h-3.5 w-3.5 text-[#6aa8d9]" /> Registrar primeira consulta
                     </button>
                   </div>
                 </div>
@@ -2757,7 +2757,7 @@ export default function PatientRecord({
                       value={buscaConsulta}
                       onChange={(evento) => setBuscaConsulta(evento.target.value)}
                       placeholder="Buscar no prontuário: sintoma, medicamento, CID..."
-                      className="w-full rounded-2xl border border-[#081b2c]/[0.08] bg-white py-2.5 pl-10 pr-4 text-[13px] font-medium text-[#081b2c] outline-none transition placeholder:text-slate-400 focus:border-[#dc8e5f]/60 focus:ring-4 focus:ring-[#dc8e5f]/10"
+                      className="w-full rounded-2xl border border-[#081b2c]/[0.08] bg-white py-2.5 pl-10 pr-4 text-[13px] font-medium text-[#081b2c] outline-none transition placeholder:text-slate-400 focus:border-[#2f7fc1]/60 focus:ring-4 focus:ring-[#2f7fc1]/10"
                     />
                   </div>
 
@@ -2862,7 +2862,7 @@ export default function PatientRecord({
                 type="button"
                 onClick={backToHistory}
                 disabled={saving}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#081b2c]/10 bg-white text-slate-500 transition hover:text-[#c87543] disabled:opacity-50"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#081b2c]/10 bg-white text-slate-500 transition hover:text-[#1f4f78] disabled:opacity-50"
                 aria-label="Voltar ao histórico"
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -2906,11 +2906,11 @@ export default function PatientRecord({
                     observacao clinica apagava este aviso. Mostrar em vez de
                     esconder tambem tira o motivo de alguem usar o campo errado. */}
                 {patient.observacoes.trim() && (
-                  <div className="sm:col-span-2 rounded-[14px] border border-[#dc8e5f]/25 bg-[#fdf6f1] px-4 py-3">
-                    <p className="text-[9px] font-extrabold uppercase tracking-[0.13em] text-[#c87543]">
+                  <div className="sm:col-span-2 rounded-[14px] border border-[#2f7fc1]/25 bg-[#f1f7fd] px-4 py-3">
+                    <p className="text-[9px] font-extrabold uppercase tracking-[0.13em] text-[#1f4f78]">
                       Recado da recepção
                     </p>
-                    <p className="mt-1 whitespace-pre-wrap text-[11px] font-semibold leading-relaxed text-[#8a4b1d]">
+                    <p className="mt-1 whitespace-pre-wrap text-[11px] font-semibold leading-relaxed text-[#16456b]">
                       {patient.observacoes}
                     </p>
                   </div>
@@ -3137,7 +3137,7 @@ export default function PatientRecord({
                 disabled={saving}
                 className="flex flex-1 items-center justify-center gap-2 rounded-[14px] bg-[#081b2c] px-5 py-3 text-xs font-extrabold text-white shadow-[0_10px_22px_rgba(8,27,44,.16)] transition hover:bg-[#102d47] disabled:cursor-wait disabled:opacity-70"
               >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-[#e3a078]" strokeWidth={3} />}
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-[#6aa8d9]" strokeWidth={3} />}
                 {saving
                   ? 'Salvando consulta...'
                   : editingConsultationId
