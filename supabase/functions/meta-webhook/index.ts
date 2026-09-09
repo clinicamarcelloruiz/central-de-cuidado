@@ -364,7 +364,11 @@ Deno.serve(async (req) => {
           //
           // Nao roda quando a pessoa esta respondendo um lembrete: ali "1" e
           // confirmacao de consulta, e o trecho mais abaixo cuida disso.
-          if (!optedOut && !respondeuLembrete && !isWell && settings.whatsapp_autoreply_enabled) {
+          // "Preciso de ajuda" tambem fica de fora: e o bloco do acompanhamento,
+          // mais abaixo, que responde e entrega a conversa a equipe. Deixar o
+          // menu falar antes mandava "como podemos ajudar hoje?" para quem
+          // acabou de dizer que precisa de ajuda.
+          if (!optedOut && !respondeuLembrete && !isWell && !pediuAjuda && settings.whatsapp_autoreply_enabled) {
             const resultado = await tratarConversa({
               admin,
               clinicId,
