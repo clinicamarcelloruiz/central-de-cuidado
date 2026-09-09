@@ -431,7 +431,7 @@ export default function Agenda({
   //
   // Existe sobretudo por causa do que chega pelo WhatsApp: a consulta nasce sem
   // paciente vinculado, e enquanto ficar assim nao entra no prontuario nem nos
-  // acompanhamentos de 30 e 90 dias.
+  // acompanhamentos de 15, 30 e 90 dias.
   const [emEdicao, setEmEdicao] = useState<Appointment | null>(null)
   const [formConsulta, setFormConsulta] = useState({
     contactName: '',
@@ -1433,7 +1433,7 @@ export default function Agenda({
                     <>
                       <p className="mt-1 text-[10px] text-slate-500">
                         Sem paciente vinculado, esta consulta não entra no prontuário nem gera
-                        acompanhamento de 30 e 90 dias.
+                        acompanhamento de 15, 30 e 90 dias.
                       </p>
                       {/* Mesmo telefone: e quase sempre a pessoa certa, entao
                           vem antes da busca e ja destacado. */}

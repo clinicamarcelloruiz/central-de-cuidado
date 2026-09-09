@@ -1,4 +1,5 @@
 import { adminClient, corsHeaders, json, toBrazilE164 } from '../_shared/whatsapp.ts'
+import { textoDoModelo } from '../_shared/modelos.ts'
 
 /**
  * Lembrete automatico de consulta.
@@ -345,7 +346,11 @@ Deno.serve(async (req) => {
         )
 
         const corpo = await resposta.json()
-        const resumoTexto = `Lembrete de consulta em ${dataBR} às ${hora} (${unidade}) enviado para ${nomeParaMensagem}.`
+        // Igual ao acompanhamento: guarda a mensagem que a pessoa leu, para a
+        // conversa na plataforma bater com o celular dela.
+        const resumoTexto =
+          textoDoModelo(clinica.templateName, [nomeParaMensagem, dataBR, hora, unidade]) ??
+          `Lembrete de consulta em ${dataBR} às ${hora} (${unidade}) enviado para ${nomeParaMensagem}.`
 
         if (!resposta.ok) {
           const motivo = corpo?.error?.message || 'Meta recusou o envio.'

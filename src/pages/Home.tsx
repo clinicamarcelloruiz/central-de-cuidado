@@ -101,7 +101,7 @@ export default function Home() {
     db,
     role,
     loading,
-    error,
+    loadError,
     retry,
     addPatient,
     updatePatient,
@@ -224,8 +224,11 @@ export default function Home() {
     )
   }
 
-  if (error) {
-    const pendingApproval = error === PENDING_ACCESS_MESSAGE
+  // So a falha da carga inicial troca o sistema inteiro por esta tela. Erro de
+  // uma acao (um envio que nao saiu, por exemplo) vira aviso, sem derrubar o
+  // que a pessoa estava fazendo.
+  if (loadError) {
+    const pendingApproval = loadError === PENDING_ACCESS_MESSAGE
     return (
       <main className="flex min-h-dvh items-center justify-center bg-[#f7f5f1] px-4 text-[#081b2c]">
         <section className="surface-card w-full max-w-md rounded-[28px] p-7 text-center">
@@ -238,7 +241,7 @@ export default function Home() {
           <p className="mt-2 text-xs leading-relaxed text-slate-500">
             {pendingApproval
               ? 'Seu pedido foi registrado. Assim que o administrador aprovar, entre novamente para acessar a Central de Cuidado.'
-              : error}
+              : loadError}
           </p>
           <button
             type="button"

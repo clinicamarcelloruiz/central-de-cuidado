@@ -281,7 +281,7 @@ export default function Dashboard({
   const appointmentsThisMonth = patients.filter((patient) => patient.dataConsulta.startsWith(currentMonth)).length
   const due = dueCount(patients)
   const completed = patients
-    .flatMap((patient) => [patient.followups.d30, patient.followups.m90])
+    .flatMap((patient) => [patient.followups.d15, patient.followups.d30, patient.followups.m90])
     .filter((followup) => followup.status === 'concluido').length
   const totalJourneys = patients.length * 2
   const completion = totalJourneys ? Math.round((completed / totalJourneys) * 100) : 0
@@ -364,7 +364,7 @@ export default function Dashboard({
         <Kpi label="Pacientes" value={patients.length} detail="na base clínica" icon={UsersRound} color={NAVY} />
         <Kpi label="Consultas no mês" value={appointmentsThisMonth} detail="atendimentos registrados" icon={CalendarCheck2} color={AZUL} />
         <Kpi label="Pendentes" value={due} detail="hoje e atrasados" icon={Clock3} color="#d45b58" />
-        <Kpi label="Concluídos" value={completed} detail="30 e 90 dias" icon={CheckCircle2} color={SAGE} />
+        <Kpi label="Concluídos" value={completed} detail="15, 30 e 90 dias" icon={CheckCircle2} color={SAGE} />
       </div>
 
       {patients.length === 0 ? (

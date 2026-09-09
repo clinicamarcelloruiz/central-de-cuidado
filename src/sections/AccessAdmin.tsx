@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useDialogos } from '@/components/dialogos-contexto'
 import { Check, Clock3, RefreshCw, ShieldCheck, UserRoundCheck, X } from 'lucide-react'
 import {
   approveAccessRequest,
@@ -29,6 +30,7 @@ export default function AccessAdmin() {
   const [roles, setRoles] = useState<Record<string, AssignableRole>>({})
   const [loading, setLoading] = useState(true)
   const [workingId, setWorkingId] = useState<string | null>(null)
+  const { perguntar } = useDialogos()
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -71,7 +73,13 @@ export default function AccessAdmin() {
   }
 
   async function reject(request: AccessRequest) {
-    if (!window.confirm(`Recusar o acesso de ${request.name}? Esta pessoa continuará sem acesso aos dados da clínica.`)) return
+    const certeza = await perguntar({
+      titulo: `Recusar o acesso de ${request.name}?`,
+      detalhe: 'Esta pessoa continuará sem acesso aos dados da clínica. Ela pode pedir acesso de novo depois.',
+      confirmar: 'Recusar',
+      perigo: true,
+    })
+    if (!certeza) return
     setWorkingId(request.id)
     setError('')
     try {

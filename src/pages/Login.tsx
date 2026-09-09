@@ -128,7 +128,7 @@ export default function Login() {
               Cada família acompanhada no momento certo.
             </h1>
             <p className="mt-5 max-w-xl text-sm leading-relaxed text-white/50 xl:text-base">
-              Uma visão segura da jornada de cada paciente, das consultas aos contatos de 30 e 90 dias.
+              Uma visão segura da jornada de cada paciente, das consultas aos contatos de 15, 30 e 90 dias.
             </p>
 
             <div className="mt-9 grid max-w-xl grid-cols-2 gap-3">

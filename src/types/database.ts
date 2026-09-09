@@ -851,7 +851,7 @@ export type Database = {
       appointment_source: "clinic" | "whatsapp"
       appointment_status: "scheduled" | "attended" | "cancelled" | "no_show"
       clinic_role: "owner" | "clinician" | "staff" | "viewer"
-      followup_key: "d30" | "m90"
+      followup_key: "d15" | "d30" | "m90"
       followup_status: "pending" | "opened" | "completed"
       membership_status: "active" | "suspended"
       patient_sex: "F" | "M" | "O"
@@ -991,7 +991,7 @@ export const Constants = {
   public: {
     Enums: {
       clinic_role: ["owner", "clinician", "staff", "viewer"],
-      followup_key: ["d30", "m90"],
+      followup_key: ["d15", "d30", "m90"],
       followup_status: ["pending", "opened", "completed"],
       membership_status: ["active", "suspended"],
       patient_sex: ["F", "M", "O"],

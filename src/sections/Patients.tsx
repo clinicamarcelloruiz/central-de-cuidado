@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useDialogos } from '@/components/dialogos-contexto'
 import {
   CalendarDays,
   Check,
@@ -242,6 +243,7 @@ export default function Patients({
   onPacienteCriado,
 }: Props) {
   const unidadesDaClinica = useUnidades()
+  const { avisar, perguntar } = useDialogos()
   const [query, setQuery] = useState('')
   // Lista simples e o padrao: cabe mais paciente na tela e a busca visual e
   // mais rapida. O modo de cartoes continua a um clique.
@@ -258,17 +260,23 @@ export default function Patients({
     try {
       setArquivados(await listArchived())
     } catch (cause) {
-      alert(cause instanceof Error ? cause.message : 'Não foi possível listar os arquivados.')
+      avisar(cause instanceof Error ? cause.message : 'Não foi possível listar os arquivados.', 'erro')
       setMostrandoArquivados(false)
     }
   }
 
   async function arquivar(patient: Patient) {
-    if (!confirm(`Arquivar o cadastro de ${patient.nome}?\n\nEle sai das listas, mas nada é apagado: dá para restaurar em "Arquivados".`)) return
+    const certeza = await perguntar({
+      titulo: `Arquivar o cadastro de ${patient.nome}?`,
+      detalhe:
+        'Ele sai das listas e dos acompanhamentos, mas nada é apagado: o prontuário continua guardado e dá para restaurar em "Arquivados".',
+      confirmar: 'Arquivar',
+    })
+    if (!certeza) return
     try {
       await removePatient(patient.id)
     } catch (cause) {
-      alert(cause instanceof Error ? cause.message : 'Não foi possível arquivar o paciente.')
+      avisar(cause instanceof Error ? cause.message : 'Não foi possível arquivar o paciente.', 'erro')
     }
   }
 
@@ -278,7 +286,7 @@ export default function Patients({
       await restorePatient(patient.id)
       setArquivados((atual) => (atual ?? []).filter((item) => item.id !== patient.id))
     } catch (cause) {
-      alert(cause instanceof Error ? cause.message : 'Não foi possível restaurar o paciente.')
+      avisar(cause instanceof Error ? cause.message : 'Não foi possível restaurar o paciente.', 'erro')
     } finally {
       setRestaurando(null)
     }
@@ -654,7 +662,7 @@ export default function Patients({
           </h2>
           <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-slate-400">
             {patients.length === 0
-              ? 'O cadastro alimenta os indicadores e programa automaticamente os acompanhamentos de 30 e 90 dias.'
+              ? 'O cadastro alimenta os indicadores e programa automaticamente os acompanhamentos de 15, 30 e 90 dias.'
               : 'Tente buscar por outro nome, cidade, responsável ou diagnóstico.'}
           </p>
           {patients.length === 0 && (
@@ -830,7 +838,7 @@ export default function Patients({
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[#081b2c]/[0.06] pt-3">
-                {(['d30', 'm90'] as const).map((key) => (
+                {(['d15', 'd30', 'm90'] as const).map((key) => (
                   <div key={key} className="flex items-center justify-between gap-2 rounded-xl bg-[#faf9f7] px-2.5 py-2">
                     <span className="text-[9px] font-extrabold text-slate-400">{FOLLOWUP_LABEL[key]}</span>
                     <StatusBadge status={patient.followups[key].status} />

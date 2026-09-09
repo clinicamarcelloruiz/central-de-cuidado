@@ -13,6 +13,7 @@ import {
   Stethoscope,
 } from 'lucide-react'
 import { useState } from 'react'
+import { useDialogos } from '@/components/dialogos-contexto'
 import type { FollowupKey, FollowupStatus, Patient } from '@/types/patient'
 import {
   fmtBR,
@@ -23,6 +24,8 @@ import { supabase } from '@/lib/supabase'
 
 const NAVY = '#081b2c'
 const AZUL = '#2f7fc1'
+/** Cor de cada etapa: azul aos 15 dias, verde aos 30, marinho aos 90. */
+const COR_DA_ETAPA: Record<FollowupKey, string> = { d15: AZUL, d30: '#6f9d91', m90: NAVY }
 
 interface Props {
   patients: Patient[]
@@ -120,20 +123,21 @@ function Group({
 
 export default function Followups({ patients, setFollowup, onAbrirConversa }: Props) {
   const [sending, setSending] = useState<string | null>(null)
+  const { avisar, perguntar } = useDialogos()
   const items = pendingFollowups(patients)
   const overdue = items.filter((item) => item.urgencia === 'atrasado')
   const today = items.filter((item) => item.urgencia === 'hoje')
   const upcoming = items.filter((item) => item.urgencia === 'proximo')
   const scheduled = items.filter((item) => item.urgencia === 'futuro')
   const completed = patients
-    .flatMap((patient) => [patient.followups.d30, patient.followups.m90])
+    .flatMap((patient) => [patient.followups.d15, patient.followups.d30, patient.followups.m90])
     .filter((followup) => followup.status === 'concluido').length
   const sent = items.filter((item) => item.patient.followups[item.key].status === 'enviado').length
 
   async function send(item: FollowupItem, consentConfirmed = false) {
     const followupId = item.patient.followups[item.key].id
     if (!followupId) {
-      alert('Este acompanhamento ainda não terminou de carregar. Atualize a página e tente novamente.')
+      avisar('Este acompanhamento ainda não terminou de carregar. Atualize a página e tente de novo.', 'erro')
       return
     }
 
@@ -148,9 +152,13 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
       const responsePayload = (data ?? errorPayload) as FunctionPayload | null
 
       if (responsePayload?.code === 'CONSENT_REQUIRED' && !consentConfirmed) {
-        const confirmed = window.confirm(
-          `Confirma que ${item.patient.responsavel || item.patient.nome} autorizou receber o acompanhamento pelo WhatsApp?`,
-        )
+        const confirmed = await perguntar({
+          titulo: `${item.patient.responsavel || item.patient.nome} autorizou receber mensagens no WhatsApp?`,
+          detalhe:
+            'A autorização fica registrada no cadastro. Ela vale para os acompanhamentos de 15, 30 e 90 dias, e a família pode sair a qualquer momento respondendo SAIR.',
+          confirmar: 'Sim, autorizou',
+          cancelar: 'Ainda não',
+        })
         if (confirmed) await send(item, true)
         return
       }
@@ -158,13 +166,13 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
       if (responsePayload?.error) throw new Error(describeFailure(responsePayload, 'Falha no envio.'))
 
       await setFollowup(item.patient.id, item.key, 'enviado')
-      alert(
+      avisar(
         responsePayload?.alreadySent
           ? 'Esta mensagem já havia sido enviada.'
-          : 'Mensagem enviada pelo WhatsApp com sucesso.',
+          : `Mensagem enviada para ${item.patient.nome} pelo WhatsApp.`,
       )
     } catch (cause) {
-      alert(cause instanceof Error ? cause.message : 'Não foi possível enviar a mensagem.')
+      avisar(cause instanceof Error ? cause.message : 'Não foi possível enviar a mensagem.', 'erro')
     } finally {
       setSending((current) => (current === sendingKey ? null : current))
     }
@@ -185,7 +193,7 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
     const isSending = sending === sendingKey
     const isOverdue = item.urgencia === 'atrasado'
     const isToday = item.urgencia === 'hoje'
-    const accent = isOverdue ? '#c94f4c' : isToday ? AZUL : item.key === 'd30' ? '#6f9d91' : NAVY
+    const accent = isOverdue ? '#c94f4c' : isToday ? AZUL : COR_DA_ETAPA[item.key]
 
     return (
       <article
@@ -207,7 +215,7 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
                 <h3 className="truncate text-sm font-extrabold tracking-[-0.02em] text-[#081b2c]">{patient.nome}</h3>
                 <span
                   className="rounded-full px-2 py-1 text-[8px] font-extrabold uppercase tracking-[0.12em]"
-                  style={{ background: `${item.key === 'd30' ? '#6f9d91' : NAVY}12`, color: item.key === 'd30' ? '#557f75' : NAVY }}
+                  style={{ background: `${COR_DA_ETAPA[item.key]}12`, color: COR_DA_ETAPA[item.key] }}
                 >
                   {item.label}
                 </span>
@@ -265,9 +273,14 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
             <button
               type="button"
               onClick={() => {
-                void setFollowup(patient.id, item.key, 'concluido').catch((cause) => {
-                  alert(cause instanceof Error ? cause.message : 'Não foi possível concluir o acompanhamento.')
-                })
+                void setFollowup(patient.id, item.key, 'concluido')
+                  .then(() => avisar(`Acompanhamento de ${patient.nome} concluído.`))
+                  .catch((cause) => {
+                    avisar(
+                      cause instanceof Error ? cause.message : 'Não foi possível concluir o acompanhamento.',
+                      'erro',
+                    )
+                  })
               }}
               className="flex items-center justify-center gap-1.5 rounded-xl border border-[#6f9d91]/35 bg-[#f4f8f7] px-3 py-2.5 text-[10px] font-extrabold text-[#4f796f] transition hover:border-[#6f9d91] hover:bg-[#eaf3f0]"
               aria-label={`Concluir acompanhamento de ${patient.nome}`}
@@ -306,7 +319,7 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
                 Hoje, o cuidado pede atenção para {overdue.length + today.length} {overdue.length + today.length === 1 ? 'família' : 'famílias'}.
               </h2>
               <p className="mt-3 max-w-xl text-[11px] leading-relaxed text-white/50 sm:text-xs">
-                A fila organiza automaticamente os contatos de 30 e 90 dias, priorizando o que não pode esperar.
+                A fila organiza automaticamente os contatos de 15, 30 e 90 dias, priorizando o que não pode esperar.
               </p>
             </div>
 
@@ -361,6 +374,7 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
             <div className="absolute bottom-5 left-[17px] top-5 w-px bg-gradient-to-b from-[#2f7fc1] via-[#6f9d91] to-[#081b2c]/20" />
             {[
               { icon: Stethoscope, label: 'Consulta', detail: 'Cadastro clínico inicial', color: '#2f7fc1' },
+              { icon: MessageCircle, label: '15 dias', detail: 'Adaptação às orientações', color: '#2f7fc1' },
               { icon: Send, label: '30 dias', detail: 'Primeiro contato de evolução', color: '#6f9d91' },
               { icon: HeartHandshake, label: '90 dias', detail: 'Continuidade e suporte', color: '#081b2c' },
             ].map((step) => {
