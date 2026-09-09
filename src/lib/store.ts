@@ -25,6 +25,7 @@ import {
   vincularContatoAoPaciente,
   type ClinicRole,
 } from '@/lib/repository'
+import { supabase } from '@/lib/supabase'
 
 export const DEFAULT_TEMPLATES: Record<FollowupKey, string> = {
   d15: 'Olá! Aqui é da equipe do Dr. Marcello Ruiz, gastroenterologista pediátrico. Já se passaram 15 dias da consulta de {nome}. Como {pronome} está se adaptando às orientações? Se surgiu qualquer dúvida, é só responder por aqui. 💙',
@@ -67,9 +68,16 @@ export function useDb() {
   const [loadError, setLoadError] = useState('')
   const loadSequence = useRef(0)
 
-  const load = useCallback(async () => {
+  /**
+   * Recarrega a base da clinica.
+   *
+   * `silencioso` serve para a atualizacao em tempo real: sem ele, cada
+   * cadastro criado pelo robo trocaria a tela inteira pelo "Carregando dados
+   * da clinica" enquanto a recepcao estava lendo alguma coisa.
+   */
+  const load = useCallback(async (silencioso = false) => {
     const sequence = ++loadSequence.current
-    setLoading(true)
+    if (!silencioso) setLoading(true)
     setError('')
     setLoadError('')
     try {
@@ -87,7 +95,7 @@ export function useDb() {
         setLoadError(texto)
       }
     } finally {
-      if (loadSequence.current === sequence) setLoading(false)
+      if (loadSequence.current === sequence && !silencioso) setLoading(false)
     }
   }, [clinicId])
 
@@ -97,6 +105,41 @@ export function useDb() {
       loadSequence.current += 1
     }
   }, [load])
+
+  /**
+   * A lista se atualiza sozinha.
+   *
+   * Um cadastro criado pelo robo, uma consulta marcada pelo WhatsApp ou um
+   * acompanhamento enviado pelo disparo automatico mudam a base sem ninguem
+   * clicar em nada. Ate 09/09/2026 so apareciam depois de um F5 - e quem
+   * estava com a tela aberta concluia que o robo nao tinha funcionado.
+   *
+   * A recarga e adiada por um segundo: uma consulta marcada mexe em varias
+   * tabelas de uma vez, e sem isso seriam tres recargas em sequencia.
+   */
+  useEffect(() => {
+    if (!clinicId) return
+    let adiado: number | undefined
+    const recarregar = () => {
+      window.clearTimeout(adiado)
+      adiado = window.setTimeout(() => void load(true), 1000)
+    }
+
+    const canal = supabase.channel(`base-${clinicId}`)
+    for (const tabela of ['patients', 'followups', 'appointments'] as const) {
+      canal.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: tabela, filter: `clinic_id=eq.${clinicId}` },
+        recarregar,
+      )
+    }
+    canal.subscribe()
+
+    return () => {
+      window.clearTimeout(adiado)
+      void supabase.removeChannel(canal)
+    }
+  }, [clinicId, load])
 
   function requireClinic() {
     if (!clinicId) throw new Error('A clínica ainda não foi carregada.')
