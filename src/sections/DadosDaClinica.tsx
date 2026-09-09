@@ -11,7 +11,14 @@ import {
 const campo =
   'mt-1.5 w-full rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-xs font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#2f7fc1] focus:bg-white focus:ring-4 focus:ring-[#2f7fc1]/10'
 
-const vazio: Dados = { medicoNome: '', crm: '', telefone: '', medicoEmail: '', medicoNascimento: '' }
+const vazio: Dados = {
+  medicoNome: '',
+  crm: '',
+  telefone: '',
+  telefone2: '',
+  medicoEmail: '',
+  medicoNascimento: '',
+}
 
 /**
  * Quem assina e de onde sai o documento.
@@ -101,9 +108,16 @@ export default function DadosDaClinica() {
         <label className="block">
           <span className="flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
             Telefone da clínica
-            <Ajuda texto="Telefone de contato impresso na receita. Pode ter dois, separados por barra: (13) 3273-6828 / (13) 99999-0000. O cadastro do médico na Memed leva só o primeiro." />
+            <Ajuda texto="Telefone principal, impresso na receita. É ele que vai para o cadastro do médico na Memed, onde só cabe um número." />
           </span>
-          <input className={campo} value={dados.telefone} onChange={(e) => set('telefone', e.target.value)} placeholder="(13) 0000-0000 / (13) 90000-0000" inputMode="tel" />
+          <input className={campo} value={dados.telefone} onChange={(e) => set('telefone', e.target.value)} placeholder="(13) 0000-0000" inputMode="tel" />
+        </label>
+        <label className="block">
+          <span className="flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
+            Segundo telefone
+            <Ajuda texto="Opcional: WhatsApp ou outro número de contato. Sai na receita junto do primeiro." />
+          </span>
+          <input className={campo} value={dados.telefone2} onChange={(e) => set('telefone2', e.target.value)} placeholder="(13) 90000-0000" inputMode="tel" />
         </label>
         <label className="block">
           <span className="flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wide text-slate-400">

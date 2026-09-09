@@ -2147,7 +2147,11 @@ export default function PatientRecord({
       const local: LocalDeAtendimento = {
         nome: unidade.name,
         endereco: unidade.address,
-        telefone: dadosDaClinica.telefone,
+        // Os dois numeros no rodape da receita, quando a clinica tem dois.
+        telefone: [dadosDaClinica.telefone, dadosDaClinica.telefone2]
+          .map((numero) => numero.trim())
+          .filter(Boolean)
+          .join(' / '),
       }
       await abrirPrescricao(patient, consultation, {
         onReceita: (dados) => {

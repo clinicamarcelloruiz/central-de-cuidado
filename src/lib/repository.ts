@@ -572,6 +572,8 @@ export interface DadosDaClinica {
   crm: string
   /** Telefone de contato da clinica, impresso na receita. */
   telefone: string
+  /** Segundo telefone, quando a clinica tem dois. Sai junto na receita. */
+  telefone2: string
   /** E-mail do medico para cadastros externos (Memed). */
   medicoEmail: string
   /** Data de nascimento do medico (YYYY-MM-DD); a Memed exige. */
@@ -585,13 +587,14 @@ type LinhaDaClinica = {
   signer_name: string | null
   signer_crm: string | null
   clinic_phone: string | null
+  clinic_phone_alt?: string | null
   prescriber_email: string | null
   prescriber_birth_date: string | null
 }
 
 export async function getDadosDaClinica(clinicId: string): Promise<DadosDaClinica> {
   const { data, error } = await tabelaCrua('clinic_settings')
-    .select('signer_name,signer_crm,clinic_phone,prescriber_email,prescriber_birth_date')
+    .select('signer_name,signer_crm,clinic_phone,clinic_phone_alt,prescriber_email,prescriber_birth_date')
     .eq('clinic_id', clinicId)
     .order('clinic_id', { ascending: true })
   if (error) fail(error)
@@ -600,6 +603,7 @@ export async function getDadosDaClinica(clinicId: string): Promise<DadosDaClinic
     medicoNome: linha?.signer_name ?? '',
     crm: linha?.signer_crm ?? '',
     telefone: linha?.clinic_phone ?? '',
+    telefone2: linha?.clinic_phone_alt ?? '',
     medicoEmail: linha?.prescriber_email ?? '',
     medicoNascimento: linha?.prescriber_birth_date ?? '',
   }
@@ -616,6 +620,7 @@ export async function saveDadosDaClinica(clinicId: string, dados: DadosDaClinica
       signer_name: dados.medicoNome.trim() || null,
       signer_crm: dados.crm.trim() || null,
       clinic_phone: dados.telefone.trim(),
+      clinic_phone_alt: dados.telefone2.trim(),
       prescriber_email: dados.medicoEmail.trim() || null,
       prescriber_birth_date: dados.medicoNascimento || null,
     })
