@@ -1044,12 +1044,15 @@ async function marcar(
     // esperando uma resposta que nao leva a lugar nenhum.
     const quantas =
       faltam.length === 1 ? 'uma pergunta rápida' : `${faltam.length} perguntas rápidas`
+    // Nada de confirmacao aqui: a conversa abre com as perguntas e fecha com o
+    // comprovante. Uma confirmacao no comeco e outra no fim soariam como duas
+    // consultas, e e o comprovante do fim que a pessoa vai rolar para
+    // reencontrar semanas depois, atras do endereco.
     return {
       ...abertura,
       resposta:
-        `${comprovante}\n\n` +
-        '━━━━━━━━━━━━━━\n' +
-        `Agora *${quantas}* para completar o cadastro.\n\n` +
+        `📋 Seu horário de *${quando}* está guardado.\n\n` +
+        `Para confirmar, ${quantas} para completar o cadastro.\n\n` +
         (abertura?.resposta ?? ''),
     }
   }
@@ -1257,12 +1260,40 @@ async function terminarDados(
     }
   }
 
+  // O comprovante fecha a conversa. Remontado aqui, e nao guardado la atras,
+  // porque entre a reserva e esta mensagem a familia respondeu varias vezes -
+  // e o que vale e o estado da consulta agora.
+  let comprovante = ''
+  if (clinicId && appointmentId) {
+    try {
+      const { data: consulta } = await admin
+        .from('appointments')
+        .select('starts_at,clinic_units(name,address)')
+        .eq('id', appointmentId)
+        .maybeSingle()
+      if (consulta) {
+        const unidade = (Array.isArray(consulta.clinic_units)
+          ? consulta.clinic_units[0]
+          : consulta.clinic_units) as { name?: string; address?: string } | null
+        const timezone = await fusoDaClinica(admin, clinicId)
+        const onde = `${unidade?.name ?? 'nossa unidade'}${unidade?.address ? `\n${unidade.address}` : ''}`
+        comprovante =
+          `✅ *Consulta marcada!*\n\n🗓️ ${formatarData(consulta.starts_at, timezone)}\n📍 ${onde}\n\n` +
+          '*Um dia antes da consulta enviamos uma mensagem aqui pelo WhatsApp para ' +
+          'você confirmar sua presença.*\n\n'
+      }
+    } catch (causa) {
+      console.error('Nao consegui remontar o comprovante', causa)
+    }
+  }
+
   return {
     resposta:
       '✅ *Tudo certo, obrigado!* Já anotamos os dados' +
       (virouCadastro ? ' e seu cadastro está feito' : ' na sua consulta') +
       '.\n\n' +
-      'O que faltar, o Dr. Marcello completa no atendimento.\n\n' + VOLTA,
+      (comprovante ? `━━━━━━━━━━━━━━\n${comprovante}` : '') +
+      VOLTA,
   }
 }
 
