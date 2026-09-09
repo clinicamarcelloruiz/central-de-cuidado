@@ -1618,9 +1618,10 @@ export async function changeFollowup(
     .eq('followup_key', key)
     .is('archived_at', null)
     .select('id,patient_id,followup_key,status,opened_at')
-    .order('created_at', { ascending: false })
 
   if (error) fail(error)
+  // Sem ordenacao: o banco em producao nao tem a coluna created_at nesta
+  // tabela, e depois de tirar os arquivados sobra um acompanhamento so.
   const linhas = (data ?? []) as FollowupRow[]
   if (linhas.length === 0) {
     throw new Error(
