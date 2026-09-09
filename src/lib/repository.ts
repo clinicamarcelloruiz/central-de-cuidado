@@ -1356,6 +1356,25 @@ export async function resolveConversation(conversationId: string) {
   if (error) fail(error)
 }
 
+/**
+ * Desfaz o "resolvida".
+ *
+ * Marcar como resolvida e um clique num botao pequeno, ao lado de outros, e
+ * ate 09/09/2026 nao havia como desmarcar: a conversa so voltava a "aberta"
+ * quando o paciente escrevesse de novo. Um erro de clique nao deveria depender
+ * de outra pessoa para se corrigir.
+ *
+ * Nao reacende a bandeira de atencao nem mexe nas nao lidas: quem reabre esta
+ * olhando para a conversa agora.
+ */
+export async function unresolveConversation(conversationId: string) {
+  const { error } = await supabase
+    .from('whatsapp_conversations')
+    .update({ status: 'open' })
+    .eq('id', conversationId)
+  if (error) fail(error)
+}
+
 export async function fetchDb(
   clinicId: string,
   defaults: Record<FollowupKey, string>,
