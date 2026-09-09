@@ -89,6 +89,40 @@ function unidadeEquivalente(nomeDaAgenda: string, opcoes: string[]): string | nu
   return opcoes.find((opcao) => limpar(opcao) === alvo) ?? null
 }
 
+/**
+ * "12/03/2019" -> "2019-03-12". Devolve null para qualquer outra coisa.
+ *
+ * A familia responde no WhatsApp em texto livre, e "marco de 2019" e resposta
+ * legitima. O que nao vira data entra em branco no cadastro, e o campo fica
+ * visivelmente vazio para alguem perguntar - melhor do que uma data inventada.
+ */
+function dataDoTexto(texto?: string): string | null {
+  const m = (texto ?? '').trim().match(/^(\d{1,2})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{4})$/)
+  if (!m) return null
+  const [, dia, mes, ano] = m
+  const iso = `${ano}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`
+  const data = new Date(`${iso}T12:00:00`)
+  if (Number.isNaN(data.getTime()) || data > new Date()) return null
+  return iso
+}
+
+/**
+ * Etiqueta do cadastro que o sistema criou sozinho na vespera da consulta.
+ *
+ * Existe para que ninguem confunda dado declarado por mensagem com dado
+ * conferido. Some no instante em que alguem abre o cadastro e salva.
+ */
+function AConferir() {
+  return (
+    <span
+      title="Cadastro criado pelo sistema a partir do agendamento no WhatsApp. Abra, confira com a família e salve."
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#e1eef8] px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-[#1f4f78]"
+    >
+      A conferir
+    </span>
+  )
+}
+
 function emptyDraft(unidadePadrao = ''): PatientDraft {
   return {
     nome: '',
@@ -179,6 +213,11 @@ interface Props {
     dataConsulta?: string
     /** Nome da unidade da consulta, como aparece na agenda. */
     unidade?: string
+    /** O que a familia respondeu ao robo do WhatsApp. Texto livre, nao conferido. */
+    nascimento?: string
+    responsavel?: string
+    cpf?: string
+    email?: string
   } | null
   /**
    * Chamado depois de salvar um cadastro que veio de outra tela. Quando existe,
@@ -274,6 +313,13 @@ export default function Patients({
             ? { unidade: unidadeEquivalente(preCadastro.unidade, opcoesDeUnidade(unidadesDaClinica))! }
             : {}),
           ...((sexoPeloNome(preCadastro.nome) && { sexo: sexoPeloNome(preCadastro.nome)! }) || {}),
+          // A ficha do WhatsApp entra preenchida, para a equipe conferir em vez
+          // de digitar. A data so entra quando e uma data de verdade: "março de
+          // 2019" fica de fora e a recepcao pergunta.
+          ...(dataDoTexto(preCadastro.nascimento) ? { nascimento: dataDoTexto(preCadastro.nascimento)! } : {}),
+          ...(preCadastro.responsavel ? { responsavel: preCadastro.responsavel } : {}),
+          ...(preCadastro.cpf ? { cpf: preCadastro.cpf } : {}),
+          ...(preCadastro.email ? { email: preCadastro.email } : {}),
         }
       : {}
     setForm({ ...emptyDraft(unidadesDaClinica[0]), ...sugerido })
@@ -676,7 +722,10 @@ export default function Patients({
               </span>
 
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-extrabold text-[#081b2c]">{patient.nome}</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="truncate text-xs font-extrabold text-[#081b2c]">{patient.nome}</p>
+                  {patient.criadoAutomaticamenteEm && <AConferir />}
+                </div>
                 <p className="truncate text-[10px] text-slate-400">
                   {[
                     patient.dataConsulta ? `Consulta ${fmtBR(patient.dataConsulta)}` : null,
@@ -731,7 +780,10 @@ export default function Patients({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <h2 className="truncate text-sm font-extrabold tracking-[-0.02em] text-[#081b2c]">{patient.nome}</h2>
+                      <div className="flex items-center gap-1.5">
+                        <h2 className="truncate text-sm font-extrabold tracking-[-0.02em] text-[#081b2c]">{patient.nome}</h2>
+                        {patient.criadoAutomaticamenteEm && <AConferir />}
+                      </div>
                       <p className="mt-1 text-[10px] font-semibold text-slate-400">
                         {idade(patient.nascimento)} · {patient.sexo === 'F' ? 'Feminino' : patient.sexo === 'M' ? 'Masculino' : 'Outro / NI'}
                       </p>

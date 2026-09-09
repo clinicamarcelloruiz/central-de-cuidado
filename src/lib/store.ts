@@ -31,7 +31,10 @@ export const DEFAULT_TEMPLATES: Record<FollowupKey, string> = {
   m90: 'Olá! Aqui é da equipe do Dr. Marcello Ruiz. Já se passaram 3 meses da consulta de {nome} e gostaríamos de saber como {pronome} está. Está tudo bem? Qualquer necessidade, estamos à disposição. 💙',
 }
 
-export type PatientDraft = Omit<Patient, 'id' | 'criadoEm' | 'followups'>
+export type PatientDraft = Omit<
+  Patient,
+  'id' | 'criadoEm' | 'followups' | 'criadoAutomaticamenteEm'
+>
 
 const EMPTY_DB: Db = {
   patients: [],

@@ -28,6 +28,12 @@ export interface Patient {
   dataConsulta: string // YYYY-MM-DD
   observacoes: string
   criadoEm: string
+  /**
+   * Quando o sistema criou este cadastro sozinho, na vespera da consulta, com o
+   * que a familia informou ao robo. Vazio depois que alguem da equipe confere e
+   * salva - e vazio tambem em todo cadastro feito por gente.
+   */
+  criadoAutomaticamenteEm: string
   followups: Record<FollowupKey, FollowupState>
 }
 

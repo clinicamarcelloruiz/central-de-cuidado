@@ -56,6 +56,11 @@ export type Estado =
   | 'aguardando_unidade'
   | 'aguardando_dia'
   | 'aguardando_horario'
+  | 'dados_nome'
+  | 'dados_nascimento'
+  | 'dados_responsavel'
+  | 'dados_cpf'
+  | 'dados_email'
   | 'atendente'
 export type MotivoAtencao = 'atendente' | 'falha' | 'cancelou_sozinho'
 
@@ -360,6 +365,7 @@ async function voltarAoMenuAtivo(admin: Admin, conversationId: string) {
     booking_unit_id: null,
     booking_patient_id: null,
     booking_replaces_id: null,
+    booking_intake_id: null,
   })
 }
 
@@ -370,6 +376,7 @@ async function limparEstado(admin: Admin, conversationId: string) {
     booking_unit_id: null,
     booking_patient_id: null,
     booking_replaces_id: null,
+    booking_intake_id: null,
   })
 }
 
@@ -939,7 +946,7 @@ async function marcar(
     vezesRemarcada = (anterior?.reschedule_count ?? 0) + 1
   }
 
-  const { error } = await admin.from('appointments').insert({
+  const { data: criada, error } = await admin.from('appointments').insert({
     clinic_id: clinicId,
     unit_id: unitId,
     patient_id: paciente?.id ?? null,
@@ -962,7 +969,7 @@ async function marcar(
     hold_expires_at: null,
     reschedule_count: vezesRemarcada,
     rescheduled_from: substitui,
-  })
+  }).select('id').maybeSingle()
 
   // Tambem termina oferecendo numero quando da errado, entao o menu fica ativo.
   if (error) await voltarAoMenuAtivo(admin, conversationId)
@@ -1010,12 +1017,224 @@ async function marcar(
   //
   // Asterisco simples e o negrito do WhatsApp. O aviso da vespera vem destacado
   // porque e a unica coisa que ainda se espera da pessoa.
+  // Vaga garantida. So agora vem a ficha - e ela e opcional do primeiro ao
+  // ultimo campo. Perguntar antes de marcar transformaria cinco perguntas em
+  // cinco chances de perder o horario para outra pessoa.
+  //
+  // Numa remarcacao nao se pergunta nada: os dados ja vieram na primeira vez.
+  const precisaDeFicha = !substitui && faltaFicha(paciente)
+  const comprovante =
+    `✅ ${aviso}\n\n🗓️ ${quando}\n📍 ${onde}\n\n` +
+    '*Um dia antes da consulta enviamos uma mensagem aqui pelo WhatsApp para ' +
+    'você confirmar sua presença.*'
+
+  if (precisaDeFicha && criada?.id) {
+    const primeira = PERGUNTAS[0]
+    const abertura = await perguntarDados(admin, conversationId, criada.id, primeira)
+    return {
+      ...abertura,
+      resposta:
+        `${comprovante}\n\n` +
+        '━━━━━━━━━━━━━━\n' +
+        'Para o Dr. Marcello já chegar preparado, posso fazer *5 perguntas rápidas*? ' +
+        'Nenhuma é obrigatória: o que faltar ele completa na consulta.\n\n' +
+        (abertura?.resposta ?? ''),
+    }
+  }
+
+  return { resposta: `${comprovante}\n\n` + VOLTA }
+}
+
+/**
+ * Quem ainda precisa responder a ficha.
+ *
+ * Paciente cadastrado ja tem nome, nascimento e responsavel no prontuario -
+ * perguntar de novo soaria como se a clinica nao o conhecesse. Sem cadastro, a
+ * consulta chega hoje so com o nome do perfil do WhatsApp e um telefone.
+ */
+function faltaFicha(paciente: Paciente | null) {
+  return paciente === null
+}
+
+
+// ---------------------------------------------------------------
+// Dados do paciente, perguntados DEPOIS de marcar
+// ---------------------------------------------------------------
+
+/**
+ * As cinco perguntas, na ordem em que sao feitas.
+ *
+ * A ordem nao e a da ficha, e a da conversa: nome e nascimento saem de cabeca,
+ * responsavel e quase sempre quem esta digitando, e o CPF - o unico que faz a
+ * pessoa levantar da cadeira - vem no fim, quando a consulta ja esta marcada e
+ * desistir da pergunta nao custa a vaga.
+ */
+const PERGUNTAS: {
+  estado: Estado
+  coluna: string
+  texto: string
+  /** Devolve o valor a guardar, ou null quando a resposta nao serve. */
+  ler: (texto: string) => string | null
+  /** Mensagem de quando nao serve. Na segunda tentativa a pergunta e pulada. */
+  erro: string
+}[] = [
+  {
+    estado: 'dados_nome',
+    coluna: 'intake_patient_name',
+    texto: '👶 Qual é o *nome completo do paciente* (a criança)?',
+    ler: (t) => (t.trim().length >= 2 ? t.trim().slice(0, 160) : null),
+    erro: 'Não consegui ler o nome. Pode escrever de novo?',
+  },
+  {
+    estado: 'dados_nascimento',
+    coluna: 'intake_birth_date',
+    texto: '🎂 Qual é a *data de nascimento* dele(a)? (dia/mês/ano)',
+    // Guarda o que a pessoa escreveu quando nao e uma data redonda: "março de
+    // 2019" diz muito mais para o medico do que um campo vazio.
+    ler: (t) => (t.trim().length >= 3 ? t.trim().slice(0, 60) : null),
+    erro: 'Não consegui ler a data. Pode escrever assim: 12/03/2019?',
+  },
+  {
+    estado: 'dados_responsavel',
+    coluna: 'intake_guardian',
+    texto: '👤 Qual é o *nome do responsável* (mãe, pai ou tutor)?',
+    ler: (t) => (t.trim().length >= 2 ? t.trim().slice(0, 160) : null),
+    erro: 'Não consegui ler o nome. Pode escrever de novo?',
+  },
+  {
+    estado: 'dados_cpf',
+    coluna: 'intake_cpf',
+    texto:
+      '🪪 Qual é o *CPF do paciente*?\n\n' +
+      '_Ele é exigido por lei na receita digital. Se a criança não tiver CPF, ' +
+      'ou você não souber agora, responda PULAR._',
+    ler: (t) => (cpfValido(t) ? soDigitos(t) : null),
+    erro: 'Esse CPF não confere. Pode conferir e mandar de novo, ou responder PULAR.',
+  },
+  {
+    estado: 'dados_email',
+    coluna: 'intake_email',
+    texto:
+      '✉️ Por fim, qual é o *e-mail* para enviarmos receitas e documentos?',
+    ler: (t) => (emailValido(t) ? t.trim().slice(0, 160) : null),
+    erro: 'Esse e-mail parece incompleto. Pode mandar de novo, ou responder PULAR.',
+  },
+]
+
+function soDigitos(texto: string) {
+  return texto.replace(/\D/g, '')
+}
+
+/**
+ * CPF pelo digito verificador, e nao so pelo tamanho.
+ *
+ * Onze digitos quaisquer passariam - inclusive um telefone digitado por engano
+ * no campo errado - e o erro so apareceria meses depois, na hora de emitir a
+ * receita, com a familia longe.
+ */
+function cpfValido(texto: string) {
+  const cpf = soDigitos(texto)
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false
+  for (const [ate, posicao] of [[9, 10], [10, 11]] as const) {
+    let soma = 0
+    for (let i = 0; i < ate; i++) soma += Number(cpf[i]) * (posicao - i)
+    const resto = (soma * 10) % 11 % 10
+    if (resto !== Number(cpf[ate])) return false
+  }
+  return true
+}
+
+function emailValido(texto: string) {
+  return /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(texto.trim())
+}
+
+/** "pular", "nao sei", "nao tenho": tudo que significa "segue sem isso". */
+function pulou(texto: string) {
+  const t = normalizar(texto)
+  return (
+    t === 'pular' || t === 'pula' || t === '-' || t === 'x' ||
+    t === 'nao sei' || t === 'não sei' || t === 'nao tenho' || t === 'não tenho' ||
+    t === 'nao lembro' || t === 'sem cpf' || t === 'nao possui' || t === 'depois'
+  )
+}
+
+/** A pergunta seguinte a um estado, ou null quando acabaram. */
+function proximaPergunta(estado: Estado | null) {
+  const indice = PERGUNTAS.findIndex((p) => p.estado === estado)
+  return PERGUNTAS[indice + 1] ?? null
+}
+
+/**
+ * O agradecimento final. Fecha a etapa e devolve o menu ativo.
+ *
+ * Diz o que fica pendente sem cobrar: quem nao soube o CPF ja ouviu uma vez que
+ * pode responder depois, e repetir viraria pressao sobre quem justamente nao
+ * podia resolver aquilo naquele momento.
+ */
+async function terminarDados(admin: Admin, conversationId: string): Promise<Resultado> {
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'menu',
+    booking_options: null,
+    booking_intake_id: null,
+  })
   return {
     resposta:
-      `✅ ${aviso}\n\n🗓️ ${quando}\n📍 ${onde}\n\n` +
-      '*Um dia antes da consulta enviamos uma mensagem aqui pelo WhatsApp para ' +
-      'você confirmar sua presença.*\n\n' + VOLTA,
+      '✅ *Tudo certo, obrigado!* Já anotamos os dados na sua consulta.\n\n' +
+      'O que faltar, o Dr. Marcello completa no atendimento.\n\n' + VOLTA,
   }
+}
+
+/**
+ * Guarda a resposta e faz a proxima pergunta.
+ *
+ * Uma pergunta por mensagem, e nao um formulario de cinco linhas: no WhatsApp
+ * um bloco com cinco campos volta pela metade, fora de ordem, e ninguem sabe
+ * qual resposta e de qual campo.
+ */
+async function perguntarDados(
+  admin: Admin,
+  conversationId: string,
+  appointmentId: string,
+  pergunta: (typeof PERGUNTAS)[number],
+  aviso = '',
+): Promise<Resultado> {
+  await salvarEstado(admin, conversationId, {
+    booking_state: pergunta.estado,
+    booking_intake_id: appointmentId,
+    // Conta as tentativas nesta pergunta. Na segunda falha o robo segue em
+    // frente sozinho, em vez de prender quem nao tem como responder.
+    booking_options: [0],
+  })
+  return {
+    resposta:
+      (aviso ? `${aviso}\n\n` : '') +
+      `${pergunta.texto}\n\n` +
+      '_Se preferir não responder agora, digite PULAR._',
+    botoes: [
+      { id: 'PULAR', titulo: 'Pular' },
+      { id: 'MENU', titulo: 'Voltar ao menu' },
+    ],
+  }
+}
+
+/**
+ * Grava uma resposta na consulta.
+ *
+ * Falha de escrita nao interrompe a conversa: a consulta ja esta marcada, e o
+ * dado que nao entrou o medico pergunta no consultorio. Prender a pessoa numa
+ * pergunta por causa de um erro nosso seria o pior dos dois mundos.
+ */
+async function guardarDado(
+  admin: Admin,
+  appointmentId: string,
+  coluna: string,
+  valor: string,
+) {
+  const { error } = await admin
+    .from('appointments')
+    .update({ [coluna]: valor })
+    .eq('id', appointmentId)
+  if (error) console.error('Falha ao guardar dado do agendamento', { coluna, error })
 }
 
 // ---------------------------------------------------------------
@@ -1053,6 +1272,8 @@ export async function tratarConversa(opcoes: {
   consultas: ConsultaMarcada[]
   /** Consulta a cancelar assim que a nova entrar, num fluxo de remarcacao. */
   consultaASubstituir: string | null
+  /** Consulta recem-marcada cujos dados estao sendo perguntados. */
+  consultaEmCadastro: string | null
   /** Nome que a pessoa usa no WhatsApp. Vazio quando o evento nao trouxe. */
   nomeDoPerfil: string
   textos: { saudacao: string; saudacaoConhecida: string; informacoes: string }
@@ -1128,6 +1349,57 @@ export async function tratarConversa(opcoes: {
     if (!opcoes.podeIniciarMenu) return null
 
     return await mostrarMenu(admin, conversationId, saudacao)
+  }
+
+  // ---- Ficha do paciente, depois de marcar ----
+  //
+  // Vem antes do menu porque estas etapas aceitam texto livre: um nome como
+  // "Ana" nao pode cair na leitura de numeros do menu.
+  const perguntaAtual = PERGUNTAS.find((p) => p.estado === estadoAtual)
+  if (perguntaAtual) {
+    const consulta = opcoes.consultaEmCadastro
+    // Sem a consulta em maos nao ha onde guardar. Encerra em vez de continuar
+    // perguntando para o vazio.
+    if (!consulta) return await terminarDados(admin, conversationId)
+
+    const seguinte = proximaPergunta(estadoAtual)
+
+    // Pular vale sempre, em qualquer campo, sem justificativa e sem insistir.
+    if (pulou(texto) || pediuVoltar(texto)) {
+      return seguinte
+        ? await perguntarDados(admin, conversationId, consulta, seguinte, 'Sem problema.')
+        : await terminarDados(admin, conversationId)
+    }
+
+    const valor = perguntaAtual.ler(texto)
+    if (valor === null) {
+      // Uma segunda chance, e so uma. Insistir num CPF que a pessoa nao tem
+      // seria transformar um dado opcional em muro.
+      const tentativas = Array.isArray(opcoes.opcoesAtuais)
+        ? Number((opcoes.opcoesAtuais as unknown[])[0] ?? 0)
+        : 0
+      if (tentativas >= 1) {
+        return seguinte
+          ? await perguntarDados(
+              admin, conversationId, consulta, seguinte,
+              'Tudo bem, deixamos esse campo em branco: o Dr. Marcello completa na consulta.',
+            )
+          : await terminarDados(admin, conversationId)
+      }
+      await salvarEstado(admin, conversationId, { booking_options: [tentativas + 1] })
+      return {
+        resposta: `${perguntaAtual.erro}\n\n_Ou digite PULAR para seguir sem esse dado._`,
+        botoes: [
+          { id: 'PULAR', titulo: 'Pular' },
+          { id: 'MENU', titulo: 'Voltar ao menu' },
+        ],
+      }
+    }
+
+    await guardarDado(admin, consulta, perguntaAtual.coluna, valor)
+    return seguinte
+      ? await perguntarDados(admin, conversationId, consulta, seguinte)
+      : await terminarDados(admin, conversationId)
   }
 
   // ---- Menu ----

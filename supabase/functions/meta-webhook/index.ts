@@ -191,7 +191,7 @@ Deno.serve(async (req) => {
             .from('whatsapp_conversations')
             .select(
               'id,booking_state,booking_options,booking_unit_id,booking_patient_id,' +
-                'booking_replaces_id,needs_attention,profile_name',
+                'booking_replaces_id,booking_intake_id,needs_attention,profile_name',
             )
             .eq('clinic_id', clinicId)
             .eq('wa_id', waId)
@@ -378,6 +378,7 @@ Deno.serve(async (req) => {
               pacienteEmAndamento: conversaAnterior?.booking_patient_id ?? null,
               consultas,
               consultaASubstituir: conversaAnterior?.booking_replaces_id ?? null,
+              consultaEmCadastro: conversaAnterior?.booking_intake_id ?? null,
               nomeDoPerfil: nomeDoPerfil || conversaAnterior?.profile_name || '',
               textos: {
                 saudacao: settings.whatsapp_autoreply_text ?? '',
