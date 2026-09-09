@@ -85,7 +85,15 @@ export type Resultado = {
 } | null
 
 type Unidade = { id: string; name: string; address: string }
-type Paciente = { id: string; name: string }
+type Paciente = {
+  id: string
+  name: string
+  /** O que o cadastro ja tem. Vazio = falta, e o robo pergunta. */
+  nascimento?: string | null
+  responsavel?: string | null
+  cpf?: string | null
+  email?: string | null
+}
 type Horario = { inicio: string; fim: string }
 
 /** Consulta futura ja marcada para este telefone. */
@@ -1022,21 +1030,22 @@ async function marcar(
   // cinco chances de perder o horario para outra pessoa.
   //
   // Numa remarcacao nao se pergunta nada: os dados ja vieram na primeira vez.
-  const precisaDeFicha = !substitui && faltaFicha(paciente)
+  const faltam = substitui ? [] : camposQueFaltam(paciente)
   const comprovante =
     `✅ ${aviso}\n\n🗓️ ${quando}\n📍 ${onde}\n\n` +
     '*Um dia antes da consulta enviamos uma mensagem aqui pelo WhatsApp para ' +
     'você confirmar sua presença.*'
 
-  if (precisaDeFicha && criada?.id) {
-    const primeira = PERGUNTAS[0]
-    const abertura = await perguntarDados(admin, conversationId, criada.id, primeira)
+  if (faltam.length > 0 && criada?.id) {
+    const abertura = await perguntarDados(admin, conversationId, criada.id, faltam)
+    const quantas =
+      faltam.length === 1 ? '*uma pergunta rápida*' : `*${faltam.length} perguntas rápidas*`
     return {
       ...abertura,
       resposta:
         `${comprovante}\n\n` +
         '━━━━━━━━━━━━━━\n' +
-        'Para o Dr. Marcello já chegar preparado, posso fazer *5 perguntas rápidas*? ' +
+        `Para o Dr. Marcello já chegar preparado, posso fazer ${quantas}? ` +
         'Nenhuma é obrigatória: o que faltar ele completa na consulta.\n\n' +
         (abertura?.resposta ?? ''),
     }
@@ -1046,14 +1055,23 @@ async function marcar(
 }
 
 /**
- * Quem ainda precisa responder a ficha.
+ * O que ainda falta perguntar.
  *
- * Paciente cadastrado ja tem nome, nascimento e responsavel no prontuario -
- * perguntar de novo soaria como se a clinica nao o conhecesse. Sem cadastro, a
- * consulta chega hoje so com o nome do perfil do WhatsApp e um telefone.
+ * Sem cadastro, tudo: a consulta chegaria so com o nome do perfil do WhatsApp
+ * e um telefone. Com cadastro, so os buracos - perguntar o nome de quem a
+ * clinica atende ha dois anos soaria como se ninguem o conhecesse. Mas o CPF
+ * costuma faltar mesmo em paciente antigo, e sem ele nao sai receita.
  */
-function faltaFicha(paciente: Paciente | null) {
-  return paciente === null
+function camposQueFaltam(paciente: Paciente | null): string[] {
+  if (!paciente) return PERGUNTAS.map((p) => p.chave)
+  const vazio = (valor?: string | null) => !String(valor ?? '').trim()
+  return PERGUNTAS.filter((p) => {
+    if (p.chave === 'nome') return false
+    if (p.chave === 'nascimento') return vazio(paciente.nascimento)
+    if (p.chave === 'responsavel') return vazio(paciente.responsavel)
+    if (p.chave === 'cpf') return vazio(paciente.cpf)
+    return vazio(paciente.email)
+  }).map((p) => p.chave)
 }
 
 
@@ -1071,7 +1089,10 @@ function faltaFicha(paciente: Paciente | null) {
  */
 const PERGUNTAS: {
   estado: Estado
+  chave: 'nome' | 'nascimento' | 'responsavel' | 'cpf' | 'email'
   coluna: string
+  /** Coluna equivalente no cadastro do paciente, quando existe. */
+  colunaDoCadastro?: string
   texto: string
   /** Devolve o valor a guardar, ou null quando a resposta nao serve. */
   ler: (texto: string) => string | null
@@ -1080,6 +1101,7 @@ const PERGUNTAS: {
 }[] = [
   {
     estado: 'dados_nome',
+    chave: 'nome',
     coluna: 'intake_patient_name',
     texto: '👶 Qual é o *nome completo do paciente* (a criança)?',
     ler: (t) => (t.trim().length >= 2 ? t.trim().slice(0, 160) : null),
@@ -1087,7 +1109,9 @@ const PERGUNTAS: {
   },
   {
     estado: 'dados_nascimento',
+    chave: 'nascimento',
     coluna: 'intake_birth_date',
+    colunaDoCadastro: 'birth_date',
     texto: '🎂 Qual é a *data de nascimento* dele(a)? (dia/mês/ano)',
     // Guarda o que a pessoa escreveu quando nao e uma data redonda: "março de
     // 2019" diz muito mais para o medico do que um campo vazio.
@@ -1096,14 +1120,18 @@ const PERGUNTAS: {
   },
   {
     estado: 'dados_responsavel',
+    chave: 'responsavel',
     coluna: 'intake_guardian',
+    colunaDoCadastro: 'guardian_name',
     texto: '👤 Qual é o *nome do responsável* (mãe, pai ou tutor)?',
     ler: (t) => (t.trim().length >= 2 ? t.trim().slice(0, 160) : null),
     erro: 'Não consegui ler o nome. Pode escrever de novo?',
   },
   {
     estado: 'dados_cpf',
+    chave: 'cpf',
     coluna: 'intake_cpf',
+    colunaDoCadastro: 'cpf',
     texto:
       '🪪 Qual é o *CPF do paciente*?\n\n' +
       '_Ele é exigido por lei na receita digital. Se a criança não tiver CPF, ' +
@@ -1113,7 +1141,9 @@ const PERGUNTAS: {
   },
   {
     estado: 'dados_email',
+    chave: 'email',
     coluna: 'intake_email',
+    colunaDoCadastro: 'email',
     texto:
       '✉️ Por fim, qual é o *e-mail* para enviarmos receitas e documentos?',
     ler: (t) => (emailValido(t) ? t.trim().slice(0, 160) : null),
@@ -1158,10 +1188,13 @@ function pulou(texto: string) {
   )
 }
 
-/** A pergunta seguinte a um estado, ou null quando acabaram. */
-function proximaPergunta(estado: Estado | null) {
-  const indice = PERGUNTAS.findIndex((p) => p.estado === estado)
-  return PERGUNTAS[indice + 1] ?? null
+/** A fila guardada na conversa: o que falta e quantas tentativas ja houve. */
+function filaDaFicha(opcoes: unknown): { tentativas: number; faltam: string[] } {
+  const bruto = opcoes as { tentativas?: number; faltam?: unknown } | null
+  return {
+    tentativas: Number(bruto?.tentativas ?? 0),
+    faltam: Array.isArray(bruto?.faltam) ? (bruto?.faltam as string[]) : [],
+  }
 }
 
 /**
@@ -1195,15 +1228,20 @@ async function perguntarDados(
   admin: Admin,
   conversationId: string,
   appointmentId: string,
-  pergunta: (typeof PERGUNTAS)[number],
+  /** A fila do que falta, comecando pela pergunta a fazer agora. */
+  faltam: string[],
   aviso = '',
 ): Promise<Resultado> {
+  const pergunta = PERGUNTAS.find((p) => p.chave === faltam[0])
+  if (!pergunta) return await terminarDados(admin, conversationId)
+
   await salvarEstado(admin, conversationId, {
     booking_state: pergunta.estado,
     booking_intake_id: appointmentId,
-    // Conta as tentativas nesta pergunta. Na segunda falha o robo segue em
-    // frente sozinho, em vez de prender quem nao tem como responder.
-    booking_options: [0],
+    // A fila do que ainda falta, e as tentativas na pergunta atual. Na segunda
+    // falha o robo segue em frente sozinho, em vez de prender quem nao tem
+    // como responder.
+    booking_options: { tentativas: 0, faltam },
   })
   return {
     resposta:
@@ -1227,14 +1265,40 @@ async function perguntarDados(
 async function guardarDado(
   admin: Admin,
   appointmentId: string,
-  coluna: string,
+  pergunta: (typeof PERGUNTAS)[number],
   valor: string,
+  paciente: Paciente | null,
 ) {
   const { error } = await admin
     .from('appointments')
-    .update({ [coluna]: valor })
+    .update({ [pergunta.coluna]: valor })
     .eq('id', appointmentId)
-  if (error) console.error('Falha ao guardar dado do agendamento', { coluna, error })
+  if (error) console.error('Falha ao guardar dado do agendamento', { coluna: pergunta.coluna, error })
+
+  // Paciente ja cadastrado: o dado vai tambem para a ficha dele, que e de onde
+  // a receita e o prontuario leem. So preenche buraco - nunca sobrescreve o que
+  // a equipe digitou, porque isto aqui veio por mensagem e ninguem conferiu.
+  if (!paciente || !pergunta.colunaDoCadastro) return
+  const jaTem = String(
+    (paciente as unknown as Record<string, unknown>)[pergunta.chave] ?? '',
+  ).trim()
+  if (jaTem) return
+
+  // Data so quando e data: "marco de 2019" fica no agendamento, para alguem ler.
+  let paraOCadastro: string = valor
+  if (pergunta.chave === 'nascimento') {
+    const m = valor.trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/)
+    if (!m) return
+    paraOCadastro = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+  }
+
+  const { error: erroDoCadastro } = await admin
+    .from('patients')
+    .update({ [pergunta.colunaDoCadastro]: paraOCadastro })
+    .eq('id', paciente.id)
+  if (erroDoCadastro) {
+    console.error('Falha ao completar o cadastro', { campo: pergunta.chave, erroDoCadastro })
+  }
 }
 
 // ---------------------------------------------------------------
@@ -1362,12 +1426,13 @@ export async function tratarConversa(opcoes: {
     // perguntando para o vazio.
     if (!consulta) return await terminarDados(admin, conversationId)
 
-    const seguinte = proximaPergunta(estadoAtual)
+    const { tentativas, faltam } = filaDaFicha(opcoes.opcoesAtuais)
+    const restantes = faltam.slice(1)
 
     // Pular vale sempre, em qualquer campo, sem justificativa e sem insistir.
     if (pulou(texto) || pediuVoltar(texto)) {
-      return seguinte
-        ? await perguntarDados(admin, conversationId, consulta, seguinte, 'Sem problema.')
+      return restantes.length
+        ? await perguntarDados(admin, conversationId, consulta, restantes, 'Sem problema.')
         : await terminarDados(admin, conversationId)
     }
 
@@ -1375,18 +1440,17 @@ export async function tratarConversa(opcoes: {
     if (valor === null) {
       // Uma segunda chance, e so uma. Insistir num CPF que a pessoa nao tem
       // seria transformar um dado opcional em muro.
-      const tentativas = Array.isArray(opcoes.opcoesAtuais)
-        ? Number((opcoes.opcoesAtuais as unknown[])[0] ?? 0)
-        : 0
       if (tentativas >= 1) {
-        return seguinte
+        return restantes.length
           ? await perguntarDados(
-              admin, conversationId, consulta, seguinte,
+              admin, conversationId, consulta, restantes,
               'Tudo bem, deixamos esse campo em branco: o Dr. Marcello completa na consulta.',
             )
           : await terminarDados(admin, conversationId)
       }
-      await salvarEstado(admin, conversationId, { booking_options: [tentativas + 1] })
+      await salvarEstado(admin, conversationId, {
+        booking_options: { tentativas: tentativas + 1, faltam },
+      })
       return {
         resposta: `${perguntaAtual.erro}\n\n_Ou digite PULAR para seguir sem esse dado._`,
         botoes: [
@@ -1396,9 +1460,9 @@ export async function tratarConversa(opcoes: {
       }
     }
 
-    await guardarDado(admin, consulta, perguntaAtual.coluna, valor)
-    return seguinte
-      ? await perguntarDados(admin, conversationId, consulta, seguinte)
+    await guardarDado(admin, consulta, perguntaAtual, valor, pacienteDaConsulta)
+    return restantes.length
+      ? await perguntarDados(admin, conversationId, consulta, restantes)
       : await terminarDados(admin, conversationId)
   }
 
