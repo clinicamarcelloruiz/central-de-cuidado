@@ -28,6 +28,7 @@ import {
   resetConversationBot,
   resumoDoPaciente,
   resolveConversation,
+  unresolveConversation,
   saveAutoReply,
   sendConversationReply,
   sendConversationMenu,
@@ -383,6 +384,17 @@ export default function Conversations({
       setAvisoAuto(cause instanceof Error ? cause.message : 'Não foi possível salvar.')
     } finally {
       setSalvandoAuto(false)
+    }
+  }
+
+  async function reabrir(conversationId: string) {
+    try {
+      await unresolveConversation(conversationId)
+      setConversations((current) =>
+        current.map((item) => (item.id === conversationId ? { ...item, status: 'open' } : item)),
+      )
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível reabrir a conversa.')
     }
   }
 
@@ -890,7 +902,17 @@ export default function Conversations({
                       </div>
                     )}
                   </div>
-                  {selected.status !== 'resolved' && (
+                  {selected.status === 'resolved' ? (
+                    <button
+                      type="button"
+                      onClick={() => void reabrir(selected.id)}
+                      title="Volta a conversa para a lista de abertas"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 px-3 py-1.5 text-[10px] font-extrabold text-[#1f4f78] transition hover:bg-[#eff6fd]"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Reabrir conversa
+                    </button>
+                  ) : (
                     <button
                       type="button"
                       onClick={() => void resolve(selected.id)}

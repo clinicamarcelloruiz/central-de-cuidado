@@ -19,6 +19,7 @@
  */
 
 import type { adminClient } from './whatsapp.ts'
+import { cadastrarDaFicha } from './cadastro.ts'
 
 /** Dias oferecidos de uma vez. Cabe a quinzena inteira numa mensagem so. */
 /**
@@ -1038,15 +1039,17 @@ async function marcar(
 
   if (faltam.length > 0 && criada?.id) {
     const abertura = await perguntarDados(admin, conversationId, criada.id, faltam)
+    // Anuncia e ja pergunta, em vez de pedir licenca: "posso fazer algumas
+    // perguntas?" convida a responder "nao" e deixa a conversa parada
+    // esperando uma resposta que nao leva a lugar nenhum.
     const quantas =
-      faltam.length === 1 ? '*uma pergunta rápida*' : `*${faltam.length} perguntas rápidas*`
+      faltam.length === 1 ? 'uma pergunta rápida' : `${faltam.length} perguntas rápidas`
     return {
       ...abertura,
       resposta:
         `${comprovante}\n\n` +
         '━━━━━━━━━━━━━━\n' +
-        `Para o Dr. Marcello já chegar preparado, posso fazer ${quantas}? ` +
-        'Nenhuma é obrigatória: o que faltar ele completa na consulta.\n\n' +
+        `Agora *${quantas}* para completar o cadastro.\n\n` +
         (abertura?.resposta ?? ''),
     }
   }
@@ -1098,10 +1101,23 @@ const PERGUNTAS: {
   ler: (texto: string) => string | null
   /** Mensagem de quando nao serve. Na segunda tentativa a pergunta e pulada. */
   erro: string
+  /**
+   * Sem PULAR anunciado.
+   *
+   * Nome, nascimento e responsavel a familia sabe de cabeca, e sem eles o
+   * cadastro nao serve para nada. CPF e e-mail sao os que fazem a pessoa
+   * levantar da cadeira - esses continuam com a saida escrita na tela.
+   *
+   * "Obrigatoria" e sobre o que se pede, e nao sobre travar: 0 e 9 continuam
+   * valendo, e depois de duas respostas que nao dao para usar o robo segue
+   * adiante sozinho em vez de repetir a mesma pergunta para sempre.
+   */
+  obrigatoria?: boolean
 }[] = [
   {
     estado: 'dados_nome',
     chave: 'nome',
+    obrigatoria: true,
     coluna: 'intake_patient_name',
     texto: '👶 Qual é o *nome completo do paciente* (a criança)?',
     ler: (t) => (t.trim().length >= 2 ? t.trim().slice(0, 160) : null),
@@ -1110,6 +1126,7 @@ const PERGUNTAS: {
   {
     estado: 'dados_nascimento',
     chave: 'nascimento',
+    obrigatoria: true,
     coluna: 'intake_birth_date',
     colunaDoCadastro: 'birth_date',
     texto: '🎂 Qual é a *data de nascimento* dele(a)? (dia/mês/ano)',
@@ -1121,6 +1138,7 @@ const PERGUNTAS: {
   {
     estado: 'dados_responsavel',
     chave: 'responsavel',
+    obrigatoria: true,
     coluna: 'intake_guardian',
     colunaDoCadastro: 'guardian_name',
     texto: '👤 Qual é o *nome do responsável* (mãe, pai ou tutor)?',
@@ -1204,15 +1222,46 @@ function filaDaFicha(opcoes: unknown): { tentativas: number; faltam: string[] } 
  * pode responder depois, e repetir viraria pressao sobre quem justamente nao
  * podia resolver aquilo naquele momento.
  */
-async function terminarDados(admin: Admin, conversationId: string): Promise<Resultado> {
+async function terminarDados(
+  admin: Admin,
+  conversationId: string,
+  clinicId?: string,
+  appointmentId?: string | null,
+): Promise<Resultado> {
   await salvarEstado(admin, conversationId, {
     booking_state: 'menu',
     booking_options: null,
     booking_intake_id: null,
   })
+
+  // O cadastro nasce agora, com o que a familia acabou de digitar, e nao
+  // depois que alguem da equipe clicar num botao. Se falhar, a vespera tenta
+  // de novo: a consulta ja esta marcada de qualquer jeito.
+  let virouCadastro = false
+  if (clinicId && appointmentId) {
+    try {
+      const { data: consulta } = await admin
+        .from('appointments')
+        .select(
+          'id,patient_id,starts_at,contact_name,contact_phone,' +
+            'intake_patient_name,intake_birth_date,intake_guardian,intake_cpf,intake_email,' +
+            'clinic_units(name)',
+        )
+        .eq('id', appointmentId)
+        .maybeSingle()
+      if (consulta && !consulta.patient_id) {
+        virouCadastro = Boolean(await cadastrarDaFicha(admin, clinicId, consulta))
+      }
+    } catch (causa) {
+      console.error('Nao consegui criar o cadastro a partir da ficha', causa)
+    }
+  }
+
   return {
     resposta:
-      '✅ *Tudo certo, obrigado!* Já anotamos os dados na sua consulta.\n\n' +
+      '✅ *Tudo certo, obrigado!* Já anotamos os dados' +
+      (virouCadastro ? ' e seu cadastro está feito' : ' na sua consulta') +
+      '.\n\n' +
       'O que faltar, o Dr. Marcello completa no atendimento.\n\n' + VOLTA,
   }
 }
@@ -1246,12 +1295,14 @@ async function perguntarDados(
   return {
     resposta:
       (aviso ? `${aviso}\n\n` : '') +
-      `${pergunta.texto}\n\n` +
-      '_Se preferir não responder agora, digite PULAR._',
-    botoes: [
-      { id: 'PULAR', titulo: 'Pular' },
-      { id: 'MENU', titulo: 'Voltar ao menu' },
-    ],
+      pergunta.texto +
+      (pergunta.obrigatoria ? '' : '\n\n_Se preferir não responder agora, digite PULAR._'),
+    botoes: pergunta.obrigatoria
+      ? [{ id: 'MENU', titulo: 'Voltar ao menu' }]
+      : [
+          { id: 'PULAR', titulo: 'Pular' },
+          { id: 'MENU', titulo: 'Voltar ao menu' },
+        ],
   }
 }
 
@@ -1429,11 +1480,25 @@ export async function tratarConversa(opcoes: {
     const { tentativas, faltam } = filaDaFicha(opcoes.opcoesAtuais)
     const restantes = faltam.slice(1)
 
-    // Pular vale sempre, em qualquer campo, sem justificativa e sem insistir.
+    // Pular vale nos campos opcionais, sem justificativa e sem insistir. Nos
+    // obrigatorios o robo pede de novo, uma vez - e depois segue, porque
+    // insistir eternamente prenderia quem nao pode responder agora.
     if (pulou(texto) || pediuVoltar(texto)) {
+      if (perguntaAtual.obrigatoria && tentativas < 1) {
+        await salvarEstado(admin, conversationId, {
+          booking_options: { tentativas: tentativas + 1, faltam },
+        })
+        return {
+          resposta:
+            'Esse dado o Dr. Marcello precisa ter no cadastro. Pode responder aqui, ' +
+            'mesmo que não seja exato?\n\n' +
+            perguntaAtual.texto,
+          botoes: [{ id: 'MENU', titulo: 'Voltar ao menu' }],
+        }
+      }
       return restantes.length
         ? await perguntarDados(admin, conversationId, consulta, restantes, 'Sem problema.')
-        : await terminarDados(admin, conversationId)
+        : await terminarDados(admin, conversationId, clinicId, consulta)
     }
 
     const valor = perguntaAtual.ler(texto)
@@ -1446,24 +1511,28 @@ export async function tratarConversa(opcoes: {
               admin, conversationId, consulta, restantes,
               'Tudo bem, deixamos esse campo em branco: o Dr. Marcello completa na consulta.',
             )
-          : await terminarDados(admin, conversationId)
+          : await terminarDados(admin, conversationId, clinicId, consulta)
       }
       await salvarEstado(admin, conversationId, {
         booking_options: { tentativas: tentativas + 1, faltam },
       })
       return {
-        resposta: `${perguntaAtual.erro}\n\n_Ou digite PULAR para seguir sem esse dado._`,
-        botoes: [
-          { id: 'PULAR', titulo: 'Pular' },
-          { id: 'MENU', titulo: 'Voltar ao menu' },
-        ],
+        resposta:
+          perguntaAtual.erro +
+          (perguntaAtual.obrigatoria ? '' : '\n\n_Ou digite PULAR para seguir sem esse dado._'),
+        botoes: perguntaAtual.obrigatoria
+          ? [{ id: 'MENU', titulo: 'Voltar ao menu' }]
+          : [
+              { id: 'PULAR', titulo: 'Pular' },
+              { id: 'MENU', titulo: 'Voltar ao menu' },
+            ],
       }
     }
 
     await guardarDado(admin, consulta, perguntaAtual, valor, pacienteDaConsulta)
     return restantes.length
       ? await perguntarDados(admin, conversationId, consulta, restantes)
-      : await terminarDados(admin, conversationId)
+      : await terminarDados(admin, conversationId, clinicId, consulta)
   }
 
   // ---- Menu ----

@@ -271,6 +271,21 @@ Deno.serve(async (req) => {
           booking_patient_id: consulta.patient_id,
         })
         .eq('id', conversa.id)
+    } else {
+      // Sem sugestoes, a mensagem promete "digite 2 aqui mesmo". Sem deixar o
+      // menu ativo, esse 2 chegava numa conversa sem etapa e o robo respondia
+      // com o menu inteiro - a pessoa fazia o que foi mandado e recebia outra
+      // pergunta. Com o menu ativo, o 2 ja abre a escolha de unidade.
+      await admin
+        .from('whatsapp_conversations')
+        .update({
+          booking_state: 'menu',
+          booking_options: null,
+          booking_unit_id: null,
+          booking_patient_id: consulta.patient_id,
+          booking_replaces_id: null,
+        })
+        .eq('id', conversa.id)
     }
 
     // Pelo modelo nao ha lista tocavel nem texto livre: a Meta so aceita o

@@ -1561,10 +1561,14 @@ export default function Agenda({
                         </div>
                       ))}
                     </dl>
-                    {/* A familia respondeu por mensagem, sem ninguem conferir:
-                        quem transforma isso em cadastro precisa saber disso. */}
+                    {/* A familia respondeu por mensagem, sem ninguem conferir.
+                        Com paciente vinculado o dado ja foi para a ficha dele -
+                        e a tela precisa dizer isso, senao a equipe digita de
+                        novo achando que nada foi salvo. */}
                     <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
-                      Dados declarados pela família; confira ao cadastrar.
+                      {emEdicao.patientId
+                        ? 'Declarado pela família. Os campos que estavam vazios já foram para o cadastro do paciente; confira em Pacientes.'
+                        : 'Dados declarados pela família; confira ao cadastrar.'}
                     </p>
                   </div>
                 )}
