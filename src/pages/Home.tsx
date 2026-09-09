@@ -138,6 +138,10 @@ export default function Home() {
       telefone: string
       dataConsulta?: string
       unidade?: string
+      nascimento?: string
+      responsavel?: string
+      cpf?: string
+      email?: string
       voltarPara?: Tab
     } | null
   >(null)
@@ -188,7 +192,16 @@ export default function Home() {
    * quer seguir organizando a agenda, e nao cair no prontuario.
    */
   function cadastrarContato(
-    dados: { nome: string; telefone: string; dataConsulta?: string; unidade?: string },
+    dados: {
+      nome: string
+      telefone: string
+      dataConsulta?: string
+      unidade?: string
+      nascimento?: string
+      responsavel?: string
+      cpf?: string
+      email?: string
+    },
     voltarPara?: Tab,
   ) {
     setPreCadastro({ ...dados, voltarPara })
@@ -246,9 +259,9 @@ export default function Home() {
         <div className="soft-grid absolute inset-0 opacity-40" />
         <div className="absolute -right-24 top-24 h-64 w-64 rounded-full bg-[#2f7fc1]/10 blur-3xl" />
         <div className="relative flex h-full flex-col">
-          <div className="px-7 pb-7 pt-8">
-            <img src={logo} alt="Dr. Marcello Ruiz" className="h-12 w-auto max-w-[190px] brightness-0 invert" />
-            <div className="mt-5 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-white/45">
+          <div className="px-7 pb-7 pt-8 [@media(max-height:820px)]:pb-4 [@media(max-height:820px)]:pt-5">
+            <img src={logo} alt="Dr. Marcello Ruiz" className="h-12 w-auto max-w-[190px] brightness-0 invert [@media(max-height:820px)]:h-9" />
+            <div className="mt-5 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-white/45 [@media(max-height:820px)]:mt-3">
               <HeartHandshake className="h-3.5 w-3.5 text-[#6aa8d9]" />
               Central de cuidado
             </div>
@@ -266,7 +279,14 @@ export default function Home() {
 
           <div className="mx-7 h-px bg-white/10" />
 
-          <nav className="mt-6 flex-1 space-y-1.5 px-4" aria-label="Navegação principal">
+          <nav
+            /* Em tela baixa o menu passava por baixo do cartao "Dados
+               protegidos" e os ultimos itens ficavam inalcancaveis: nao havia
+               rolagem, porque o aside inteiro era overflow-hidden. Agora a
+               lista rola sozinha e os itens encolhem antes disso. */
+            className="scrollbar-subtle mt-6 min-h-0 flex-1 space-y-1.5 overflow-y-auto px-4 [@media(max-height:820px)]:mt-3 [@media(max-height:820px)]:space-y-0.5"
+            aria-label="Navegação principal"
+          >
             <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">Menu</p>
             {tabs.map((item) => {
               const active = tab === item.key
@@ -277,14 +297,14 @@ export default function Home() {
                   type="button"
                   onClick={() => setTab(item.key)}
                   aria-current={active ? 'page' : undefined}
-                  className={`group flex w-full items-center gap-3 rounded-2xl px-3.5 py-3.5 text-sm font-semibold transition-all ${
+                  className={`group flex w-full items-center gap-3 rounded-2xl px-3.5 py-3.5 text-sm font-semibold transition-all [@media(max-height:820px)]:py-2.5 ${
                     active
                       ? 'bg-white text-[#081b2c] shadow-[0_12px_28px_rgba(0,0,0,.18)]'
                       : 'text-white/55 hover:bg-white/[0.06] hover:text-white'
                   }`}
                 >
                   <span
-                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors ${
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors [@media(max-height:820px)]:h-8 [@media(max-height:820px)]:w-8 ${
                       active ? 'bg-[#d9e8f7] text-[#1f4f78]' : 'bg-white/[0.055] text-white/60 group-hover:text-white'
                     }`}
                   >
@@ -313,7 +333,7 @@ export default function Home() {
             })}
           </nav>
 
-          <div className="relative mx-4 mb-4 overflow-hidden rounded-[22px] border border-white/10 bg-white/[0.055] p-4">
+          <div className="relative mx-4 mb-4 overflow-hidden rounded-[22px] border border-white/10 bg-white/[0.055] p-4 [@media(max-height:900px)]:hidden">
             <div className="absolute -right-5 -top-5 h-20 w-20 rounded-full bg-[#2f7fc1]/15 blur-2xl" />
             <div className="relative flex items-center gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#2f7fc1] text-white">

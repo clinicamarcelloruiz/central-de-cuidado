@@ -83,6 +83,26 @@ function hora(iso: string) {
  * medico (outro consultorio, compromisso). Nasce pela tela, sem cadastro nem
  * telefone - e isso que a distingue de uma solicitacao pelo WhatsApp.
  */
+/**
+ * O telefone que vai receber o lembrete da vespera.
+ *
+ * Vem do cadastro quando a consulta tem paciente, e do contato quando alguem
+ * marcou sem cadastro. Vazio nos dois casos significa uma coisa so: essa pessoa
+ * nao vai receber lembrete nenhum, e a tela precisa dizer isso antes da
+ * vespera, e nao depois da falta.
+ */
+function telefoneDoLembrete(item: Appointment, patients: Patient[]) {
+  if (item.patientId) {
+    return patients.find((p) => p.id === item.patientId)?.telefone?.trim() ?? ''
+  }
+  return item.contactPhone.trim()
+}
+
+/** Consulta marcada para alguem de fora da base, sem telefone utilizavel. */
+function telefoneCurto(escolha: { patientId: string; telefone: string }) {
+  return !escolha.patientId && escolha.telefone.replace(/\D/g, '').length < 10
+}
+
 function ehReserva(item: Appointment) {
   return item.source === 'clinic' && !item.patientId && !item.contactName && !item.contactPhone
 }
@@ -302,6 +322,10 @@ export default function Agenda({
     telefone: string
     dataConsulta?: string
     unidade?: string
+    nascimento?: string
+    responsavel?: string
+    cpf?: string
+    email?: string
   }) => void
 }) {
   const [aba, setAba] = useState<Aba>('calendario')
@@ -330,6 +354,10 @@ export default function Agenda({
   >(null)
   const [slotEscolhido, setSlotEscolhido] = useState<string | null>(null)
   const [motivoReserva, setMotivoReserva] = useState('')
+  // Paciente escolhido no modal e, quando nao ha cadastro, nome e WhatsApp
+  // digitados na hora. Estado, e nao leitura do DOM: o botao precisa saber se
+  // ja da para marcar antes do clique.
+  const [novaConsulta, setNovaConsulta] = useState({ patientId: '', nome: '', telefone: '' })
   // Dia que o usuario mandou bloquear e ainda espera o motivo.
   const [bloqueandoDia, setBloqueandoDia] = useState<{ dia: string; motivo: string } | null>(null)
 
@@ -773,6 +801,14 @@ export default function Agenda({
                             {!item.confirmedAt && !item.rescheduleRequestedAt && item.reminderSentAt && (
                               <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-extrabold text-white/70">
                                 Lembrete enviado, sem resposta
+                              </span>
+                            )}
+                            {/* Marcada pela equipe sem telefone nenhum: o
+                                lembrete da vespera nao tem para onde ir. Dito
+                                agora, da tempo de completar o cadastro. */}
+                            {!item.reminderSentAt && !telefoneDoLembrete(item, patients) && (
+                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-extrabold text-white/70">
+                                Sem telefone: não recebe lembrete
                               </span>
                             )}
                             {/* Uma remarcacao e rotina; tres viram padrao, e
@@ -1263,8 +1299,8 @@ export default function Agenda({
             </p>
 
             <select
-              id="paciente-agenda"
-              defaultValue=""
+              value={novaConsulta.patientId}
+              onChange={(e) => setNovaConsulta({ patientId: e.target.value, nome: '', telefone: '' })}
               className="mt-2 w-full rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3 py-2 text-xs outline-none focus:border-[#1f4f78]"
             >
               <option value="">Selecione o paciente</option>
@@ -1275,12 +1311,42 @@ export default function Agenda({
               ))}
             </select>
 
+            {/* Quem ainda nao esta na base entra por aqui, com nome e WhatsApp.
+                Sem o telefone a consulta nasce muda: nao recebe o lembrete da
+                vespera e o sistema tambem nao consegue criar o cadastro
+                sozinho. Dois campos evitam as duas coisas. */}
+            {!novaConsulta.patientId && (
+              <div className="mt-3 rounded-[14px] border border-[#081b2c]/10 bg-[#fafaf8] p-3">
+                <p className="text-[10px] font-bold text-slate-500">
+                  Ainda não é cadastrado? Informe nome e WhatsApp.
+                </p>
+                <input
+                  value={novaConsulta.nome}
+                  onChange={(e) => setNovaConsulta({ ...novaConsulta, nome: e.target.value })}
+                  placeholder="Nome do paciente"
+                  className="mt-2 w-full rounded-xl border border-[#081b2c]/10 bg-white px-3 py-2 text-xs outline-none focus:border-[#1f4f78]"
+                />
+                <input
+                  value={novaConsulta.telefone}
+                  onChange={(e) => setNovaConsulta({ ...novaConsulta, telefone: e.target.value })}
+                  placeholder="WhatsApp com DDD"
+                  inputMode="tel"
+                  className="mt-2 w-full rounded-xl border border-[#081b2c]/10 bg-white px-3 py-2 text-xs outline-none focus:border-[#1f4f78]"
+                />
+                <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
+                  Na véspera ele recebe o lembrete para confirmar, e o cadastro é criado
+                  automaticamente com esses dados.
+                </p>
+              </div>
+            )}
+
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => {
                   setSlotEscolhido(null)
                   setMotivoReserva('')
+                  setNovaConsulta({ patientId: '', nome: '', telefone: '' })
                 }}
                 className="rounded-xl bg-[#eef3f2] px-3 py-2 text-[11px] font-bold text-[#557f75]"
               >
@@ -1288,23 +1354,31 @@ export default function Agenda({
               </button>
               <button
                 type="button"
+                // Ou um paciente da base, ou um nome digitado. Marcar sem
+                // nenhum dos dois criaria uma consulta de ninguem - para isso
+                // existe "Reservar sem paciente", logo acima.
+                disabled={!novaConsulta.patientId && novaConsulta.nome.trim().length < 2}
                 onClick={() => {
-                  const select = document.getElementById('paciente-agenda') as HTMLSelectElement
-                  const escolhido = select?.value || null
                   const inicio = slotEscolhido
+                  const escolha = novaConsulta
                   setSlotEscolhido(null)
+                  setNovaConsulta({ patientId: '', nome: '', telefone: '' })
                   void acao(async () => {
                     if (!clinicId || !unitId) return
                     await createAppointment(
                       clinicId,
                       unitId,
-                      escolhido,
+                      escolha.patientId || null,
                       inicio,
                       prefs.slotMinutes,
+                      '',
+                      { nome: escolha.nome, telefone: escolha.telefone },
                     )
-                  }, 'Consulta marcada.')
+                  }, telefoneCurto(escolha)
+                    ? 'Consulta marcada. Sem WhatsApp completo, essa pessoa não recebe o lembrete da véspera.'
+                    : 'Consulta marcada.')
                 }}
-                className="rounded-xl bg-[#081b2c] px-4 py-2 text-[11px] font-bold text-white transition hover:bg-[#102d47]"
+                className="rounded-xl bg-[#081b2c] px-4 py-2 text-[11px] font-bold text-white transition hover:bg-[#102d47] disabled:opacity-40"
               >
                 Confirmar
               </button>
@@ -1436,8 +1510,15 @@ export default function Agenda({
                           type="button"
                           onClick={() =>
                             onCadastrarContato({
-                              nome: formConsulta.contactName,
+                              // O nome da crianca informado no agendamento vale
+                              // mais do que o nome do perfil do WhatsApp, que
+                              // costuma ser o da mae.
+                              nome: emEdicao.ficha.nome || formConsulta.contactName,
                               telefone: formConsulta.contactPhone,
+                              nascimento: emEdicao.ficha.nascimento,
+                              responsavel: emEdicao.ficha.responsavel,
+                              cpf: emEdicao.ficha.cpf,
+                              email: emEdicao.ficha.email,
                               // A consulta ja sabe quando e onde: repetir isso a
                               // mao e onde nasce divergencia entre agenda e
                               // cadastro.
@@ -1454,6 +1535,39 @@ export default function Agenda({
                     </>
                   )}
                 </div>
+
+                {(emEdicao.ficha.nome ||
+                  emEdicao.ficha.nascimento ||
+                  emEdicao.ficha.responsavel ||
+                  emEdicao.ficha.cpf ||
+                  emEdicao.ficha.email) && (
+                  <div className="rounded-[16px] border border-[#2f7fc1]/25 bg-[#f1f7fd] p-3.5">
+                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-[#1f4f78]">
+                      Informado pela família no WhatsApp
+                    </p>
+                    <dl className="mt-2 space-y-1.5">
+                      {[
+                        ['Paciente', emEdicao.ficha.nome],
+                        ['Nascimento', emEdicao.ficha.nascimento],
+                        ['Responsável', emEdicao.ficha.responsavel],
+                        ['CPF', emEdicao.ficha.cpf],
+                        ['E-mail', emEdicao.ficha.email],
+                      ].map(([rotulo, valor]) => (
+                        <div key={rotulo} className="grid grid-cols-[92px_1fr] gap-2 text-[11px]">
+                          <dt className="font-bold text-slate-400">{rotulo}</dt>
+                          <dd className={valor ? 'font-semibold text-[#081b2c]' : 'text-slate-300'}>
+                            {valor || 'não informado'}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                    {/* A familia respondeu por mensagem, sem ninguem conferir:
+                        quem transforma isso em cadastro precisa saber disso. */}
+                    <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
+                      Dados declarados pela família; confira ao cadastrar.
+                    </p>
+                  </div>
+                )}
 
                 <div>
                   <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">

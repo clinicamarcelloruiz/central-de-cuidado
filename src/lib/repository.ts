@@ -158,6 +158,7 @@ function mapPatient(row: PatientRow, followupRows: FollowupRow[]): Patient {
     dataConsulta: row.consultation_date,
     observacoes: row.notes ?? '',
     criadoEm: row.created_at,
+    criadoAutomaticamenteEm: (row as { auto_created_at?: string | null }).auto_created_at ?? '',
     followups,
   }
 }
@@ -234,7 +235,11 @@ function consultationPayload(
  * la, sem esta abertura o CPF seria descartado em silencio no caminho para o
  * banco - o mesmo tipo de bug que ja custou uma tarde neste projeto.
  */
-type ColunasNovasDoPaciente = { cpf?: string | null; email?: string | null }
+type ColunasNovasDoPaciente = {
+  cpf?: string | null
+  email?: string | null
+  auto_created_at?: string | null
+}
 
 function patientCreatePayload(
   draft: PatientDraft,
@@ -273,6 +278,10 @@ function patientUpdatePayload(patch: Partial<Patient>): PatientUpdate & ColunasN
   if (patch.unidade !== undefined) payload.unit = patch.unidade.trim()
   if (patch.dataConsulta !== undefined) payload.consultation_date = patch.dataConsulta
   if (patch.observacoes !== undefined) payload.notes = patch.observacoes.trim()
+  // Salvou pela tela: alguem leu o cadastro. A marca de "criado sozinho" perde
+  // o sentido no instante em que uma pessoa confere - mante-la viraria um aviso
+  // que ninguem consegue tirar.
+  payload.auto_created_at = null
   return payload
 }
 
@@ -421,6 +430,17 @@ export interface Appointment {
   rescheduleRequestedAt: string | null
   /** Quando o lembrete da vespera saiu. Nulo enquanto nao foi enviado. */
   reminderSentAt: string | null
+  /**
+   * O que a familia informou pelo WhatsApp ao marcar. Declarado por mensagem,
+   * sem ninguem conferir: a equipe le, confere e transforma em cadastro.
+   */
+  ficha: {
+    nome: string
+    nascimento: string
+    responsavel: string
+    cpf: string
+    email: string
+  }
   /** Quantas vezes esta consulta ja trocou de data. Zero na primeira. */
   rescheduleCount: number
 }
@@ -639,6 +659,53 @@ export async function listAvailableSlots(unitId: string): Promise<string[]> {
   return (data ?? []).map((row) => row.slot_start)
 }
 
+/**
+ * As colunas da ficha, que os tipos gerados ainda nao conhecem.
+ *
+ * Some quando os tipos forem regerados depois desta migration. Ate la o
+ * cliente recusaria os nomes na compilacao.
+ */
+type LinhaComFicha = {
+  intake_patient_name?: string | null
+  intake_birth_date?: string | null
+  intake_guardian?: string | null
+  intake_cpf?: string | null
+  intake_email?: string | null
+}
+
+const FICHA_VAZIA = { nome: '', nascimento: '', responsavel: '', cpf: '', email: '' }
+
+/**
+ * A ficha que a familia preencheu pelo WhatsApp, por consulta.
+ *
+ * Consulta a parte porque os tipos gerados ainda nao conhecem estas colunas;
+ * pedi-las na consulta principal faria a compilacao recusar todas as outras.
+ * Se falhar, a agenda continua inteira - a ficha e complemento.
+ */
+async function fichasDasConsultas(clinicId: string, unitId: string) {
+  const vazio = new Map<string, typeof FICHA_VAZIA>()
+  try {
+    const { data, error } = await tabelaCrua('appointments')
+      .select('id,intake_patient_name,intake_birth_date,intake_guardian,intake_cpf,intake_email')
+      .eq('clinic_id', clinicId)
+      .eq('unit_id', unitId)
+      .order('id', { ascending: true })
+    if (error) return vazio
+    for (const linha of ((data ?? []) as (LinhaComFicha & { id: string })[])) {
+      vazio.set(linha.id, {
+        nome: linha.intake_patient_name ?? '',
+        nascimento: linha.intake_birth_date ?? '',
+        responsavel: linha.intake_guardian ?? '',
+        cpf: linha.intake_cpf ?? '',
+        email: linha.intake_email ?? '',
+      })
+    }
+  } catch {
+    // Antes da migration rodar a tabela nao tem as colunas. A agenda segue.
+  }
+  return vazio
+}
+
 export async function listAppointments(clinicId: string, unitId: string): Promise<Appointment[]> {
   const { data, error } = await supabase
     .from('appointments')
@@ -656,6 +723,7 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
     ? await supabase.from('patients').select('id,name').in('id', patientIds)
     : { data: [] }
   const nameById = new Map((patients ?? []).map((p) => [p.id, p.name]))
+  const fichas = await fichasDasConsultas(clinicId, unitId)
 
   return rows.map((row) => ({
     id: row.id,
@@ -670,6 +738,7 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
     status: row.status,
     source: row.source,
     staffNote: row.staff_note,
+    ficha: fichas.get(row.id) ?? FICHA_VAZIA,
     contactName: row.contact_name,
     // Formatado ja aqui: quem le a agenda precisa conferir um numero, e
     // "5513988481114" nao se confere de bater o olho.
@@ -830,6 +899,14 @@ export async function createAppointment(
   startsAt: string,
   slotMinutes: number,
   staffNote = '',
+  /**
+   * Nome e WhatsApp de quem ainda nao tem cadastro.
+   *
+   * Sem eles a consulta marcada pela equipe para alguem de fora da base ficava
+   * muda: o lembrete da vespera nao tem para onde ir, e na vespera o sistema
+   * tambem nao consegue criar o cadastro. Dois campos resolvem os dois.
+   */
+  contato: { nome: string; telefone: string } = { nome: '', telefone: '' },
 ) {
   const endsAt = new Date(new Date(startsAt).getTime() + slotMinutes * 60000).toISOString()
   const { error } = await supabase.from('appointments').insert({
@@ -840,6 +917,8 @@ export async function createAppointment(
     ends_at: endsAt,
     source: 'clinic',
     staff_note: staffNote.trim(),
+    contact_name: contato.nome.trim(),
+    contact_phone: contato.telefone.replace(/\D/g, ''),
   })
   // O indice unico do banco e a garantia real contra dois pacientes no mesmo
   // horario. Traduzimos o erro tecnico para algo que a recepcao entenda.
@@ -1150,6 +1229,8 @@ export async function resetConversationBot(conversationId: string) {
       booking_unit_id: null,
       booking_patient_id: null,
       booking_replaces_id: null,
+      // A coluna existe no banco; os tipos gerados ainda nao a conhecem.
+      ...({ booking_intake_id: null } as Record<string, unknown>),
       booking_updated_at: new Date().toISOString(),
       // Zerar tambem o menu_sent_at faz o robo poder recomecar na hora, sem
       // esperar o intervalo que evita repetir o menu.
