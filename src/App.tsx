@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router'
 import { HeartHandshake } from 'lucide-react'
 import { useAuth } from '@/auth/AuthProvider'
+import { ProvedorDeDialogos } from '@/components/Dialogos'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import NovaSenha from './pages/NovaSenha'
@@ -30,8 +31,10 @@ export default function App() {
   if (!session) return <Login />
 
   return (
-    <Routes>
-      <Route path="/" element={<Home />} />
-    </Routes>
+    <ProvedorDeDialogos>
+      <Routes>
+        <Route path="/" element={<Home />} />
+      </Routes>
+    </ProvedorDeDialogos>
   )
 }

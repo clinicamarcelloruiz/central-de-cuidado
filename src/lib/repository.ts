@@ -65,6 +65,7 @@ type FollowupRow = {
 }
 
 type SettingsRow = {
+  template_d15?: string
   template_d30: string
   template_m90: string
 }
@@ -100,7 +101,7 @@ type ConsultationRow = {
   signed_pdf_path?: string | null
 }
 
-const FOLLOWUP_KEYS: FollowupKey[] = ['d30', 'm90']
+const FOLLOWUP_KEYS: FollowupKey[] = ['d15', 'd30', 'm90']
 
 function message(error: unknown) {
   if (error instanceof Error) return error.message
@@ -126,6 +127,7 @@ function toDbStatus(status: FollowupStatus) {
 
 function emptyFollowups(): Record<FollowupKey, FollowupState> {
   return {
+    d15: { status: 'pendente' },
     d30: { status: 'pendente' },
     m90: { status: 'pendente' },
   }
@@ -806,7 +808,7 @@ export async function listPendingRequests(clinicId: string): Promise<PendingRequ
  * Vale principalmente para o que chegou pelo WhatsApp: corrigir um nome mal
  * digitado, anotar um recado, e sobretudo dizer de quem e aquela consulta.
  * Enquanto patientId for nulo, a consulta nao entra no prontuario nem nos
- * acompanhamentos de 30 e 90 dias.
+ * acompanhamentos de 15, 30 e 90 dias.
  */
 export async function updateAppointmentDetails(
   appointmentId: string,
@@ -1372,7 +1374,7 @@ export async function fetchDb(
       .is('archived_at', null),
     supabase
       .from('clinic_settings')
-      .select('template_d30,template_m90')
+      .select('template_d30,template_m90,template_d15')
       .eq('clinic_id', clinicId)
       .maybeSingle(),
   ])
@@ -1395,6 +1397,7 @@ export async function fetchDb(
       mapPatient(patient, byPatient.get(patient.id) ?? []),
     ),
     templates: {
+      d15: (settings as { template_d15?: string } | null)?.template_d15 ?? defaults.d15,
       d30: settings?.template_d30 ?? defaults.d30,
       m90: settings?.template_m90 ?? defaults.m90,
     },
@@ -1464,7 +1467,7 @@ export async function createConsultation(
   draft: ConsultationDraft,
 ) {
   // Cadastrar um paciente cria automaticamente uma consulta inicial vazia - e
-  // dela que penduram os acompanhamentos de 30 e 90 dias. Quando o medico
+  // dela que penduram os acompanhamentos de 15, 30 e 90 dias. Quando o medico
   // finalmente escreve o primeiro atendimento, ele deve PREENCHER esse
   // esqueleto, e nao criar um segundo ao lado.
   //
@@ -1600,17 +1603,31 @@ export async function changeFollowup(
   key: FollowupKey,
   status: FollowupStatus,
 ) {
+  // Sem `single()`, e com o arquivado de fora.
+  //
+  // Em 08/09/2026 antecipar um acompanhamento derrubou o sistema inteiro com
+  // "Cannot coerce the result to a single JSON object": o `single()` exige
+  // exatamente uma linha, e o paciente tinha mais de um acompanhamento do mesmo
+  // tipo (um arquivado, de um cadastro anterior). A mensagem chegou no celular
+  // da familia e a tela mostrou erro - o pior dos dois mundos.
   const { data, error } = await supabase
     .from('followups')
     .update({ status: toDbStatus(status) })
     .eq('clinic_id', clinicId)
     .eq('patient_id', patientId)
     .eq('followup_key', key)
+    .is('archived_at', null)
     .select('id,patient_id,followup_key,status,opened_at')
-    .single()
+    .order('created_at', { ascending: false })
 
   if (error) fail(error)
-  const row = data as FollowupRow
+  const linhas = (data ?? []) as FollowupRow[]
+  if (linhas.length === 0) {
+    throw new Error(
+      'Este acompanhamento não foi encontrado. Atualize a página; se continuar, o cadastro pode ter sido arquivado.',
+    )
+  }
+  const row = linhas[0]
   return {
     id: row.id,
     status: toUiStatus(row.status),
@@ -1627,6 +1644,8 @@ export async function saveTemplates(
     .update({
       template_d30: templates.d30,
       template_m90: templates.m90,
+      // Coluna nova; os tipos gerados ainda nao a conhecem.
+      ...({ template_d15: templates.d15 } as Record<string, unknown>),
     })
     .eq('clinic_id', clinicId)
   if (error) fail(error)

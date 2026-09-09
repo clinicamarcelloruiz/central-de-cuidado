@@ -1,4 +1,5 @@
 import { adminClient, formatDateBR, toBrazilE164 } from './whatsapp.ts'
+import { textoDoModelo } from './modelos.ts'
 
 /**
  * Envio de um acompanhamento pelo WhatsApp.
@@ -187,10 +188,17 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
   )
 
   const graphBody = await graphResponse.json()
-  const followupLabel = followup.followup_key === 'd30' ? '30 dias' : '3 meses'
+  const followupLabel =
+    followup.followup_key === 'd15' ? '15 dias' : followup.followup_key === 'd30' ? '30 dias' : '3 meses'
+  // O registro guarda a mensagem que a familia leu, e nao um resumo do que o
+  // sistema fez. Quem abre a conversa na plataforma precisa ver a mesma coisa
+  // que esta no celular dela; o resumo ficava parecendo que o sistema tinha
+  // mandado outra mensagem.
+  const nomeDoModelo = settings.whatsapp_template_name || 'acompanhamento_pos_consulta'
   const summary =
+    textoDoModelo(nomeDoModelo, [patient.name, formatDateBR(consultation.consultation_date)]) ??
     `Acompanhamento de ${followupLabel} enviado para ${patient.name} ` +
-    `(consulta em ${formatDateBR(consultation.consultation_date)}).`
+      `(consulta em ${formatDateBR(consultation.consultation_date)}).`
 
   if (!graphResponse.ok) {
     const reason = graphBody?.error?.message || 'Meta recusou o envio.'

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useDialogos } from '@/components/dialogos-contexto'
 import {
   Check,
   DatabaseBackup,
@@ -31,6 +32,7 @@ interface Props {
 export default function Settings({ db, setTemplates, importDb, clearAll }: Props) {
   const [situacao, setSituacao] = useState<SituacaoDoNumero | null>(null)
   const [erroSituacao, setErroSituacao] = useState('')
+  const { avisar, perguntar } = useDialogos()
 
   // Consulta na abertura das configuracoes. E leitura pura na Meta, entao nao
   // custa nada e evita ter que lembrar de apertar um botao para saber.
@@ -66,6 +68,7 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
     }
   }
 
+  const [d15, setD15] = useState(db.templates.d15)
   const [d30, setD30] = useState(db.templates.d30)
   const [m90, setM90] = useState(db.templates.m90)
   const [saved, setSaved] = useState(false)
@@ -74,15 +77,16 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    setD15(db.templates.d15)
     setD30(db.templates.d30)
     setM90(db.templates.m90)
-  }, [db.templates.d30, db.templates.m90])
+  }, [db.templates.d15, db.templates.d30, db.templates.m90])
 
   async function save() {
     setSaving(true)
     setImportMessage('')
     try {
-      await setTemplates({ d30, m90 })
+      await setTemplates({ d15, d30, m90 })
       setSaved(true)
       window.setTimeout(() => setSaved(false), 2500)
     } catch (cause) {
@@ -117,6 +121,7 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
   }
 
   function restoreDefaults() {
+    setD15(DEFAULT_TEMPLATES.d15)
     setD30(DEFAULT_TEMPLATES.d30)
     setM90(DEFAULT_TEMPLATES.m90)
     setSaved(false)
@@ -151,6 +156,18 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
             <code className="rounded-lg bg-white px-2 py-1 text-[9px] font-extrabold text-[#1f4f78] shadow-sm">{'{pronome}'}</code>
             <span className="text-[9px] text-slate-400">ele ou ela</span>
           </div>
+
+          <label className="block rounded-[22px] border border-[#081b2c]/[0.07] bg-white p-4 sm:p-5">
+            <div className="flex items-center gap-3">
+              <span className="flex h-8 min-w-8 items-center justify-center rounded-xl bg-[#e1eef8] text-[10px] font-extrabold text-[#2f7fc1]">15</span>
+              <div>
+                <p className="text-xs font-extrabold text-[#081b2c]">Mensagem de 15 dias</p>
+                <p className="mt-0.5 text-[9px] text-slate-400">Adaptação às orientações da consulta</p>
+              </div>
+            </div>
+            <textarea className={inputClass} value={d15} onChange={(event) => setD15(event.target.value)} />
+            <p className="mt-2 text-right text-[9px] font-semibold text-slate-300">{d15.length} caracteres</p>
+          </label>
 
           <label className="block rounded-[22px] border border-[#081b2c]/[0.07] bg-white p-4 sm:p-5">
             <div className="flex items-center gap-3">
@@ -343,11 +360,24 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
           <button
             type="button"
             onClick={() => {
-              if (confirm('Tem certeza? Isso arquiva TODOS os pacientes da clínica em todos os dispositivos.')) {
-                void clearAll().catch((cause) => {
-                  setImportMessage(cause instanceof Error ? cause.message : 'Não foi possível arquivar os pacientes.')
+              void (async () => {
+                const certeza = await perguntar({
+                  titulo: 'Arquivar TODOS os pacientes da clínica?',
+                  detalhe:
+                    'Vale para todos os computadores e celulares da equipe. Nada é apagado do banco, mas as listas ficam vazias. Exporte um backup antes.',
+                  confirmar: 'Arquivar tudo',
+                  perigo: true,
                 })
-              }
+                if (!certeza) return
+                try {
+                  await clearAll()
+                  avisar('Todos os pacientes foram arquivados.')
+                } catch (cause) {
+                  setImportMessage(
+                    cause instanceof Error ? cause.message : 'Não foi possível arquivar os pacientes.',
+                  )
+                }
+              })()
             }}
             className="mt-4 w-full rounded-xl border border-red-200 px-3 py-2.5 text-[10px] font-extrabold text-red-500 transition hover:bg-red-50"
           >

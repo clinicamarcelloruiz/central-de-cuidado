@@ -1,6 +1,6 @@
 export type Sexo = 'F' | 'M' | 'O'
 
-export type FollowupKey = 'd30' | 'm90'
+export type FollowupKey = 'd15' | 'd30' | 'm90'
 
 export type FollowupStatus = 'pendente' | 'enviado' | 'concluido'
 
@@ -85,6 +85,7 @@ export interface Db {
  */
 
 export const FOLLOWUP_LABEL: Record<FollowupKey, string> = {
+  d15: '15 dias',
   d30: '30 dias',
   m90: '3 meses',
 }

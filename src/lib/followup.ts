@@ -1,7 +1,10 @@
 import type { FollowupKey, Patient } from '@/types/patient'
 import { FOLLOWUP_LABEL } from '@/types/patient'
 
-export const FOLLOWUP_DAYS: Record<FollowupKey, number> = { d30: 30, m90: 90 }
+export const FOLLOWUP_DAYS: Record<FollowupKey, number> = { d15: 15, d30: 30, m90: 90 }
+
+/** Os tres contatos, na ordem em que acontecem. */
+export const FOLLOWUP_KEYS: FollowupKey[] = ['d15', 'd30', 'm90']
 
 export function todayISO(): string {
   const d = new Date()
@@ -99,7 +102,7 @@ export interface FollowupItem {
 export function pendingFollowups(patients: Patient[]): FollowupItem[] {
   const items: FollowupItem[] = []
   for (const p of patients) {
-    for (const key of ['d30', 'm90'] as FollowupKey[]) {
+    for (const key of FOLLOWUP_KEYS) {
       const st = p.followups[key]
       if (st.status === 'concluido') continue
       const due = dueDate(p, key)

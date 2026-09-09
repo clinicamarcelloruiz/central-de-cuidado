@@ -27,6 +27,7 @@ import {
 } from '@/lib/repository'
 
 export const DEFAULT_TEMPLATES: Record<FollowupKey, string> = {
+  d15: 'Olá! Aqui é da equipe do Dr. Marcello Ruiz, gastroenterologista pediátrico. Já se passaram 15 dias da consulta de {nome}. Como {pronome} está se adaptando às orientações? Se surgiu qualquer dúvida, é só responder por aqui. 💙',
   d30: 'Olá! Aqui é da equipe do Dr. Marcello Ruiz, gastroenterologista pediátrico. Já se passaram 30 dias da consulta de {nome}. Como {pronome} está? Está tudo bem? Se precisarem de qualquer auxílio, é só responder por aqui. 💙',
   m90: 'Olá! Aqui é da equipe do Dr. Marcello Ruiz. Já se passaram 3 meses da consulta de {nome} e gostaríamos de saber como {pronome} está. Está tudo bem? Qualquer necessidade, estamos à disposição. 💙',
 }
@@ -59,12 +60,18 @@ export function useDb() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // Erro da carga inicial, separado do erro de uma acao. Ate 08/09/2026 eram o
+  // mesmo estado: uma falha ao antecipar um acompanhamento trocava o sistema
+  // inteiro pela tela de "nao foi possivel carregar os dados", como se o
+  // sistema tivesse caido.
+  const [loadError, setLoadError] = useState('')
   const loadSequence = useRef(0)
 
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current
     setLoading(true)
     setError('')
+    setLoadError('')
     try {
       const membership = clinicId ? null : await getCurrentMembership()
       const id = clinicId ?? membership?.clinicId ?? (await ensureClinic())
@@ -74,7 +81,11 @@ export function useDb() {
       if (membership) setRole(membership.role)
       setDb(next)
     } catch (cause) {
-      if (loadSequence.current === sequence) setError(errorMessage(cause))
+      if (loadSequence.current === sequence) {
+        const texto = errorMessage(cause)
+        setError(texto)
+        setLoadError(texto)
+      }
     } finally {
       if (loadSequence.current === sequence) setLoading(false)
     }
@@ -215,6 +226,7 @@ export function useDb() {
     loading,
     busy,
     error,
+    loadError,
     retry: load,
     addPatient,
     updatePatient,
