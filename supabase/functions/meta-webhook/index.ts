@@ -138,16 +138,24 @@ Deno.serve(async (req) => {
           // celular; escolher sozinho marcava consulta no nome do irmao errado.
           const { data: patientRows } = await admin
             .from('patients')
-            .select('id,name')
+            .select('id,name,birth_date,guardian_name,cpf,email')
             .eq('clinic_id', clinicId)
             .is('archived_at', null)
             .or(`phone_digits.eq.${waId},phone_digits.eq.${localDigits}`)
             .order('name')
 
-          const pacientes = (patientRows ?? []).map((p) => ({
-            id: p.id as string,
-            name: (p.name as string) ?? '',
-          }))
+          const pacientes = (patientRows ?? []).map((p) => {
+            const linha = p as Record<string, unknown>
+            return {
+              id: p.id as string,
+              name: (p.name as string) ?? '',
+              // O que o cadastro ja tem. O robo so pergunta o que falta.
+              nascimento: (linha.birth_date as string | null) ?? null,
+              responsavel: (linha.guardian_name as string | null) ?? null,
+              cpf: (linha.cpf as string | null) ?? null,
+              email: (linha.email as string | null) ?? null,
+            }
+          })
           // Para ligar a conversa e as mensagens basta um: sao da familia toda.
           // Quem precisa de precisao e a consulta, e essa o robo pergunta.
           const patient = pacientes[0] ?? null
