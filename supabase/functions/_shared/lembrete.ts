@@ -120,3 +120,34 @@ export function avisoDaResposta(resposta: Resposta) {
       : 'Certo! Já avisei a nossa equipe para remarcar com você. Alguém retorna por aqui.'
   return `${aviso}\n\nDigite 0 se precisar de mais alguma coisa.`
 }
+
+/**
+ * O que responder a quem apertou um botão do acompanhamento.
+ *
+ * Até 08/09/2026 os três botões eram anotados e nada voltava: "Estou bem"
+ * fechava o acompanhamento em silêncio, "Preciso de ajuda" acendia a bandeira
+ * para a equipe sem dizer isso à família, e "Não quero receber" desligava os
+ * envios sem confirmar. Quem aperta um botão espera ouvir algo.
+ *
+ * Devolve null quando a resposta não foi a um acompanhamento: aí quem fala é
+ * o menu, como sempre.
+ */
+export function respostaAoAcompanhamento(resposta: Resposta): string | null {
+  if (resposta.isWell) {
+    return 'Que bom saber! 💙 Se surgir qualquer dúvida, é só escrever por aqui.'
+  }
+  if (resposta.pediuAjuda) {
+    return (
+      'Já avisei a nossa equipe. Pode escrever sua dúvida por aqui: quem assumir o ' +
+      'atendimento vai ler tudo antes de responder.\n\n' +
+      'Atendemos de segunda a sexta, das 8h às 18h. Fora desse horário, respondemos no próximo dia útil.'
+    )
+  }
+  if (resposta.optedOut) {
+    return (
+      'Tudo bem, não enviaremos mais mensagens de acompanhamento. ' +
+      'Se precisar da clínica, é só escrever por aqui que respondemos.'
+    )
+  }
+  return null
+}

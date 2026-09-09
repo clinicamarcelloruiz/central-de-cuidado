@@ -4,6 +4,7 @@ import { type Estado, type Toque, tratarConversa } from '../_shared/atendimento.
 import { montarConteudo } from '../_shared/conteudo.ts'
 import {
   avisoDaResposta,
+  respostaAoAcompanhamento,
   equipeFalouRecentemente as equipeFalouHaPouco,
   interpretarResposta,
   mudancaDaConsulta,
@@ -453,7 +454,26 @@ Deno.serve(async (req) => {
                 ? { status: 'completed', completed_at: receivedAt }
                 : { status: 'opened' })
                 .eq('id', lastOutbound.followup_id)
+
+              // Responde ao botao. "Preciso de ajuda" tambem entrega a conversa
+              // a equipe, como o 9 do menu faria: o robo se cala ate alguem
+              // assumir, em vez de mandar menu por cima de um pedido de ajuda.
+              const texto = respostaAoAcompanhamento(resposta)
+              if (texto) await responder(texto)
+              if (pediuAjuda) {
+                await admin
+                  .from('whatsapp_conversations')
+                  .update({ booking_state: 'atendente', booking_options: null })
+                  .eq('id', conversation.id)
+              }
             }
+          }
+
+          // "Nao quero receber" apertado no acompanhamento: confirma de volta.
+          // Sem isso a pessoa apertava e o silencio parecia que nao pegou.
+          if (optedOut && patient?.id) {
+            const texto = respostaAoAcompanhamento(resposta)
+            if (texto) await responder(texto)
           }
         }
 
