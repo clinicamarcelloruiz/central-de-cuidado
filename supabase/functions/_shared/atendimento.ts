@@ -20,6 +20,7 @@
 
 import type { adminClient } from './whatsapp.ts'
 import { cadastrarDaFicha } from './cadastro.ts'
+import { acharResposta, carregarRespostas } from './respostas.ts'
 
 /** Dias oferecidos de uma vez. Cabe a quinzena inteira numa mensagem so. */
 /**
@@ -477,6 +478,46 @@ export async function mostrarMenu(
         { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
         { id: '3', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
         { id: '4', titulo: 'Minha consulta', descricao: 'Ver, remarcar ou cancelar' },
+      ],
+    },
+  }
+}
+
+/**
+ * Responder uma pergunta escrita, quando a clinica tem resposta pronta para ela.
+ *
+ * Vem antes do menu: quem escreveu "quanto custa a consulta?" fez uma pergunta,
+ * e devolver uma lista de opcoes e fingir que a pergunta nao existiu. Se nenhum
+ * assunto cadastrado bate - ou se a mensagem e clinica - devolve nulo e o menu
+ * segue como sempre.
+ *
+ * Termina em 'menu' para os numeros continuarem valendo: quem acabou de ler o
+ * valor da consulta e exatamente quem pode responder "2" para marcar.
+ */
+async function responderPergunta(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+  texto: string,
+): Promise<Resultado | null> {
+  const achada = acharResposta(texto, await carregarRespostas(admin, clinicId))
+  if (!achada) return null
+
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'menu',
+    booking_options: null,
+    booking_unit_id: null,
+    menu_sent_at: new Date().toISOString(),
+  })
+
+  return {
+    resposta: `${achada.resposta}\n\n${SAIDAS}`,
+    lista: {
+      rotulo: 'Ver opções',
+      linhas: [
+        { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
+        { id: '9', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
+        { id: '0', titulo: 'Voltar ao menu' },
       ],
     },
   }
@@ -1494,6 +1535,11 @@ export async function tratarConversa(opcoes: {
     // que a secretaria esta tocando, atrapalha em vez de ajudar.
     if (!opcoes.podeIniciarMenu) return null
 
+    // A pergunta vem antes do menu. Quem escreveu uma duvida que a clinica ja
+    // respondeu mil vezes merece a resposta, e nao uma lista de opcoes.
+    const pronta = await responderPergunta(admin, clinicId, conversationId, texto)
+    if (pronta) return pronta
+
     return await mostrarMenu(admin, conversationId, saudacao)
   }
 
@@ -1617,6 +1663,11 @@ export async function tratarConversa(opcoes: {
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
       )
     }
+
+    // Antes de dizer "nao entendi": a pessoa pode ter ignorado a lista e
+    // escrito a duvida dela, que e o que se faz num WhatsApp de verdade.
+    const pronta = await responderPergunta(admin, clinicId, conversationId, texto)
+    if (pronta) return pronta
 
     return await mostrarMenu(
       admin,
