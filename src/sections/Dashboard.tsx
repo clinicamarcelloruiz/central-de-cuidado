@@ -14,6 +14,7 @@ import {
 import type { Patient } from '@/types/patient'
 import type { PendingRequest } from '@/lib/repository'
 import { dueCount, idadeAnos, pendingFollowups } from '@/lib/followup'
+import { nomeDoCid } from '@/lib/cid'
 
 const NAVY = '#081b2c'
 // Azul de destaque do sistema (proposta 3, aprovada em 08/09/2026). O nome
@@ -99,16 +100,21 @@ function DataBar({
   color?: string
 }) {
   const width = max > 0 ? Math.max((value / max) * 100, value > 0 ? 6 : 0) : 0
+  // Nome em cima, barra embaixo. Ate 09/09/2026 os tres ficavam na mesma linha,
+  // com o rotulo espremido em 112px: "Livance Ibirapuera - Vila Clementino"
+  // virava "Livance Ibirapuera - ..." e o nome de um CID nao caberia nunca.
   return (
-    <div className="grid grid-cols-[92px_minmax(0,1fr)_28px] items-center gap-3 sm:grid-cols-[112px_minmax(0,1fr)_32px]">
-      <span className="truncate text-[11px] font-semibold text-slate-500">{label}</span>
-      <div className="h-2 overflow-hidden rounded-full bg-[#eef1f2]">
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[11px] font-semibold leading-snug text-slate-500">{label}</span>
+        <span className="shrink-0 text-[11px] font-extrabold text-[#081b2c]">{value}</span>
+      </div>
+      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-[#eef1f2]">
         <div
           className="h-full rounded-full transition-[width] duration-700"
           style={{ width: `${width}%`, background: `linear-gradient(90deg, ${color}, ${color}b8)` }}
         />
       </div>
-      <span className="text-right text-[11px] font-extrabold text-[#081b2c]">{value}</span>
     </div>
   )
 }
@@ -302,7 +308,9 @@ export default function Dashboard({
   }))
   const maxAge = Math.max(...ageRanges.map((range) => range.value), 1)
 
-  const cids = topN(countBy(patients, (patient) => patient.cid.toUpperCase()), 5)
+  // Agrupado pelo nome, e nao pelo codigo: assim "K59.0" e "K59,0" - a virgula
+  // do teclado numerico - contam como a mesma coisa, que e o que sao.
+  const cids = topN(countBy(patients, (patient) => nomeDoCid(patient.cid)), 5)
   const cities = topN(countBy(patients, (patient) => patient.cidade), 5)
   // Bairro e unidade ja chegavam aqui dentro de cada paciente; so nunca tinham
   // sido lidos. Nao precisou de nada no banco.
