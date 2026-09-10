@@ -2046,3 +2046,97 @@ export async function conferirIntegridade(clinicId: string): Promise<Integridade
     quebradoEm: linha?.quebrado_em ?? null,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Respostas prontas do robô
+// ---------------------------------------------------------------------------
+
+/**
+ * O que a clínica escreve para o robô responder sozinho.
+ *
+ * `palavras` são as pistas que identificam o assunto na mensagem da família, e
+ * `resposta` é o texto enviado, sem alteração nenhuma. Assunto clínico não é
+ * respondido nem que esteja cadastrado: a trava está no atendimento, antes da
+ * busca.
+ */
+export type RespostaPronta = {
+  id: string
+  assunto: string
+  palavras: string[]
+  resposta: string
+  ativa: boolean
+  ordem: number
+}
+
+/** Escape para a tabela nova, que os tipos gerados ainda não conhecem. */
+type Resposta = { data: unknown; error: { message: string } | null }
+interface TabelaLivre extends PromiseLike<Resposta> {
+  select: (colunas: string) => TabelaLivre
+  insert: (valores: Record<string, unknown>) => TabelaLivre
+  update: (valores: Record<string, unknown>) => TabelaLivre
+  delete: () => TabelaLivre
+  eq: (coluna: string, valor: string) => TabelaLivre
+  order: (coluna: string, opcoes: { ascending: boolean }) => TabelaLivre
+  single: () => PromiseLike<Resposta>
+}
+
+function respostasProntas(): TabelaLivre {
+  return (supabase.from as unknown as (n: string) => TabelaLivre)('bot_answers')
+}
+
+type LinhaDaResposta = {
+  id: string
+  subject: string
+  keywords: string[] | null
+  answer: string
+  is_active: boolean
+  position: number
+}
+
+export async function listRespostasProntas(clinicId: string): Promise<RespostaPronta[]> {
+  const { data, error } = await respostasProntas()
+    .select('id,subject,keywords,answer,is_active,position')
+    .eq('clinic_id', clinicId)
+    .order('position', { ascending: true })
+  if (error) fail(error)
+  return ((data ?? []) as LinhaDaResposta[]).map((linha) => ({
+    id: linha.id,
+    assunto: linha.subject,
+    palavras: linha.keywords ?? [],
+    resposta: linha.answer,
+    ativa: linha.is_active,
+    ordem: linha.position,
+  }))
+}
+
+/** Grava uma resposta. Sem id, cria; com id, atualiza. Devolve o id final. */
+export async function saveRespostaPronta(
+  clinicId: string,
+  resposta: RespostaPronta,
+): Promise<string> {
+  const valores = {
+    subject: resposta.assunto.trim(),
+    keywords: resposta.palavras.map((p) => p.trim()).filter(Boolean),
+    answer: resposta.resposta.trim(),
+    is_active: resposta.ativa,
+    position: resposta.ordem,
+  }
+
+  if (resposta.id) {
+    const { error } = await respostasProntas().update(valores).eq('id', resposta.id)
+    if (error) fail(error)
+    return resposta.id
+  }
+
+  const { data, error } = await respostasProntas()
+    .insert({ ...valores, clinic_id: clinicId })
+    .select('id')
+    .single()
+  if (error) fail(error)
+  return ((data ?? {}) as { id?: string }).id ?? ''
+}
+
+export async function deleteRespostaPronta(id: string): Promise<void> {
+  const { error } = await respostasProntas().delete().eq('id', id)
+  if (error) fail(error)
+}
