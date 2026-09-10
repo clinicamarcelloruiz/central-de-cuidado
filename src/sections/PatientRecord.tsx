@@ -838,6 +838,82 @@ function consultationToDraft(consultation: Consultation): ConsultationDraft {
   }
 }
 
+/**
+ * Tamanho do texto do formulario, escolhido por quem esta usando.
+ *
+ * Os rotulos dos campos sao pequenos de proposito - ocupam pouco e deixam a
+ * escrita do medico em primeiro plano. So que "pequeno" depende da vista de
+ * quem le e do monitor da mesa, e a mesma tela que fica elegante num 24
+ * polegadas fica ilegivel num notebook.
+ *
+ * O botao aumenta tudo junto: rotulo, texto digitado, caixas e botoes crescem
+ * na mesma proporcao, entao o formulario nao se desmonta. A escolha fica no
+ * navegador de cada um - o dr. pode usar grande sem mudar a tela da recepcao.
+ */
+const ESCALA_MINIMA = 1
+const ESCALA_MAXIMA = 1.6
+const ESCALA_PASSO = 0.15
+const CHAVE_DA_ESCALA = 'prontuario:tamanho-do-texto'
+
+function lerEscalaSalva(): number {
+  const salvo = Number(window.localStorage.getItem(CHAVE_DA_ESCALA))
+  if (!Number.isFinite(salvo) || salvo <= 0) return ESCALA_MINIMA
+  return Math.min(ESCALA_MAXIMA, Math.max(ESCALA_MINIMA, salvo))
+}
+
+function TamanhoDoTexto({
+  escala,
+  onMudar,
+}: {
+  escala: number
+  onMudar: (valor: number) => void
+}) {
+  const mudar = (delta: number) => {
+    const proxima = Math.min(ESCALA_MAXIMA, Math.max(ESCALA_MINIMA, Number((escala + delta).toFixed(2))))
+    onMudar(proxima)
+  }
+  const botao =
+    'flex h-9 w-9 items-center justify-center rounded-xl border border-[#081b2c]/10 bg-white font-extrabold text-slate-500 transition hover:text-[#1f4f78] disabled:opacity-40'
+
+  return (
+    <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      <span className="hidden text-[9px] font-extrabold uppercase tracking-[0.13em] text-slate-400 sm:block">
+        Texto
+      </span>
+      <button
+        type="button"
+        onClick={() => mudar(-ESCALA_PASSO)}
+        disabled={escala <= ESCALA_MINIMA}
+        className={`${botao} text-[12px]`}
+        aria-label="Diminuir o texto do formulário"
+        title="Diminuir o texto"
+      >
+        A
+      </button>
+      <button
+        type="button"
+        onClick={() => mudar(ESCALA_PASSO)}
+        disabled={escala >= ESCALA_MAXIMA}
+        className={`${botao} text-[17px] leading-none`}
+        aria-label="Aumentar o texto do formulário"
+        title="Aumentar o texto"
+      >
+        A
+      </button>
+      {escala > ESCALA_MINIMA && (
+        <button
+          type="button"
+          onClick={() => onMudar(ESCALA_MINIMA)}
+          className="rounded-lg px-1.5 py-1 text-[9px] font-extrabold uppercase tracking-wide text-slate-400 transition hover:text-[#1f4f78]"
+          title="Voltar ao tamanho padrão"
+        >
+          {Math.round(escala * 100)}%
+        </button>
+      )}
+    </div>
+  )
+}
+
 function Field({
   label,
   children,
@@ -2404,6 +2480,9 @@ export default function PatientRecord({
   )
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Guardado no navegador de quem usa: o tamanho e preferencia de pessoa, nao
+  // configuracao da clinica. Lido uma vez, na primeira renderizacao.
+  const [escalaDoTexto, setEscalaDoTexto] = useState<number>(lerEscalaSalva)
   const [loadError, setLoadError] = useState('')
   const [formError, setFormError] = useState('')
   const loadSequence = useRef(0)
@@ -2881,9 +2960,22 @@ export default function PatientRecord({
                     : 'Registre a evolução clínica com segurança e clareza.'}
                 </p>
               </div>
+              <TamanhoDoTexto
+                escala={escalaDoTexto}
+                onMudar={(valor) => {
+                  setEscalaDoTexto(valor)
+                  window.localStorage.setItem(CHAVE_DA_ESCALA, String(valor))
+                }}
+              />
             </div>
 
-            <div className="scrollbar-subtle flex-1 overflow-y-auto px-5 pb-6 pt-2 sm:px-7">
+            {/* `zoom` em vez de mexer no tamanho de cada texto: cresce rotulo,
+                letra digitada, caixa e botao na mesma proporcao, e o formulario
+                continua alinhado. */}
+            <div
+              className="scrollbar-subtle flex-1 overflow-y-auto px-5 pb-6 pt-2 sm:px-7"
+              style={{ zoom: escalaDoTexto }}
+            >
               <BarraDeFormatacao />
               {/* Assinada, a consulta e um documento fechado. O banco recusa a
                   alteracao de qualquer jeito - o aviso existe para a pessoa
