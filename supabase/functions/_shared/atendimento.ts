@@ -20,7 +20,7 @@
 
 import type { adminClient } from './whatsapp.ts'
 import { cadastrarDaFicha } from './cadastro.ts'
-import { acharResposta, carregarRespostas } from './respostas.ts'
+import { acharResposta, assuntoClinico, carregarRespostas } from './respostas.ts'
 
 /** Dias oferecidos de uma vez. Cabe a quinzena inteira numa mensagem so. */
 /**
@@ -1326,7 +1326,7 @@ async function marcar(
       ...abertura,
       resposta:
         `📋 Seu horário de *${quando}* está guardado.\n\n` +
-        `Para confirmar, ${quantas} para completar o cadastro.\n\n` +
+        `Para completar o cadastro, ${quantas}.\n\n` +
         (abertura?.resposta ?? ''),
     }
   }
@@ -1390,6 +1390,8 @@ const PERGUNTAS: {
    * adiante sozinho em vez de repetir a mesma pergunta para sempre.
    */
   obrigatoria?: boolean
+  /** O proprio texto ja diz como pular, entao a linha generica nao entra. */
+  jaExplicaOPular?: boolean
 }[] = [
   {
     estado: 'dados_nome',
@@ -1427,10 +1429,14 @@ const PERGUNTAS: {
     chave: 'cpf',
     coluna: 'intake_cpf',
     colunaDoCadastro: 'cpf',
+    // Sem a linha generica de PULAR embaixo: este texto ja explica o pular, e
+    // com contexto ("nao tem CPF, nao sabe agora"). Duas instrucoes coladas
+    // dizendo a mesma coisa e o tipo de ruido que faz a pessoa parar de ler.
     texto:
       '🪪 Qual é o *CPF do paciente*?\n\n' +
       '_Ele é exigido por lei na receita digital. Se a criança não tiver CPF, ' +
       'ou você não souber agora, responda PULAR._',
+    jaExplicaOPular: true,
     ler: (t) => (cpfValido(t) ? soDigitos(t) : null),
     erro: 'Esse CPF não confere. Pode conferir e mandar de novo, ou responder PULAR.',
   },
@@ -1604,7 +1610,9 @@ async function perguntarDados(
     resposta:
       (aviso ? `${aviso}\n\n` : '') +
       pergunta.texto +
-      (pergunta.obrigatoria ? '' : '\n\n_Se preferir não responder agora, digite PULAR._'),
+      (pergunta.obrigatoria || pergunta.jaExplicaOPular
+        ? ''
+        : '\n\n_Se preferir não responder agora, digite PULAR._'),
     botoes: pergunta.obrigatoria
       ? [{ id: 'MENU', titulo: 'Voltar ao menu' }]
       : [
@@ -1734,7 +1742,23 @@ export async function tratarConversa(opcoes: {
 
   // Equipe assumiu a conversa. O robo cala a boca - falar por cima de uma
   // pessoa que esta atendendo e pior do que nao responder.
-  if (estadoAtual === 'atendente') return null
+  //
+  // A excecao e urgencia. Quem ja esta na fila da equipe e escreve "e urgente"
+  // precisa de duas coisas: a conversa subindo na lista da recepcao, e a
+  // confirmacao de que o recado chegou. Ficar mudo aqui era o pior cenario
+  // possivel - a mae avisando que a crianca esta mal, e a tela sem sinal
+  // nenhum de que aquilo era diferente das outras conversas em espera.
+  if (estadoAtual === 'atendente') {
+    if (pediuUrgencia(texto)) {
+      return {
+        resposta:
+          '🚨 Avisei a nossa equipe de que é urgente. Alguém entra em contato o mais rápido possível.\n\n' +
+          'Se for uma emergência com risco de vida, procure o pronto-socorro mais próximo ou ligue 192.',
+        atencao: 'urgencia',
+      }
+    }
+    return null
+  }
 
   // Nao existe mais silencio por causa da bandeira de atencao.
   //
@@ -1790,6 +1814,21 @@ export async function tratarConversa(opcoes: {
     // respondeu mil vezes merece a resposta, e nao uma lista de opcoes.
     const pronta = await responderPergunta(admin, clinicId, conversationId, texto, opcoes.textos.informacoes)
     if (pronta) return pronta
+
+    // Quem descreveu um sintoma ou perguntou de remedio nao pode receber "como
+    // podemos ajudar hoje?" como se nao tivesse dito nada. O robo nao responde
+    // - isso e consulta -, mas diz por que nao responde e mostra o caminho. Nao
+    // transfere sozinho de proposito: muita gente escreve o sintoma junto com
+    // "queria marcar", e ai o menu e que resolve.
+    if (assuntoClinico(texto)) {
+      return await mostrarMenu(
+        admin,
+        conversationId,
+        saudacao,
+        'Sobre sintomas, remédios e o que fazer, quem responde é o Dr. Marcello ou alguém da equipe - ' +
+          'por aqui eu não posso orientar. Digite *3* para falar com a equipe, ou escolha:',
+      )
+    }
 
     return await mostrarMenu(admin, conversationId, saudacao)
   }
