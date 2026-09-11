@@ -186,6 +186,11 @@ function pediuAtendente(texto: string) {
   )
 }
 
+/** "Urgente", "é urgência", ou a linha URGENCIA tocada na lista. */
+function pediuUrgencia(texto: string) {
+  return /urgen/.test(normalizar(texto))
+}
+
 function desistiu(texto: string) {
   const t = normalizar(texto)
   return t === 'cancelar' || t === 'sair' || t === 'parar' || t === 'desistir'
@@ -662,10 +667,12 @@ async function responderInformacoes(
     informacoes = (unidade?.info_text ?? '').trim()
     titulo = unidade?.name ?? ''
   }
-  // Sem texto proprio, vale o texto geral da clinica - o de sempre. Sem nem
-  // esse, volta ao menu em vez de mandar uma mensagem vazia.
-  if (!informacoes) informacoes = textoGeral.trim()
-  if (!informacoes) {
+  // O fecho comum vai no fim de qualquer lugar: como agendar, como falar com
+  // a equipe, telefones, horario. E o mesmo para todos, editado uma vez so.
+  // Sem texto da unidade nem fecho, volta ao menu em vez de mandar vazio.
+  const fecho = textoGeral.trim()
+  const corpo = [informacoes, fecho].filter(Boolean).join('\n\n')
+  if (!corpo) {
     return await mostrarMenu(admin, conversationId, 'Olá!')
   }
 
@@ -675,17 +682,21 @@ async function responderInformacoes(
     booking_options: null,
     booking_unit_id: null,
   })
+  // Quem le sobre telemedicina pode estar com pressa: a saida de urgencia
+  // aparece aqui mesmo, e nao so depois de entrar no agendamento.
+  const tele = lugarId === TELE_ID
   return {
     resposta:
-      `${informacoes}\n\n` +
-      // Curta de proposito: repetir os tres numeros aqui criava duas linhas de
-      // instrucao coladas dizendo quase a mesma coisa.
-      'Digite *2* para agendar, *1* para ver outra unidade ou *0* para ver todas as opções.',
+      `${corpo}\n\n` +
+      // Curta de proposito: o fecho ja explica o 2 e o 3 com contexto.
+      'Digite *1* para ver outra unidade ou *0* para ver todas as opções.' +
+      (tele ? '\n\n🚨 Se for *urgência*, digite URGÊNCIA: a equipe entra em contato o mais rápido possível.' : ''),
     // Quem acabou de ler o preco e exatamente quem esta pronto para marcar.
     lista: {
       rotulo: 'Ver opções',
       linhas: [
         { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
+        ...(tele ? [{ id: 'URGENCIA', titulo: '🚨 É urgência', descricao: 'Falar com a equipe agora' }] : []),
         { id: '1', titulo: 'Outra unidade', descricao: titulo ? `Você viu: ${titulo}` : 'Ver outras informações' },
         { id: '9', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
         { id: '0', titulo: 'Voltar ao menu' },
@@ -1741,6 +1752,13 @@ export async function tratarConversa(opcoes: {
     return await chamarEquipe(admin, conversationId)
   }
 
+  // Urgencia tambem vale de qualquer etapa. Nasceu na telemedicina, mas uma
+  // mae com a crianca passando mal nao vai procurar a etapa certa para dizer
+  // isso - e o custo de tratar como urgente o que nao era e uma ligacao a mais.
+  if (pediuUrgencia(texto)) {
+    return await transferirUrgencia(admin, conversationId)
+  }
+
   // "Cancelar" muda de sentido dentro de "minha consulta": ali nao e desistir
   // do fluxo, e desmarcar a consulta. Sem esta excecao a palavra era engolida
   // aqui e a pessoa nunca chegava a poder cancelar de fato.
@@ -2069,12 +2087,6 @@ export async function tratarConversa(opcoes: {
   if (estadoAtual === 'aguardando_dia') {
     if (pediuVoltar(texto)) {
       return await perguntarUnidade(admin, clinicId, conversationId)
-    }
-
-    // So na telemedicina existe a saida de urgencia. Vale tocada na lista
-    // ("URGENCIA") ou escrita de qualquer jeito: "urgente", "é urgência".
-    if (unidadeEmAndamento === TELE_ID && /urg/.test(normalizar(texto))) {
-      return await transferirUrgencia(admin, conversationId)
     }
 
     const dias = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []

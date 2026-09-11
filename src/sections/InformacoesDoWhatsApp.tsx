@@ -89,8 +89,9 @@ export default function InformacoesDoWhatsApp() {
             <h2 className="mt-1 text-base font-extrabold tracking-[-0.03em] text-[#081b2c]">Informações por unidade</h2>
             <p className="mt-1.5 max-w-2xl text-[11px] leading-relaxed text-slate-400">
               Quando a família escolhe "Dúvidas sobre a consulta", o robô pergunta para qual atendimento e
-              responde o texto daquele lugar: valor, pagamento, endereço, o que levar. Para negrito no
-              WhatsApp, use *asteriscos*.
+              responde o texto daquele lugar: valor, pagamento, endereço, o que levar. No fim ele cola o
+              fecho comum (como agendar, equipe, telefones, horário), editado em Conversas → Menu
+              automático. Para negrito no WhatsApp, use *asteriscos*.
             </p>
           </div>
         </div>
