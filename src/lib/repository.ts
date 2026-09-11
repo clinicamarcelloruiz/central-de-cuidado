@@ -1794,6 +1794,22 @@ export async function reopenConversation(conversationId: string) {
 }
 
 /**
+ * Manda a resposta da equipe mesmo com a janela fechada.
+ *
+ * O texto viaja dentro de um modelo de utilidade aprovado - a unica forma de
+ * dizer algo novo depois das 24 horas. Mesma funcao do convite no servidor: o
+ * que decide o caminho e existir ou nao uma mensagem escrita.
+ */
+export async function sendTemplateReply(conversationId: string, mensagem: string) {
+  const { error } = await supabase.functions.invoke('whatsapp-reopen', {
+    body: { conversationId, mensagem },
+  })
+  if (error) {
+    throw new Error(await motivoDaFalha(error, 'Não foi possível enviar a mensagem.'))
+  }
+}
+
+/**
  * Troca a foto de perfil do WhatsApp Business.
  *
  * A imagem nao vai daqui: a funcao no servidor busca o arquivo publicado no

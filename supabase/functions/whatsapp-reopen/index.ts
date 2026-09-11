@@ -1,20 +1,49 @@
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
+import { textoDoModelo } from '../_shared/modelos.ts'
 
 /**
- * Retoma uma conversa cuja janela de 24 horas ja fechou.
+ * Falar com alguem cuja janela de 24 horas ja fechou.
  *
- * Fora da janela a Meta so aceita template aprovado. Este envio nao resolve o
- * assunto - ele reabre a porta: o paciente responde, a janela volta a contar, e
- * a equipe escreve livremente de novo pela tela de sempre.
+ * Fora da janela a Meta so aceita modelo aprovado, e existem dois caminhos:
+ *
+ *  - CONVITE (sem `mensagem`): o modelo pede que a pessoa responda. Nao resolve
+ *    o assunto, reabre a porta - ela responde, a janela volta a contar, e a
+ *    equipe escreve livremente pela tela de sempre. Serve quando o assunto e
+ *    longo demais para caber num modelo.
+ *
+ *  - RESPOSTA (com `mensagem`): o texto que a equipe digitou vai dentro de um
+ *    modelo de utilidade, e a familia le a resposta na hora. Serve para o caso
+ *    comum: alguem perguntou algo simples ontem e merece a resposta, nao um
+ *    pedido para escrever de novo.
  *
  * Recusa de proposito quando a janela AINDA esta aberta. Ali o texto livre
  * funciona, chega mais completo e (ate outubro de 2026) e gratuito; gastar um
- * template no lugar dele seria pagar para dizer menos.
+ * modelo no lugar dele seria pagar para dizer menos.
  */
 
 const JANELA_HORAS = 24
 
-type ReopenRequest = { conversationId?: string }
+/**
+ * Limite do texto da equipe.
+ *
+ * O corpo inteiro do modelo cabe em 1024 caracteres na Meta, e a moldura
+ * ("Olá, Fulano. Aqui é o consultório...") ja come uma parte. 700 deixa folga
+ * confortavel e ainda e mais do que qualquer resposta de recepcao precisa.
+ */
+const LIMITE_DA_MENSAGEM = 700
+
+type ReopenRequest = { conversationId?: string; mensagem?: string }
+
+/**
+ * Deixa o texto no formato que a Meta aceita como parametro.
+ *
+ * Parametro de modelo nao pode conter quebra de linha, tabulacao nem quatro
+ * espacos seguidos - a Meta recusa a mensagem inteira, com erro generico. Em
+ * vez de devolver "erro 132000" para a recepcao, as quebras viram espaco.
+ */
+function limparParametro(texto: string): string {
+  return texto.replace(/[\r\n\t]+/g, ' ').replace(/ {2,}/g, ' ').trim()
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -26,6 +55,14 @@ Deno.serve(async (req) => {
 
     const body = (await req.json()) as ReopenRequest
     if (!body.conversationId) return json({ error: 'Conversa não informada.' }, 400)
+
+    const mensagem = limparParametro(body.mensagem ?? '')
+    if (mensagem.length > LIMITE_DA_MENSAGEM) {
+      return json({
+        error: `A mensagem passa de ${LIMITE_DA_MENSAGEM} caracteres. Encurte ou envie o convite para conversar livremente.`,
+        code: 'TOO_LONG',
+      }, 400)
+    }
 
     // A RLS e a autorizacao: so aparece conversa de clinica onde o usuario e
     // membro ativo. Se nao vier nada, ele nao pode escrever para esta pessoa.
@@ -75,7 +112,9 @@ Deno.serve(async (req) => {
 
     const { data: settings } = await admin
       .from('clinic_settings')
-      .select('whatsapp_phone_number_id,whatsapp_reopen_template_name,whatsapp_template_language')
+      .select(
+        'whatsapp_phone_number_id,whatsapp_reopen_template_name,whatsapp_reply_template_name,whatsapp_template_language',
+      )
       .eq('clinic_id', visivel.clinic_id)
       .single()
 
@@ -100,7 +139,13 @@ Deno.serve(async (req) => {
     }
     const primeiroNome = (nome.split(/\s+/)[0] || 'tudo bem').slice(0, 60)
 
-    const templateName = settings.whatsapp_reopen_template_name || 'retomar_atendimento'
+    // Dois modelos, um caminho de codigo. O que muda e o nome e os parametros:
+    // o convite leva so o nome; a resposta leva o nome e o texto da equipe.
+    const enviandoResposta = mensagem.length > 0
+    const templateName = enviandoResposta
+      ? settings.whatsapp_reply_template_name || 'resposta_da_clinica'
+      : settings.whatsapp_reopen_template_name || 'retomar_atendimento'
+    const parametros = enviandoResposta ? [primeiroNome, mensagem] : [primeiroNome]
     const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
     const agora = new Date().toISOString()
 
@@ -117,16 +162,21 @@ Deno.serve(async (req) => {
           template: {
             name: templateName,
             language: { code: settings.whatsapp_template_language || 'pt_BR' },
-            components: [{ type: 'body', parameters: [{ type: 'text', text: primeiroNome }] }],
+            components: [
+              { type: 'body', parameters: parametros.map((valor) => ({ type: 'text', text: valor })) },
+            ],
           },
         }),
       },
     )
 
     const corpo = await resposta.json()
-    // O historico guarda o que a mensagem FAZ, e nao o nome tecnico do modelo:
-    // quem abrir a conversa amanha precisa entender o que o paciente recebeu.
-    const resumo = `Mensagem enviada para retomar o atendimento com ${primeiroNome}.`
+    // O historico guarda o que a familia LEU, e nao o nome tecnico do modelo.
+    // Na resposta isso e essencial: o texto que a equipe escreveu e o conteudo
+    // do atendimento, e some se guardarmos "modelo enviado".
+    const resumo = enviandoResposta
+      ? textoDoModelo(templateName, parametros) ?? mensagem
+      : `Mensagem enviada para retomar o atendimento com ${primeiroNome}.`
 
     if (!resposta.ok) {
       const motivo = corpo?.error?.message || 'Meta recusou o envio.'

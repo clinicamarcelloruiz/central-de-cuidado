@@ -25,6 +25,7 @@ import {
   getReplyWindow,
   markConversationSeen,
   reopenConversation,
+  sendTemplateReply,
   resetConversationBot,
   resumoDoPaciente,
   resolveConversation,
@@ -183,6 +184,7 @@ export default function Conversations({
   // Instante em que a janela de 24h da Meta fecha para a conversa aberta.
   const [janelaAte, setJanelaAte] = useState<string | null>(null)
   const [reabrindo, setReabrindo] = useState(false)
+  const [enviandoModelo, setEnviandoModelo] = useState(false)
   const [avisoRetomada, setAvisoRetomada] = useState('')
   // Recalculado a cada minuto: sem isso a caixa continuaria habilitada depois
   // de a janela vencer com a tela aberta.
@@ -370,6 +372,30 @@ export default function Conversations({
       setAvisoRetomada(causa instanceof Error ? causa.message : 'Não foi possível enviar.')
     } finally {
       setReabrindo(false)
+    }
+  }
+
+  /**
+   * A resposta da equipe com a janela ja fechada.
+   *
+   * Mesmo campo de escrever de sempre; o que muda e o caminho no servidor, que
+   * embrulha o texto num modelo aprovado. Por isso a caixa e esvaziada so no
+   * sucesso: se a Meta recusar, o que foi escrito continua ali para tentar de
+   * novo ou encurtar.
+   */
+  async function responderPorModelo() {
+    if (!selectedId || !resposta.trim()) return
+    setEnviandoModelo(true)
+    setAvisoRetomada('')
+    try {
+      await sendTemplateReply(selectedId, resposta)
+      setResposta('')
+      setMessages(await listConversationMessages(selectedId))
+      void load(true)
+    } catch (causa) {
+      setAvisoRetomada(causa instanceof Error ? causa.message : 'Não foi possível enviar.')
+    } finally {
+      setEnviandoModelo(false)
     }
   }
 
@@ -1085,19 +1111,46 @@ export default function Conversations({
                           : 'Este contato ainda não escreveu para a clínica'}
                       </p>
                       <p className="mt-1 text-[10px] font-semibold text-[#16456b]/80">
-                        A Meta só permite texto livre nas 24 horas seguintes à mensagem do
-                        paciente. Dá para enviar um convite para o paciente responder. Quando ele
-                        responder, a janela reabre e você escreve normalmente.
+                        A Meta só permite texto livre nas 24 horas seguintes à mensagem do paciente.
+                        Fora delas você tem dois caminhos: responder agora dentro de um modelo
+                        aprovado, ou convidar a família a escrever para a conversa reabrir.
                       </p>
-                      <button
-                        type="button"
-                        disabled={reabrindo}
-                        onClick={() => void reabrirConversa()}
-                        className="mt-2.5 inline-flex items-center gap-1.5 rounded-xl bg-[#16456b] px-4 py-2 text-[10px] font-extrabold text-white transition hover:bg-[#10344f] disabled:cursor-wait disabled:opacity-50"
-                      >
-                        <MessageSquareText className="h-3.5 w-3.5" />
-                        {reabrindo ? 'Enviando...' : 'Enviar convite para retomar a conversa'}
-                      </button>
+
+                      {/* Caminho 1: a resposta sai agora, dentro do modelo. */}
+                      <textarea
+                        value={resposta}
+                        onChange={(evento) => setResposta(evento.target.value)}
+                        rows={3}
+                        maxLength={700}
+                        placeholder="Escreva a resposta. Ela chega precedida de 'Olá, [nome]. Aqui é o consultório do Dr. Marcello Ruiz.'"
+                        className="mt-3 w-full resize-y rounded-xl border border-[#2f7fc1]/25 bg-white px-3 py-2.5 text-[11px] font-semibold leading-relaxed text-[#081b2c] outline-none transition placeholder:font-medium placeholder:text-slate-300 focus:border-[#2f7fc1] focus:ring-4 focus:ring-[#2f7fc1]/10"
+                      />
+                      <p className="mt-1 text-[9px] font-bold text-[#16456b]/60">
+                        Sem quebras de linha: a Meta recusa modelo com parágrafos. {resposta.length}/700
+                      </p>
+
+                      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={enviandoModelo || reabrindo || !resposta.trim()}
+                          onClick={() => void responderPorModelo()}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-[#081b2c] px-4 py-2 text-[10px] font-extrabold text-white transition hover:bg-[#102d47] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          {enviandoModelo ? 'Enviando...' : 'Enviar mensagem agora'}
+                        </button>
+                        {/* Caminho 2: o convite de sempre, para quando o assunto
+                            for longo demais para caber num modelo. */}
+                        <button
+                          type="button"
+                          disabled={reabrindo || enviandoModelo}
+                          onClick={() => void reabrirConversa()}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-[#16456b]/30 bg-white px-4 py-2 text-[10px] font-extrabold text-[#16456b] transition hover:bg-[#e7f0fa] disabled:cursor-wait disabled:opacity-50"
+                        >
+                          <MessageSquareText className="h-3.5 w-3.5" />
+                          {reabrindo ? 'Enviando...' : 'Só convidar a responder'}
+                        </button>
+                      </div>
                       {avisoRetomada && (
                         <p className="mt-2 text-[10px] font-bold text-[#b42318]">{avisoRetomada}</p>
                       )}

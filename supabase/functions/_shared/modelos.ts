@@ -29,6 +29,15 @@ const MODELOS: Record<string, { corpo: string; rodape?: string; botoes?: string[
       'Podemos confirmar sua presença?',
     botoes: ['Confirmar presença', 'Preciso remarcar'],
   },
+  // A resposta da equipe fora da janela de 24 horas. O {{2}} é o texto que a
+  // pessoa digitou na tela - por isso o registro precisa deste modelo aqui:
+  // sem ele, a conversa guardaria "modelo enviado" e ninguém saberia o que a
+  // família leu, que é justamente o conteúdo que importa.
+  resposta_da_clinica: {
+    corpo:
+      'Olá, {{1}}. Aqui é o consultório do Dr. Marcello Ruiz.\n\n{{2}}\n\n' +
+      'Se precisar, é só responder por aqui.',
+  },
 }
 
 /**
