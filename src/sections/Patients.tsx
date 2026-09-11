@@ -687,7 +687,7 @@ export default function Patients({
                   {initials(patient.nome)}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-extrabold text-slate-500">{patient.nome}</p>
+                  <p className="truncate text-xs font-extrabold uppercase text-slate-500">{patient.nome}</p>
                   <p className="truncate text-[10px] text-slate-400">
                     {[
                       patient.dataConsulta ? `Consulta ${fmtBR(patient.dataConsulta)}` : null,
@@ -731,7 +731,11 @@ export default function Patients({
 
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <p className="truncate text-xs font-extrabold text-[#081b2c]">{patient.nome}</p>
+                  {/* Maiuscula so na exibicao: o cadastro guarda o nome como
+                      foi escrito, e e assim que ele sai na receita e no
+                      prontuario. Aqui a lista fica uniforme, sem depender de
+                      quem digitou ter caprichado. */}
+                  <p className="truncate text-xs font-extrabold uppercase text-[#081b2c]">{patient.nome}</p>
                   {patient.criadoAutomaticamenteEm && <AConferir />}
                 </div>
                 <p className="truncate text-[10px] text-slate-400">
@@ -789,7 +793,7 @@ export default function Patients({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <h2 className="truncate text-sm font-extrabold tracking-[-0.02em] text-[#081b2c]">{patient.nome}</h2>
+                        <h2 className="truncate text-sm font-extrabold uppercase tracking-[-0.01em] text-[#081b2c]">{patient.nome}</h2>
                         {patient.criadoAutomaticamenteEm && <AConferir />}
                       </div>
                       <p className="mt-1 text-[10px] font-semibold text-slate-400">
