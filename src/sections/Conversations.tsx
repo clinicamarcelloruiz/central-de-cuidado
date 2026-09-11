@@ -772,13 +772,17 @@ export default function Conversations({
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
+        /* minmax(0,1fr) tambem na coluna unica do celular. Sem isso a coluna
+           implicita e "auto", e o texto sem quebra das previas (truncate) faz
+           a coluna crescer ate a largura do texto inteiro: a lista saia pela
+           direita da tela e o botao de cada conversa ficava fora do alcance. */
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
           {/* No computador, lista e conversa convivem lado a lado. No celular
               nao cabem: a conversa ficava embaixo da lista inteira, e tocar num
               nome parecia nao fazer nada - a tela continuava igual e o
               historico estava a muitas rolagens de distancia. Aqui vale uma
               coisa de cada vez, com o botao de voltar no topo da conversa. */}
-          <div className={`space-y-2 ${selected ? 'hidden lg:block' : ''}`}>
+          <div className={`min-w-0 space-y-2 ${selected ? 'hidden lg:block' : ''}`}>
             {visiveis.length === 0 && (
               <div className="surface-card rounded-[18px] p-6 text-center text-[11px] font-semibold text-slate-500">
                 Nenhuma conversa encontrada com esses filtros.
@@ -906,7 +910,7 @@ export default function Conversations({
           </div>
 
           <div
-            className={`surface-card min-h-[320px] rounded-[22px] p-4 ${
+            className={`surface-card min-h-[320px] min-w-0 rounded-[22px] p-4 ${
               selected ? '' : 'hidden lg:block'
             }`}
           >
