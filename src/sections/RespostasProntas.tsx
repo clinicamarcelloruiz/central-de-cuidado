@@ -24,6 +24,7 @@ const NOVA: Omit<Item, 'ordem'> = {
   palavras: [],
   resposta: '',
   ativa: false,
+  perguntarUnidade: false,
 }
 
 /**
@@ -230,6 +231,24 @@ export default function RespostasProntas() {
                 />
                 <span className="mt-1 block text-right text-[9px] font-bold text-slate-300">
                   {item.resposta.length}/1024
+                </span>
+              </label>
+
+              {/* Para o que muda de unidade para unidade - o valor, sobretudo.
+                  Ligado, o robo pergunta onde e o atendimento e responde o
+                  texto de "Informacoes por unidade" daquele lugar; o texto
+                  acima vira reserva. */}
+              <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-[14px] border border-[#081b2c]/[0.06] bg-[#f8f7f4] px-3.5 py-3">
+                <input
+                  type="checkbox"
+                  checked={item.perguntarUnidade}
+                  onChange={(e) => mudar(indice, { perguntarUnidade: e.target.checked })}
+                  className="mt-0.5 h-3.5 w-3.5 accent-[#2f7fc1]"
+                />
+                <span className="text-[10px] font-bold leading-relaxed text-slate-500">
+                  Antes de responder, perguntar onde é o atendimento (Santos, São Paulo ou Telemedicina) e enviar
+                  o texto de "Informações por unidade" daquele lugar. A resposta acima só é usada se a clínica
+                  tiver um lugar só.
                 </span>
               </label>
             </div>

@@ -26,6 +26,12 @@ export type RespostaPronta = {
   assunto: string
   palavras: string[]
   resposta: string
+  /**
+   * Ligado, a resposta e a pergunta "Santos, Sao Paulo ou Telemedicina?", e o
+   * texto que vale e o de informacoes do lugar escolhido. Serve para o que
+   * muda de unidade para unidade - o valor, principalmente.
+   */
+  perguntarUnidade: boolean
 }
 
 /** Tira acento e caixa: "Convênio" e "convenio" viram a mesma coisa. */
@@ -136,18 +142,25 @@ export async function carregarRespostas(
 ): Promise<RespostaPronta[]> {
   const { data, error } = await admin
     .from('bot_answers')
-    .select('id, subject, keywords, answer')
+    .select('id, subject, keywords, answer, ask_unit')
     .eq('clinic_id', clinicId)
     .eq('is_active', true)
     .order('position', { ascending: true })
 
   if (error || !data) return []
-  return (data as { id: string; subject: string; keywords: string[] | null; answer: string }[])
+  return (data as {
+    id: string
+    subject: string
+    keywords: string[] | null
+    answer: string
+    ask_unit?: boolean | null
+  }[])
     .map((linha) => ({
       id: linha.id,
       assunto: linha.subject,
       palavras: linha.keywords ?? [],
       resposta: linha.answer,
+      perguntarUnidade: Boolean(linha.ask_unit),
     }))
     .filter((r) => r.palavras.length > 0 && r.resposta.trim().length > 0)
 }
