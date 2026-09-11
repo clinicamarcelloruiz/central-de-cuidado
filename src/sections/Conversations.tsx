@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   ArrowDown,
+  ArrowLeft,
   Check,
   CheckCheck,
   CircleSlash,
@@ -101,6 +102,13 @@ const MOTIVO_ATENCAO: Record<
     rotulo: 'Falha no atendimento automático',
     classe: 'bg-red-600 text-white',
     borda: 'border-red-500 ring-1 ring-red-500/30',
+  },
+  // Pediu urgencia na telemedicina: uma crianca passando mal e alguem
+  // esperando ligacao. E a unica bandeira que precisa gritar mais que a falha.
+  urgencia: {
+    rotulo: '🚨 Urgência: ligar agora',
+    classe: 'bg-[#b42318] text-white',
+    borda: 'border-[#b42318] ring-2 ring-[#b42318]/40',
   },
 }
 
@@ -299,6 +307,11 @@ export default function Conversations({
     setLoadingMessages(true)
     setResposta('')
     setJanelaAte(null)
+    // No celular a conversa substitui a lista, e a pagina pode estar rolada na
+    // altura do nome que a pessoa tocou. Sem isto, a conversa abre no meio.
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
     try {
       const [historico, janela] = await Promise.all([
         listConversationMessages(conversation.id),
@@ -760,7 +773,12 @@ export default function Conversations({
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
-          <div className="space-y-2">
+          {/* No computador, lista e conversa convivem lado a lado. No celular
+              nao cabem: a conversa ficava embaixo da lista inteira, e tocar num
+              nome parecia nao fazer nada - a tela continuava igual e o
+              historico estava a muitas rolagens de distancia. Aqui vale uma
+              coisa de cada vez, com o botao de voltar no topo da conversa. */}
+          <div className={`space-y-2 ${selected ? 'hidden lg:block' : ''}`}>
             {visiveis.length === 0 && (
               <div className="surface-card rounded-[18px] p-6 text-center text-[11px] font-semibold text-slate-500">
                 Nenhuma conversa encontrada com esses filtros.
@@ -887,13 +905,27 @@ export default function Conversations({
             })}
           </div>
 
-          <div className="surface-card min-h-[320px] rounded-[22px] p-4">
+          <div
+            className={`surface-card min-h-[320px] rounded-[22px] p-4 ${
+              selected ? '' : 'hidden lg:block'
+            }`}
+          >
             {!selected ? (
               <p className="pt-16 text-center text-xs font-semibold text-slate-400">
                 Escolha uma conversa para ver o histórico.
               </p>
             ) : (
               <>
+                {/* Só no celular: no computador a lista está do lado, e um
+                    botão de voltar ali seria um passo inventado. */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(null)}
+                  className="mb-3 inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 px-3 py-2 text-[10px] font-extrabold text-slate-500 transition hover:text-[#1f4f78] lg:hidden"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  Todas as conversas
+                </button>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#081b2c]/[0.07] pb-3">
                   <div>
                     <p className="text-sm font-extrabold text-[#081b2c]">{selected.patientName}</p>

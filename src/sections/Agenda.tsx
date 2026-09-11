@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Video,
   Settings2,
   Trash2,
   MessageCircleOff,
@@ -825,6 +826,15 @@ export default function Agenda({
                               >
                                 <RotateCcw className="h-2.5 w-2.5" strokeWidth={3} />
                                 Remarcada {item.rescheduleCount}x
+                              </span>
+                            )}
+                            {/* Por video: o horario e desta unidade, mas a
+                                pessoa nao vem. Sem a etiqueta a recepcao
+                                esperaria alguem na porta. */}
+                            {item.ficha.telemedicina && (
+                              <span className="mt-1 ml-1 inline-flex items-center gap-1 rounded-full bg-[#7ab8ea] px-2 py-0.5 text-[9px] font-extrabold text-[#081b2c]">
+                                <Video className="h-2.5 w-2.5" strokeWidth={3} />
+                                Telemedicina
                               </span>
                             )}
                             <p className="text-[9px] font-bold text-white/60">
