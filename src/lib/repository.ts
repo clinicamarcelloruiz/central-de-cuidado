@@ -2088,6 +2088,8 @@ export type RespostaPronta = {
   resposta: string
   ativa: boolean
   ordem: number
+  /** Antes de responder, pergunta Santos, São Paulo ou Telemedicina e usa o texto do lugar. */
+  perguntarUnidade: boolean
 }
 
 /** Escape para a tabela nova, que os tipos gerados ainda não conhecem. */
@@ -2113,11 +2115,12 @@ type LinhaDaResposta = {
   answer: string
   is_active: boolean
   position: number
+  ask_unit?: boolean | null
 }
 
 export async function listRespostasProntas(clinicId: string): Promise<RespostaPronta[]> {
   const { data, error } = await respostasProntas()
-    .select('id,subject,keywords,answer,is_active,position')
+    .select('id,subject,keywords,answer,is_active,position,ask_unit')
     .eq('clinic_id', clinicId)
     .order('position', { ascending: true })
   if (error) fail(error)
@@ -2128,6 +2131,7 @@ export async function listRespostasProntas(clinicId: string): Promise<RespostaPr
     resposta: linha.answer,
     ativa: linha.is_active,
     ordem: linha.position,
+    perguntarUnidade: Boolean(linha.ask_unit),
   }))
 }
 
@@ -2142,6 +2146,7 @@ export async function saveRespostaPronta(
     answer: resposta.resposta.trim(),
     is_active: resposta.ativa,
     position: resposta.ordem,
+    ask_unit: resposta.perguntarUnidade,
   }
 
   if (resposta.id) {

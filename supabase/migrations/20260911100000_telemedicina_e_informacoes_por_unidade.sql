@@ -96,27 +96,27 @@ alter table public.whatsapp_conversations
 -- ---------------------------------------------------------------
 
 update public.clinic_units
-set info_text = E'💙 *Consulta em Santos: R$ 450,00.* Inclui retorno em até 30 dias.\n\n'
-  E'💳 Pagamento somente em pix ou dinheiro. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n'
-  E'📍 Liferty · Santos — Al. Armênio Mendes, 66, sala 2912, Aparecida. Estacionamento particular no local.\n\n'
+set info_text = E'💙 *Consulta em Santos: R$ 450,00.* Inclui retorno em até 30 dias.\n\n' ||
+  E'💳 Pagamento somente em pix ou dinheiro. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n' ||
+  E'📍 Liferty · Santos — Al. Armênio Mendes, 66, sala 2912, Aparecida. Estacionamento particular no local.\n\n' ||
   E'📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.'
 where info_text = ''
   and archived_at is null
   and name ilike '%santos%';
 
 update public.clinic_units
-set info_text = E'💙 *Consulta em São Paulo: R$ 550,00.* Inclui retorno em até 30 dias.\n\n'
-  E'💳 Pagamento somente em pix ou dinheiro. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n'
-  E'📍 Livance · Ibirapuera — R. Agostinho Rodrigues Filho, 550, Vila Clementino. Estacionamento particular no local.\n\n'
+set info_text = E'💙 *Consulta em São Paulo: R$ 550,00.* Inclui retorno em até 30 dias.\n\n' ||
+  E'💳 Pagamento somente em pix ou dinheiro. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n' ||
+  E'📍 Livance · Ibirapuera — R. Agostinho Rodrigues Filho, 550, Vila Clementino. Estacionamento particular no local.\n\n' ||
   E'📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.'
 where info_text = ''
   and archived_at is null
   and (name ilike '%ibirapuera%' or name ilike '%paulo%' or name ilike '%livance%');
 
 update public.clinic_settings
-set telemedicine_info_text = E'💙 *Telemedicina: R$ 450,00.* Inclui um retorno presencial em até 30 dias, em Santos ou São Paulo.\n\n'
-  E'💳 Pagamento por pix. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n'
-  E'💻 A consulta é por vídeo, no horário marcado. Você recebe o link aqui pelo WhatsApp.\n\n'
+set telemedicine_info_text = E'💙 *Telemedicina: R$ 450,00.* Inclui um retorno presencial em até 30 dias, em Santos ou São Paulo.\n\n' ||
+  E'💳 Pagamento por pix. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n' ||
+  E'💻 A consulta é por vídeo, no horário marcado. Você recebe o link aqui pelo WhatsApp.\n\n' ||
   E'📋 Tenha em mãos a carteirinha de vacinação da criança e os exames anteriores, se houver.'
 where telemedicine_info_text = '';
 

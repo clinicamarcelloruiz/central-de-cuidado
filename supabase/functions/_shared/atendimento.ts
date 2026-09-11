@@ -569,9 +569,21 @@ async function responderPergunta(
   clinicId: string,
   conversationId: string,
   texto: string,
+  textoGeral: string,
 ): Promise<Resultado | null> {
   const achada = acharResposta(texto, await carregarRespostas(admin, clinicId))
   if (!achada) return null
+
+  // "Quanto custa?" nao tem resposta unica: depende de onde. O assunto marcado
+  // para perguntar a unidade cai na mesma pergunta da opcao 1 do menu, e a
+  // resposta e o texto de informacoes do lugar escolhido. Com um lugar so, a
+  // pergunta nao existe e vale o texto da propria resposta.
+  if (achada.perguntarUnidade) {
+    const lugares = await opcoesDeAtendimento(admin, clinicId)
+    if (lugares.length > 1) {
+      return await perguntarLocalDasInformacoes(admin, clinicId, conversationId, textoGeral)
+    }
+  }
 
   await salvarEstado(admin, conversationId, {
     booking_state: 'menu',
@@ -1758,7 +1770,7 @@ export async function tratarConversa(opcoes: {
 
     // A pergunta vem antes do menu. Quem escreveu uma duvida que a clinica ja
     // respondeu mil vezes merece a resposta, e nao uma lista de opcoes.
-    const pronta = await responderPergunta(admin, clinicId, conversationId, texto)
+    const pronta = await responderPergunta(admin, clinicId, conversationId, texto, opcoes.textos.informacoes)
     if (pronta) return pronta
 
     return await mostrarMenu(admin, conversationId, saudacao)
@@ -1863,7 +1875,7 @@ export async function tratarConversa(opcoes: {
 
     // Antes de dizer "nao entendi": a pessoa pode ter ignorado a lista e
     // escrito a duvida dela, que e o que se faz num WhatsApp de verdade.
-    const pronta = await responderPergunta(admin, clinicId, conversationId, texto)
+    const pronta = await responderPergunta(admin, clinicId, conversationId, texto, opcoes.textos.informacoes)
     if (pronta) return pronta
 
     return await mostrarMenu(
