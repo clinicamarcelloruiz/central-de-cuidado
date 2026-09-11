@@ -660,7 +660,7 @@ export default function Conversations({
             </p>
 
             <p className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
-              Opção 1 - Informações sobre a consulta
+              Opção 1 - Fecho comum das informações
             </p>
             <textarea
               value={autoReply.infoText}
@@ -669,7 +669,9 @@ export default function Conversations({
               className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#2f7fc1]"
             />
             <p className="mt-2 text-[10px] text-slate-500">
-              Valores, formas de contato e orientações. É o que o paciente recebe ao responder 1.
+              Vai no fim do texto de qualquer unidade e da telemedicina: como agendar, como falar com a
+              equipe, telefones e horário. O valor, o endereço e o que levar de cada lugar ficam em
+              Preferências, em "Informações por unidade".
             </p>
             <p className="mt-1 text-[10px] text-slate-500">
               A opção 2 usa a agenda das unidades. A opção 3 marca a conversa aqui em
