@@ -442,6 +442,8 @@ export interface Appointment {
     responsavel: string
     cpf: string
     email: string
+    /** Consulta por video. A unidade e a que cedeu o horario. */
+    telemedicina: boolean
   }
   /** Quantas vezes esta consulta ja trocou de data. Zero na primeira. */
   rescheduleCount: number
@@ -680,7 +682,7 @@ type LinhaComFicha = {
   intake_email?: string | null
 }
 
-const FICHA_VAZIA = { nome: '', nascimento: '', responsavel: '', cpf: '', email: '' }
+const FICHA_VAZIA = { nome: '', nascimento: '', responsavel: '', cpf: '', email: '', telemedicina: false }
 
 /**
  * A ficha que a familia preencheu pelo WhatsApp, por consulta.
@@ -693,18 +695,21 @@ async function fichasDasConsultas(clinicId: string, unitId: string) {
   const vazio = new Map<string, typeof FICHA_VAZIA>()
   try {
     const { data, error } = await tabelaCrua('appointments')
-      .select('id,intake_patient_name,intake_birth_date,intake_guardian,intake_cpf,intake_email')
+      .select('id,intake_patient_name,intake_birth_date,intake_guardian,intake_cpf,intake_email,modality')
       .eq('clinic_id', clinicId)
       .eq('unit_id', unitId)
       .order('id', { ascending: true })
     if (error) return vazio
-    for (const linha of ((data ?? []) as (LinhaComFicha & { id: string })[])) {
+    for (const linha of ((data ?? []) as (LinhaComFicha & { id: string; modality?: string | null })[])) {
       vazio.set(linha.id, {
         nome: linha.intake_patient_name ?? '',
         nascimento: linha.intake_birth_date ?? '',
         responsavel: linha.intake_guardian ?? '',
         cpf: linha.intake_cpf ?? '',
         email: linha.intake_email ?? '',
+        // Vem junto da ficha porque as duas colunas sao mais novas que os
+        // tipos gerados, e uma consulta crua so ja paga as duas.
+        telemedicina: linha.modality === 'telemedicina',
       })
     }
   } catch {
@@ -1087,6 +1092,7 @@ export interface Conversation {
     | 'ajuda'
     | 'falha'
     | 'cancelou_sozinho'
+    | 'urgencia'
     | null
   /** Etapa em que o robo parou nesta conversa. Nulo quando nao ha nada aberto. */
   bookingState: string | null
@@ -2154,5 +2160,56 @@ export async function saveRespostaPronta(
 
 export async function deleteRespostaPronta(id: string): Promise<void> {
   const { error } = await respostasProntas().delete().eq('id', id)
+  if (error) fail(error)
+}
+
+// ---------------------------------------------------------------------------
+// Informações que o robô dá por unidade, e a telemedicina
+// ---------------------------------------------------------------------------
+
+export type InformacoesDaUnidade = { id: string; nome: string; texto: string }
+export type Telemedicina = { ativa: boolean; texto: string }
+
+/** As unidades ativas com o texto que o robô responde na opção "Dúvidas". */
+export async function listInformacoesDasUnidades(clinicId: string): Promise<InformacoesDaUnidade[]> {
+  const { data, error } = await tabelaCrua('clinic_units')
+    .select('id,name,info_text,archived_at')
+    .eq('clinic_id', clinicId)
+    .order('name', { ascending: true })
+  if (error) fail(error)
+  return ((data ?? []) as { id: string; name: string; info_text: string | null; archived_at: string | null }[])
+    .filter((u) => !u.archived_at)
+    .map((u) => ({ id: u.id, nome: u.name, texto: u.info_text ?? '' }))
+}
+
+export async function saveInformacoesDaUnidade(unitId: string, texto: string) {
+  const atualizar = (supabase.from as unknown as (n: string) => {
+    update: (valores: Record<string, unknown>) => {
+      eq: (coluna: string, valor: string) => PromiseLike<{ error: { message: string } | null }>
+    }
+  })('clinic_units')
+  const { error } = await atualizar.update({ info_text: texto.trim() }).eq('id', unitId)
+  if (error) fail(error)
+}
+
+export async function getTelemedicina(clinicId: string): Promise<Telemedicina> {
+  const { data, error } = await tabelaCrua('clinic_settings')
+    .select('telemedicine_enabled,telemedicine_info_text')
+    .eq('clinic_id', clinicId)
+    .order('clinic_id', { ascending: true })
+  if (error) fail(error)
+  const linha = ((data ?? []) as { telemedicine_enabled?: boolean; telemedicine_info_text?: string | null }[])[0]
+  return { ativa: Boolean(linha?.telemedicine_enabled), texto: linha?.telemedicine_info_text ?? '' }
+}
+
+export async function saveTelemedicina(clinicId: string, dados: Telemedicina) {
+  const atualizar = (supabase.from as unknown as (n: string) => {
+    update: (valores: Record<string, unknown>) => {
+      eq: (coluna: string, valor: string) => PromiseLike<{ error: { message: string } | null }>
+    }
+  })('clinic_settings')
+  const { error } = await atualizar
+    .update({ telemedicine_enabled: dados.ativa, telemedicine_info_text: dados.texto.trim() })
+    .eq('clinic_id', clinicId)
   if (error) fail(error)
 }

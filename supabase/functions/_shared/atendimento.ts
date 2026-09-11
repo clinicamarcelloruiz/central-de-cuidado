@@ -63,8 +63,23 @@ export type Estado =
   | 'dados_responsavel'
   | 'dados_cpf'
   | 'dados_email'
+  | 'informacoes_unidade'
   | 'atendente'
-export type MotivoAtencao = 'atendente' | 'falha' | 'cancelou_sozinho'
+export type MotivoAtencao = 'atendente' | 'falha' | 'cancelou_sozinho' | 'urgencia'
+
+/**
+ * A telemedicina como "unidade" do fluxo.
+ *
+ * Ela nao tem agenda propria: usa os horarios das unidades fisicas, porque e o
+ * mesmo medico no mesmo dia. Para o robo, porem, e uma opcao na mesma lista
+ * de Santos e Sao Paulo - e tratar como unidade virtual deixa o fluxo inteiro
+ * (unidade -> dia -> horario) igual, com um desvio so na hora de buscar os
+ * horarios e outro na hora de gravar. O id nao e uuid de proposito: nunca vai
+ * para a coluna booking_unit_id; a modalidade fica em booking_modality.
+ */
+const TELE_ID = 'telemedicina'
+const UNIDADE_TELE = { id: TELE_ID, name: 'Telemedicina (por vídeo)', address: '' }
+export type Modalidade = 'presencial' | 'telemedicina'
 
 /**
  * Botao ou linha de lista tocavel no WhatsApp.
@@ -86,7 +101,7 @@ export type Resultado = {
   lista?: { rotulo: string; linhas: Toque[] }
 } | null
 
-type Unidade = { id: string; name: string; address: string }
+type Unidade = { id: string; name: string; address: string; info_text?: string | null }
 type Paciente = {
   id: string
   name: string
@@ -96,7 +111,8 @@ type Paciente = {
   cpf?: string | null
   email?: string | null
 }
-type Horario = { inicio: string; fim: string }
+/** `unitId` so vem na telemedicina: diz de qual unidade fisica saiu o horario. */
+type Horario = { inicio: string; fim: string; unitId?: string }
 
 /** Consulta futura ja marcada para este telefone. */
 export type ConsultaMarcada = {
@@ -373,6 +389,7 @@ async function voltarAoMenuAtivo(admin: Admin, conversationId: string) {
     booking_state: 'menu',
     booking_options: null,
     booking_unit_id: null,
+    booking_modality: null,
     booking_patient_id: null,
     booking_replaces_id: null,
     booking_intake_id: null,
@@ -384,20 +401,60 @@ async function limparEstado(admin: Admin, conversationId: string) {
     booking_state: null,
     booking_options: null,
     booking_unit_id: null,
+    booking_modality: null,
     booking_patient_id: null,
     booking_replaces_id: null,
     booking_intake_id: null,
   })
 }
 
+/** Se a clinica oferece telemedicina pelo robo, e o texto de informacoes dela. */
+async function telemedicinaDaClinica(
+  admin: Admin,
+  clinicId: string,
+): Promise<{ ativa: boolean; informacoes: string }> {
+  const { data } = await admin
+    .from('clinic_settings')
+    .select('telemedicine_enabled,telemedicine_info_text')
+    .eq('clinic_id', clinicId)
+    .maybeSingle()
+  return {
+    ativa: Boolean(data?.telemedicine_enabled),
+    informacoes: (data?.telemedicine_info_text ?? '').trim(),
+  }
+}
+
+/**
+ * A unidade pelo id, incluindo a virtual da telemedicina.
+ *
+ * Todo lugar que precisava reler a unidade do banco passa por aqui, para a
+ * telemedicina nao virar "unidade nao encontrada" no meio do fluxo.
+ */
+async function unidadePorId(admin: Admin, id: string): Promise<Unidade | null> {
+  if (id === TELE_ID) return UNIDADE_TELE
+  const { data } = await admin
+    .from('clinic_units')
+    .select('id,name,address,info_text')
+    .eq('id', id)
+    .maybeSingle()
+  return (data as Unidade | null) ?? null
+}
+
 async function unidadesAtivas(admin: Admin, clinicId: string) {
   const { data } = await admin
     .from('clinic_units')
-    .select('id,name,address')
+    .select('id,name,address,info_text')
     .eq('clinic_id', clinicId)
     .is('archived_at', null)
     .order('name')
   return (data ?? []) as Unidade[]
+}
+
+/** As unidades fisicas e, quando a clinica oferece, a telemedicina no fim. */
+async function opcoesDeAtendimento(admin: Admin, clinicId: string): Promise<Unidade[]> {
+  const unidades = await unidadesAtivas(admin, clinicId)
+  const tele = await telemedicinaDaClinica(admin, clinicId)
+  return tele.ativa && unidades.length > 0 ? [...unidades, UNIDADE_TELE] : unidades
 }
 
 async function fusoDaClinica(admin: Admin, clinicId: string) {
@@ -419,8 +476,21 @@ async function fusoDaClinica(admin: Admin, clinicId: string) {
  */
 async function horariosLivres(
   admin: Admin,
+  clinicId: string,
   unitId: string,
 ): Promise<{ horarios: Horario[]; falhou: boolean }> {
+  // Telemedicina: os horarios de todas as unidades fisicas, juntos e em ordem.
+  // Cada um lembra de onde veio, porque e la que a consulta vai ser gravada.
+  if (unitId === TELE_ID) {
+    const fisicas = await unidadesAtivas(admin, clinicId)
+    const partes = await Promise.all(fisicas.map((u) => horariosLivres(admin, clinicId, u.id)))
+    if (partes.length > 0 && partes.every((p) => p.falhou)) return { horarios: [], falhou: true }
+    const juntos = partes
+      .flatMap((p, i) => p.horarios.map((h) => ({ ...h, unitId: fisicas[i].id })))
+      .sort((a, b) => a.inicio.localeCompare(b.inicio))
+    return { horarios: juntos, falhou: false }
+  }
+
   // Libera reservas vencidas antes de listar: sem isso o horario aparece livre
   // aqui e a marcacao falha depois, no indice unico.
   const { error: erroFaxina } = await admin.rpc('liberar_reservas_vencidas')
@@ -516,6 +586,95 @@ async function responderPergunta(
       rotulo: 'Ver opções',
       linhas: [
         { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
+        { id: '9', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
+        { id: '0', titulo: 'Voltar ao menu' },
+      ],
+    },
+  }
+}
+
+/**
+ * Informacoes da consulta: primeiro onde, depois o texto.
+ *
+ * O valor nao e um so - Santos e Sao Paulo cobram diferente, e a telemedicina
+ * tem regra propria de retorno. Responder tudo de uma vez virava um paragrafo
+ * com tres precos, e a pessoa tinha que achar o dela no meio. Perguntar antes
+ * custa um toque e entrega a resposta certa, curta, com o endereco certo.
+ *
+ * Com uma unidade so e sem telemedicina, nao ha o que perguntar: responde.
+ */
+async function perguntarLocalDasInformacoes(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+  textoGeral: string,
+): Promise<Resultado> {
+  const lugares = await opcoesDeAtendimento(admin, clinicId)
+
+  if (lugares.length <= 1) {
+    return await responderInformacoes(admin, clinicId, conversationId, lugares[0]?.id ?? '', textoGeral)
+  }
+
+  const linhas = lugares.map((u, i) => `*${i + 1}* ${u.name}`).join('\n')
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'informacoes_unidade',
+    booking_options: lugares.map((u) => u.id),
+    booking_unit_id: null,
+  })
+  return {
+    resposta:
+      `💬 Para qual atendimento você quer informações?\n\n${linhas}\n\n` +
+      `Responda com o número. ${SAIDAS}`,
+    lista: {
+      rotulo: 'Escolher',
+      linhas: comVoltar(lugares.map((u, i) => ({ id: String(i + 1), titulo: u.name }))),
+    },
+  }
+}
+
+async function responderInformacoes(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+  lugarId: string,
+  textoGeral: string,
+): Promise<Resultado> {
+  let informacoes = ''
+  let titulo = ''
+  if (lugarId === TELE_ID) {
+    const tele = await telemedicinaDaClinica(admin, clinicId)
+    informacoes = tele.informacoes
+    titulo = UNIDADE_TELE.name
+  } else if (lugarId) {
+    const unidade = await unidadePorId(admin, lugarId)
+    informacoes = (unidade?.info_text ?? '').trim()
+    titulo = unidade?.name ?? ''
+  }
+  // Sem texto proprio, vale o texto geral da clinica - o de sempre. Sem nem
+  // esse, volta ao menu em vez de mandar uma mensagem vazia.
+  if (!informacoes) informacoes = textoGeral.trim()
+  if (!informacoes) {
+    return await mostrarMenu(admin, conversationId, 'Olá!')
+  }
+
+  // Segue em 'menu': assim a pessoa le os valores e responde 2 na hora.
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'menu',
+    booking_options: null,
+    booking_unit_id: null,
+  })
+  return {
+    resposta:
+      `${informacoes}\n\n` +
+      // Curta de proposito: repetir os tres numeros aqui criava duas linhas de
+      // instrucao coladas dizendo quase a mesma coisa.
+      'Digite *2* para agendar, *1* para ver outra unidade ou *0* para ver todas as opções.',
+    // Quem acabou de ler o preco e exatamente quem esta pronto para marcar.
+    lista: {
+      rotulo: 'Ver opções',
+      linhas: [
+        { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
+        { id: '1', titulo: 'Outra unidade', descricao: titulo ? `Você viu: ${titulo}` : 'Ver outras informações' },
         { id: '9', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
         { id: '0', titulo: 'Voltar ao menu' },
       ],
@@ -750,7 +909,7 @@ async function perguntarUnidade(
   clinicId: string,
   conversationId: string,
 ): Promise<Resultado> {
-  const unidades = await unidadesAtivas(admin, clinicId)
+  const unidades = await opcoesDeAtendimento(admin, clinicId)
 
   if (unidades.length === 0) {
     return {
@@ -769,7 +928,7 @@ async function perguntarUnidade(
   // unidade, mas evita o pior roteiro possivel: a pessoa escolhe, espera, e
   // descobre que ali nao tinha nada.
   const comAgenda = await Promise.all(
-    unidades.map(async (u) => ({ unidade: u, ...(await horariosLivres(admin, u.id)) })),
+    unidades.map(async (u) => ({ unidade: u, ...(await horariosLivres(admin, clinicId, u.id)) })),
   )
 
   if (comAgenda.every((u) => u.falhou)) {
@@ -829,7 +988,8 @@ async function perguntarDia(
   podeTrocarUnidade = true,
 ): Promise<Resultado> {
   const timezone = await fusoDaClinica(admin, clinicId)
-  const { horarios, falhou } = await horariosLivres(admin, unidade.id)
+  const { horarios, falhou } = await horariosLivres(admin, clinicId, unidade.id)
+  const tele = unidade.id === TELE_ID
 
   if (falhou) {
     await limparEstado(admin, conversationId)
@@ -855,7 +1015,8 @@ async function perguntarDia(
   }
 
   const dias = agruparPorDia(horarios, timezone)
-  const mostrados = dias.slice(0, MAX_DIAS)
+  // Na telemedicina uma das oito linhas e a urgencia, entao cabem sete dias.
+  const mostrados = dias.slice(0, tele ? MAX_DIAS - 1 : MAX_DIAS)
 
   const linhas = mostrados
     .map((d, i) => {
@@ -866,10 +1027,13 @@ async function perguntarDia(
     })
     .join('\n')
 
+  // A telemedicina nao tem unidade no banco: a modalidade e que guarda a
+  // escolha, e o horario, quando vier, diz de qual unidade fisica saiu.
   await salvarEstado(admin, conversationId, {
     booking_state: 'aguardando_dia',
     booking_options: mostrados.map((d) => d.chave),
-    booking_unit_id: unidade.id,
+    booking_unit_id: tele ? null : unidade.id,
+    booking_modality: tele ? 'telemedicina' : 'presencial',
   })
 
   // Sem agenda alem da quinzena nao adianta prometer: quem precisa de data
@@ -878,20 +1042,55 @@ async function perguntarDia(
     ? 'Digite VOLTAR para escolher outra unidade, *9* se precisar de uma data mais distante, ou *0* para o início.'
     : 'Digite *9* se precisar de uma data mais distante, ou *0* para o início.'
 
+  // Na telemedicina existe a saida de urgencia: quem nao pode esperar um
+  // horario da lista fala com a equipe agora, e a conversa sobe na fila.
+  const urgencia = tele
+    ? '\n\n🚨 Se for *urgência*, digite URGÊNCIA: a nossa equipe entra em contato o mais rápido possível.'
+    : ''
+
+  const linhasDaLista = mostrados.map((d, i) => ({
+    id: String(i + 1),
+    titulo: formatarDia(d.horarios[0].inicio, timezone),
+    descricao: `${d.horarios.length} horário${d.horarios.length === 1 ? '' : 's'}`,
+  }))
+
   return {
     resposta:
-      `🗓️ *Datas disponíveis em ${unidade.name}:*\n\n${linhas}\n\n` +
-      `Responda com o número do dia.\n${rodape}`,
+      `🗓️ *Datas disponíveis${tele ? ' para telemedicina' : ` em ${unidade.name}`}:*\n\n${linhas}\n\n` +
+      `Responda com o número do dia.\n${rodape}${urgencia}`,
     lista: {
       rotulo: 'Escolher o dia',
       linhas: comVoltar(
-        mostrados.map((d, i) => ({
-          id: String(i + 1),
-          titulo: formatarDia(d.horarios[0].inicio, timezone),
-          descricao: `${d.horarios.length} horário${d.horarios.length === 1 ? '' : 's'}`,
-        })),
+        tele
+          ? [...linhasDaLista, { id: 'URGENCIA', titulo: '🚨 É urgência', descricao: 'Falar com a equipe agora' }]
+          : linhasDaLista,
       ),
     },
+  }
+}
+
+/**
+ * Urgencia na telemedicina: o robo para de marcar e chama gente.
+ *
+ * Nao e a mesma coisa que "falar com a equipe". Quem pediu urgencia esta com
+ * uma crianca passando mal e precisa ouvir que alguem vai ligar agora - e a
+ * conversa precisa saltar na lista da recepcao com uma bandeira propria.
+ */
+async function transferirUrgencia(admin: Admin, conversationId: string): Promise<Resultado> {
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'atendente',
+    booking_options: null,
+    booking_unit_id: null,
+    booking_modality: null,
+  })
+  return {
+    resposta:
+      '🚨 Entendi que é urgência. Estou transferindo você para um atendente do ' +
+      'consultório, e a nossa equipe vai entrar em contato com urgência por aqui.\n\n' +
+      'Se puder, já escreva o que está acontecendo com a criança: a pessoa que ' +
+      'assumir o atendimento lê tudo antes de responder.\n\n' +
+      'Se for uma emergência com risco de vida, procure o pronto-socorro mais próximo ou ligue 192.',
+    atencao: 'urgencia',
   }
 }
 
@@ -904,7 +1103,8 @@ async function perguntarHorario(
   diaEscolhido: string,
 ): Promise<Resultado> {
   const timezone = await fusoDaClinica(admin, clinicId)
-  const { horarios, falhou } = await horariosLivres(admin, unitId)
+  const { horarios, falhou } = await horariosLivres(admin, clinicId, unitId)
+  const tele = unitId === TELE_ID
 
   if (falhou) {
     await limparEstado(admin, conversationId)
@@ -918,16 +1118,12 @@ async function perguntarHorario(
   if (doDia.length === 0) {
     // Alguem ocupou o dia inteiro entre a listagem e a escolha. Volta um passo
     // em vez de encerrar.
-    const { data: unidade } = await admin
-      .from('clinic_units')
-      .select('id,name,address')
-      .eq('id', unitId)
-      .maybeSingle()
+    const unidade = await unidadePorId(admin, unitId)
     if (!unidade) {
       await limparEstado(admin, conversationId)
       return { resposta: AVISO_FALHA, atencao: 'falha' }
     }
-    return await perguntarDia(admin, clinicId, conversationId, unidade as Unidade)
+    return await perguntarDia(admin, clinicId, conversationId, unidade)
   }
 
   const linhas = doDia.map((h, i) => `*${i + 1}* ${formatarHora(h.inicio, timezone)}`).join('\n')
@@ -935,7 +1131,8 @@ async function perguntarHorario(
   await salvarEstado(admin, conversationId, {
     booking_state: 'aguardando_horario',
     booking_options: doDia,
-    booking_unit_id: unitId,
+    booking_unit_id: tele ? null : unitId,
+    booking_modality: tele ? 'telemedicina' : 'presencial',
   })
 
   return {
@@ -975,11 +1172,19 @@ async function marcar(
   /** Consulta antiga a cancelar assim que a nova entrar (remarcacao). */
   substitui: string | null = null,
 ): Promise<Resultado> {
-  const { data: unidade } = await admin
-    .from('clinic_units')
-    .select('name,address')
-    .eq('id', unitId)
-    .maybeSingle()
+  // Telemedicina: a consulta e gravada na unidade fisica que cedeu o horario -
+  // e o mesmo medico, no mesmo dia, entao o horario nao pode ficar livre la.
+  // O que muda e a modalidade.
+  const tele = unitId === TELE_ID
+  const unidadeDoHorario = tele ? slot.unitId ?? null : unitId
+  if (!unidadeDoHorario) {
+    await voltarAoMenuAtivo(admin, conversationId)
+    return {
+      resposta:
+        'Não consegui identificar a unidade desse horário. Digite *2* para ver os horários de novo, ou *0* para o início.',
+    }
+  }
+  const unidade = await unidadePorId(admin, unidadeDoHorario)
   const timezone = await fusoDaClinica(admin, clinicId)
 
 
@@ -998,7 +1203,8 @@ async function marcar(
 
   const { data: criada, error } = await admin.from('appointments').insert({
     clinic_id: clinicId,
-    unit_id: unitId,
+    unit_id: unidadeDoHorario,
+    modality: tele ? 'telemedicina' : 'presencial',
     patient_id: paciente?.id ?? null,
     starts_at: slot.inicio,
     ends_at: slot.fim,
@@ -1057,7 +1263,11 @@ async function marcar(
   if (substitui) remarcou = await cancelarConsulta(admin, substitui)
 
   const quando = formatarData(slot.inicio, timezone)
-  const onde = `${unidade?.name ?? 'nossa unidade'}${unidade?.address ? `\n${unidade.address}` : ''}`
+  // Na telemedicina o endereco nao interessa; o que a pessoa precisa saber e
+  // que a consulta e por video e que o link chega por aqui.
+  const onde = tele
+    ? 'Telemedicina, por vídeo. O link da consulta chega aqui pelo WhatsApp antes do horário.'
+    : `${unidade?.name ?? 'nossa unidade'}${unidade?.address ? `\n${unidade.address}` : ''}`
   const aviso = remarcou ? '*Consulta remarcada!*' : '*Consulta marcada!*'
 
   // Esta mensagem e um comprovante, e nao uma etapa: e ela que a pessoa vai
@@ -1074,7 +1284,7 @@ async function marcar(
   // Numa remarcacao nao se pergunta nada: os dados ja vieram na primeira vez.
   const faltam = substitui ? [] : camposQueFaltam(paciente)
   const comprovante =
-    `✅ ${aviso}\n\n🗓️ ${quando}\n📍 ${onde}\n\n` +
+    `✅ ${aviso}\n\n🗓️ ${quando}\n${tele ? "💻" : "📍"} ${onde}\n\n` +
     '*Um dia antes da consulta enviamos uma mensagem aqui pelo WhatsApp para ' +
     'você confirmar sua presença.*'
 
@@ -1309,7 +1519,7 @@ async function terminarDados(
     try {
       const { data: consulta } = await admin
         .from('appointments')
-        .select('starts_at,clinic_units(name,address)')
+        .select('starts_at,modality,clinic_units(name,address)')
         .eq('id', appointmentId)
         .maybeSingle()
       if (consulta) {
@@ -1317,9 +1527,12 @@ async function terminarDados(
           ? consulta.clinic_units[0]
           : consulta.clinic_units) as { name?: string; address?: string } | null
         const timezone = await fusoDaClinica(admin, clinicId)
-        const onde = `${unidade?.name ?? 'nossa unidade'}${unidade?.address ? `\n${unidade.address}` : ''}`
+        const tele = consulta.modality === 'telemedicina'
+        const onde = tele
+          ? 'Telemedicina, por vídeo. O link da consulta chega aqui pelo WhatsApp antes do horário.'
+          : `${unidade?.name ?? 'nossa unidade'}${unidade?.address ? `\n${unidade.address}` : ''}`
         comprovante =
-          `✅ *Consulta marcada!*\n\n🗓️ ${formatarData(consulta.starts_at, timezone)}\n📍 ${onde}\n\n` +
+          `✅ *Consulta marcada!*\n\n🗓️ ${formatarData(consulta.starts_at, timezone)}\n${tele ? '💻' : '📍'} ${onde}\n\n` +
           '*Um dia antes da consulta enviamos uma mensagem aqui pelo WhatsApp para ' +
           'você confirmar sua presença.*\n\n'
       }
@@ -1440,6 +1653,8 @@ export async function tratarConversa(opcoes: {
   estadoAtual: Estado | null
   opcoesAtuais: unknown
   unidadeEmAndamento: string | null
+  /** 'telemedicina' quando a pessoa escolheu atendimento por video. */
+  modalidadeEmAndamento?: Modalidade | null
   /**
    * Falso quando o robo nao deve puxar assunto: a pessoa esta respondendo um
    * acompanhamento, ou alguem da equipe escreveu ha pouco e a conversa e
@@ -1466,6 +1681,12 @@ export async function tratarConversa(opcoes: {
   textos: { saudacao: string; saudacaoConhecida: string; informacoes: string }
 }): Promise<Resultado> {
   const { admin, clinicId, conversationId, estadoAtual, texto } = opcoes
+
+  // A telemedicina nao tem id de unidade no banco; a modalidade e que diz que
+  // a pessoa esta nesse caminho. Daqui para baixo as etapas so olham para
+  // esta variavel, e nunca para a coluna crua.
+  const unidadeEmAndamento =
+    opcoes.modalidadeEmAndamento === 'telemedicina' ? TELE_ID : opcoes.unidadeEmAndamento
 
   // Chamar pelo nome so quando ha um paciente neste telefone. Com dois irmaos
   // cadastrados, usar o nome de um deles seria adivinhar - e adivinhar errado
@@ -1617,31 +1838,7 @@ export async function tratarConversa(opcoes: {
     const escolhido = escolha(texto, 4)
 
     if (escolhido === 0) {
-      const informacoes = opcoes.textos.informacoes.trim()
-      if (!informacoes) {
-        return await mostrarMenu(admin, conversationId, saudacao)
-      }
-      // Segue em 'menu': assim a pessoa le os valores e responde 2 na hora.
-      await salvarEstado(admin, conversationId, { booking_state: 'menu' })
-      return {
-        resposta:
-          `${informacoes}\n\n` +
-          // Curta de proposito: o texto de informacoes ja explica o 2 e o 3 no
-          // meio das frases, com contexto. Repetir os tres numeros aqui embaixo
-          // criava duas linhas de instrucao coladas dizendo quase a mesma coisa.
-          'Digite *2* para agendar ou *0* para ver todas as opções.',
-        // Esta tela respondia e deixava a pessoa sem botao, no meio de um fluxo
-        // em que todas as outras tem. Quem acabou de ler o preco e o horario e
-        // exatamente quem esta pronto para marcar.
-        lista: {
-          rotulo: 'Ver opções',
-          linhas: [
-            { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
-            { id: '9', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
-            { id: '0', titulo: 'Voltar ao menu' },
-          ],
-        },
-      }
+      return await perguntarLocalDasInformacoes(admin, clinicId, conversationId, opcoes.textos.informacoes)
     }
 
     if (escolhido === 1) {
@@ -1675,6 +1872,20 @@ export async function tratarConversa(opcoes: {
       saudacao,
       'Não entendi. Responda com o número da opção:',
     )
+  }
+
+  // ---- Informacoes: de qual unidade? ----
+  if (estadoAtual === 'informacoes_unidade') {
+    const ids = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
+    const indice = escolha(texto, ids.length)
+    if (indice === null) {
+      if (pediuVoltar(texto)) return await mostrarMenu(admin, conversationId, saudacao)
+      return {
+        resposta:
+          'Não entendi. Responda com o número da unidade da lista acima.\n\n' + VOLTA,
+      }
+    }
+    return await responderInformacoes(admin, clinicId, conversationId, ids[indice], opcoes.textos.informacoes)
   }
 
   // ---- Minha consulta ----
@@ -1829,7 +2040,7 @@ export async function tratarConversa(opcoes: {
       }
     }
 
-    const unidades = await unidadesAtivas(admin, clinicId)
+    const unidades = await opcoesDeAtendimento(admin, clinicId)
     const escolhida = unidades.find((u) => u.id === ids[indice])
     if (!escolhida) {
       return await mostrarMenu(
@@ -1846,6 +2057,12 @@ export async function tratarConversa(opcoes: {
   if (estadoAtual === 'aguardando_dia') {
     if (pediuVoltar(texto)) {
       return await perguntarUnidade(admin, clinicId, conversationId)
+    }
+
+    // So na telemedicina existe a saida de urgencia. Vale tocada na lista
+    // ("URGENCIA") ou escrita de qualquer jeito: "urgente", "é urgência".
+    if (unidadeEmAndamento === TELE_ID && /urg/.test(normalizar(texto))) {
+      return await transferirUrgencia(admin, conversationId)
     }
 
     const dias = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
@@ -1868,7 +2085,7 @@ export async function tratarConversa(opcoes: {
           'Digite VOLTAR para escolher outra unidade, ou 0 para o início.',
       }
     }
-    if (!opcoes.unidadeEmAndamento) {
+    if (!unidadeEmAndamento) {
       return await mostrarMenu(
         admin,
         conversationId,
@@ -1880,7 +2097,7 @@ export async function tratarConversa(opcoes: {
       admin,
       clinicId,
       conversationId,
-      opcoes.unidadeEmAndamento,
+      unidadeEmAndamento,
       dias[indice],
     )
   }
@@ -1888,16 +2105,12 @@ export async function tratarConversa(opcoes: {
   // ---- Escolha do horario ----
   if (estadoAtual === 'aguardando_horario') {
     if (pediuVoltar(texto)) {
-      if (!opcoes.unidadeEmAndamento) {
+      if (!unidadeEmAndamento) {
         return await perguntarUnidade(admin, clinicId, conversationId)
       }
-      const { data: unidade } = await admin
-        .from('clinic_units')
-        .select('id,name,address')
-        .eq('id', opcoes.unidadeEmAndamento)
-        .maybeSingle()
+      const unidade = await unidadePorId(admin, unidadeEmAndamento)
       if (!unidade) return await perguntarUnidade(admin, clinicId, conversationId)
-      return await perguntarDia(admin, clinicId, conversationId, unidade as Unidade)
+      return await perguntarDia(admin, clinicId, conversationId, unidade)
     }
 
     const lista = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as Horario[]) : []
@@ -1913,11 +2126,11 @@ export async function tratarConversa(opcoes: {
       })
 
       if (daHora.length === 1) {
-        if (!opcoes.unidadeEmAndamento) {
+        if (!unidadeEmAndamento) {
           return await mostrarMenu(admin, conversationId, saudacao, 'Perdi o fio da conversa, desculpe. Vamos recomeçar:')
         }
         return await marcar(
-          admin, clinicId, conversationId, opcoes.unidadeEmAndamento,
+          admin, clinicId, conversationId, unidadeEmAndamento,
           pacienteDaConsulta, opcoes.telefone, opcoes.nomeDoPerfil, daHora[0],
           opcoes.consultaASubstituir,
         )
@@ -1953,7 +2166,7 @@ export async function tratarConversa(opcoes: {
           'Digite VOLTAR para escolher outro dia, ou 0 para o início.',
       }
     }
-    if (!opcoes.unidadeEmAndamento) {
+    if (!unidadeEmAndamento) {
       return await mostrarMenu(
         admin,
         conversationId,
@@ -1965,7 +2178,7 @@ export async function tratarConversa(opcoes: {
       admin,
       clinicId,
       conversationId,
-      opcoes.unidadeEmAndamento,
+      unidadeEmAndamento,
       pacienteDaConsulta,
       opcoes.telefone,
       opcoes.nomeDoPerfil,

@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
 
       const { data: consultas, error: consultasError } = await admin
         .from('appointments')
-        .select('id,patient_id,starts_at,unit_id,contact_name,contact_phone,clinic_units(name),' +
+        .select('id,patient_id,starts_at,unit_id,modality,contact_name,contact_phone,clinic_units(name),' +
           'intake_patient_name,intake_birth_date,intake_guardian,intake_cpf,intake_email')
         .eq('clinic_id', clinica.clinic_id)
         .eq('status', 'scheduled')
@@ -201,7 +201,12 @@ Deno.serve(async (req) => {
           continue
         }
         const { dataBR, hora } = formatarDataHora(consulta.starts_at, clinica.timezone)
-        const unidade = (consulta.clinic_units as { name?: string } | null)?.name || 'a clínica'
+        // Na telemedicina o lembrete diz "por vídeo", e nao o nome da unidade
+        // que cedeu o horario - senao a familia sai de casa para uma consulta
+        // que era online.
+        const unidade = consulta.modality === 'telemedicina'
+          ? 'telemedicina (por vídeo)'
+          : (consulta.clinic_units as { name?: string } | null)?.name || 'a clínica'
 
         const { data: conversa, error: conversaError } = await admin
           .from('whatsapp_conversations')
