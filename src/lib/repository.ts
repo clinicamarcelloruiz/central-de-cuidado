@@ -986,6 +986,17 @@ export async function cancelAppointment(
   return data as ResultadoDoCancelamento
 }
 
+/*
+ * Sem tela desde 11/09/2026.
+ *
+ * O bloco "Canceladas sem aviso" saiu da Agenda: o aviso falhava por um erro
+ * de busca da conversa, e não por acaso - corrigido o erro, a lista virou um
+ * alarme que só tocava para cancelamentos em que a clínica escolheu não avisar.
+ * As duas funções abaixo ficam de pé porque o servidor ainda sabe reenviar
+ * (appointment-cancel com apenasAvisar) e trazer a lista de volta é uma tela,
+ * não um sistema.
+ */
+
 /** Uma consulta já cancelada em que o paciente ficou sem saber. */
 export interface CancelamentoSemAviso {
   id: string

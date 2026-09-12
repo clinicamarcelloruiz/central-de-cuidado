@@ -298,12 +298,20 @@ Deno.serve(async (req) => {
     // Da MESMA unidade de proposito: quem marcou em Santos nao quer sugestao de
     // Ibirapuera. E so tres, porque a mensagem chega junto com uma ma noticia e
     // uma lista longa ali vira ruido.
+    //
+    // Sugerir e escolha explicita de quem cancela: sem o pedido, a mensagem
+    // apenas avisa. Oferecer data nova por conta propria transforma "sua
+    // consulta foi cancelada" numa proposta que ninguem fez.
     let sugestoes: Horario[] = []
-    if (!porModelo && corpo.sugerirDatas !== false && consulta.unit_id) {
+    if (!porModelo && corpo.sugerirDatas === true && consulta.unit_id) {
       await admin.rpc('liberar_reservas_vencidas')
       const { data: livres } = await admin.rpc('available_slots', { p_unit_id: consulta.unit_id })
       sugestoes = ((livres ?? []) as { slot_start: string; slot_end: string }[])
         .map((h) => ({ inicio: h.slot_start, fim: h.slot_end }))
+        // Fora o horario que acabou de ser cancelado: ele voltou a ficar livre
+        // no mesmo segundo, e reoferecer a vaga que a clinica acabou de
+        // desmarcar e o tipo de coisa que faz a familia duvidar do aviso.
+        .filter((h) => h.inicio !== consulta.starts_at)
         .slice(0, 3)
     }
 
