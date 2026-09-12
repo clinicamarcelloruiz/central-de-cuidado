@@ -213,6 +213,28 @@ export default function Conversations({
     return () => window.clearInterval(timer)
   }, [])
 
+  /**
+   * Toda conversa abre onde ela está: no fim.
+   *
+   * Antes abria no topo, na primeira mensagem - que numa conversa de semanas
+   * atrás é o "olá" do robô. O que acabou de acontecer (a resposta do paciente,
+   * o aviso de cancelamento que a equipe mandou) ficava fora da tela, e dava a
+   * impressão de que a mensagem não tinha sido enviada. O botão "Ir para o fim"
+   * existia justamente porque isto faltava.
+   *
+   * Na primeira vez o salto é seco; depois, com a conversa já aberta, mensagem
+   * nova desce suave, como no aplicativo.
+   */
+  useEffect(() => {
+    if (!selectedId || loadingMessages || messages.length === 0) return
+    const primeiraVez = conversaRolada.current !== selectedId
+    conversaRolada.current = selectedId
+    fimDasMensagens.current?.scrollIntoView({
+      behavior: primeiraVez ? 'auto' : 'smooth',
+      block: 'end',
+    })
+  }, [selectedId, messages, loadingMessages])
+
   const janelaAberta = janelaAte !== null && new Date(janelaAte).getTime() > agora
 
   // A assinatura de tempo real e criada uma vez so. Sem estas refs ela ficaria
@@ -221,6 +243,9 @@ export default function Conversations({
   const selectedIdRef = useRef<string | null>(null)
   // Fim da lista de mensagens. O botao de descer rola ate ele.
   const fimDasMensagens = useRef<HTMLDivElement>(null)
+  // Qual conversa ja foi posicionada no fim. Sem isto, cada mensagem nova
+  // rolaria a tela de novo enquanto alguem le algo mais acima.
+  const conversaRolada = useRef<string | null>(null)
   const [resumo, setResumo] = useState<ResumoDoPaciente | null>(null)
   selectedIdRef.current = selectedId
 
@@ -307,11 +332,10 @@ export default function Conversations({
     setLoadingMessages(true)
     setResposta('')
     setJanelaAte(null)
-    // No celular a conversa substitui a lista, e a pagina pode estar rolada na
-    // altura do nome que a pessoa tocou. Sem isto, a conversa abre no meio.
-    if (window.matchMedia('(max-width: 1023px)').matches) {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-    }
+    // Quem posiciona a tela é o efeito que rola até a última mensagem, logo
+    // que ela carrega. Aqui só zeramos a marca, para que a conversa que abre
+    // seja tratada como primeira vez e dê o salto seco em vez do suave.
+    conversaRolada.current = null
     try {
       const [historico, janela] = await Promise.all([
         listConversationMessages(conversation.id),
