@@ -986,6 +986,80 @@ export async function cancelAppointment(
   return data as ResultadoDoCancelamento
 }
 
+/** Uma consulta já cancelada em que o paciente ficou sem saber. */
+export interface CancelamentoSemAviso {
+  id: string
+  quando: string
+  paciente: string
+  unidade: string
+  motivo: string
+}
+
+/**
+ * Cancelamentos recentes que ninguém soube.
+ *
+ * O aviso pode falhar por muita coisa: a Meta fora do ar, o modelo ainda não
+ * aprovado, a equipe escolhendo "não avisar" para ligar e esquecendo depois.
+ * Quando falha, a família continua achando que tem consulta marcada - e
+ * aparece na unidade, com a criança, no dia.
+ *
+ * Sete dias porque depois disso a consulta já passou e ligar é o certo, não
+ * mandar mensagem sobre um horário que ficou para trás.
+ */
+export async function listCancelamentosSemAviso(clinicId: string): Promise<CancelamentoSemAviso[]> {
+  const desde = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+  const { data, error } = await tabelaCrua('appointments')
+    .select('id,starts_at,contact_name,patient_id,cancellation_reason,cancelled_at,clinic_units(name)')
+    .eq('clinic_id', clinicId)
+    .eq('status', 'cancelled')
+    .is('cancellation_notified_at', null)
+    .gte('cancelled_at', desde)
+    .order('cancelled_at', { ascending: false })
+
+  // Lista de apoio: se falhar, a agenda continua inteira.
+  if (error) return []
+
+  type Linha = {
+    id: string
+    starts_at: string
+    contact_name: string | null
+    patient_id: string | null
+    cancellation_reason: string | null
+    clinic_units: { name?: string } | { name?: string }[] | null
+  }
+  const linhas = (data ?? []) as Linha[]
+
+  // O nome do cadastro vale mais do que o do contato, quando existe.
+  const ids = [...new Set(linhas.map((l) => l.patient_id).filter(Boolean))] as string[]
+  const { data: pacientes } = ids.length
+    ? await supabase.from('patients').select('id,name').in('id', ids)
+    : { data: [] }
+  const nomePorId = new Map((pacientes ?? []).map((p) => [p.id, p.name]))
+
+  return linhas.map((linha) => {
+    const unidade = Array.isArray(linha.clinic_units) ? linha.clinic_units[0] : linha.clinic_units
+    return {
+      id: linha.id,
+      quando: linha.starts_at,
+      paciente:
+        (linha.patient_id && nomePorId.get(linha.patient_id)) ||
+        linha.contact_name ||
+        'Contato sem cadastro',
+      unidade: unidade?.name ?? '',
+      motivo: linha.cancellation_reason ?? '',
+    }
+  })
+}
+
+/** Reenvia o aviso de uma consulta que já está cancelada. */
+export async function avisarCancelamento(appointmentId: string) {
+  const { data, error } = await supabase.functions.invoke('appointment-cancel', {
+    body: { appointmentId, apenasAvisar: true },
+  })
+  if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível enviar o aviso.'))
+  return data as ResultadoDoCancelamento
+}
+
 export interface ResumoDoPaciente {
   /** Mensagens que o paciente mandou, em todas as conversas. */
   contatos: number
@@ -1881,6 +1955,10 @@ export interface Receita {
 type ConsultaCrua = {
   select: (colunas: string) => ConsultaCrua
   eq: (coluna: string, valor: string) => ConsultaCrua
+  /** Coluna vazia: `is('cancellation_notified_at', null)` é "nunca avisado". */
+  is: (coluna: string, valor: null) => ConsultaCrua
+  /** Maior ou igual, para recortes de data. */
+  gte: (coluna: string, valor: string) => ConsultaCrua
   order: (
     coluna: string,
     opcoes: { ascending: boolean },

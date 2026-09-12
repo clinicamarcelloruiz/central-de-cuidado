@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Ajuda } from '@/components/Ajuda'
 import {
   AlertTriangle,
+  BellOff,
   Building2,
   Check,
   CalendarOff,
@@ -10,6 +11,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Send,
   Video,
   Settings2,
   Trash2,
@@ -18,7 +20,10 @@ import {
 } from 'lucide-react'
 import {
   archiveUnit,
+  avisarCancelamento,
   cancelAppointment,
+  listCancelamentosSemAviso,
+  type CancelamentoSemAviso,
   MOTIVOS_DE_CANCELAMENTO,
   type ResultadoDoCancelamento,
   createAppointment,
@@ -344,6 +349,10 @@ export default function Agenda({
   })
   const [slots, setSlots] = useState<string[]>([])
   const [appointments, setAppointments] = useState<Appointment[]>([])
+  // Canceladas em que o paciente ficou sem saber. Some da lista assim que o
+  // aviso sai - é tarefa, não histórico.
+  const [semAviso, setSemAviso] = useState<CancelamentoSemAviso[]>([])
+  const [avisando, setAvisando] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
@@ -411,12 +420,22 @@ export default function Agenda({
     }
   }, [clinicId, unitId])
 
+  // Cancelamentos que ninguém soube. Não depende da unidade escolhida: a
+  // pendência é da clínica, e esconder atrás do seletor seria esconder.
+  const carregarPendentes = useCallback(async () => {
+    if (!clinicId) return setSemAviso([])
+    setSemAviso(await listCancelamentosSemAviso(clinicId))
+  }, [clinicId])
+
   useEffect(() => {
     void carregarBase()
   }, [carregarBase])
   useEffect(() => {
     void carregarUnidade()
   }, [carregarUnidade])
+  useEffect(() => {
+    void carregarPendentes()
+  }, [carregarPendentes])
 
   const dias = useMemo(() => {
     const limite = new Date()
@@ -495,6 +514,46 @@ export default function Agenda({
    * segue confirmada do mesmo jeito e a tela diz que o aviso nao saiu. Deixar
    * a confirmacao presa a um envio seria pior.
    */
+  /** "segunda, 14/09 às 15:00" - o mesmo formato do comprovante do paciente. */
+  function fmtDataHora(iso: string) {
+    return new Date(iso)
+      .toLocaleString('pt-BR', {
+        weekday: 'long',
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      .replace('-feira', '')
+  }
+
+  /**
+   * Reenvia o aviso de uma consulta que já está cancelada.
+   *
+   * Some da lista só quando o aviso chega de verdade. Se falhar de novo, a
+   * pendência continua ali com o motivo escrito - esconder a tarefa porque
+   * alguém clicou seria pior do que não ter o botão.
+   */
+  async function avisarAgora(item: CancelamentoSemAviso) {
+    setAvisando(item.id)
+    setError('')
+    try {
+      const resultado = await avisarCancelamento(item.id)
+      if (resultado.avisado) {
+        setAviso(`${item.paciente} foi avisada do cancelamento pelo WhatsApp.`)
+        await carregarPendentes()
+      } else {
+        setError(
+          `Não consegui avisar ${item.paciente}: ${resultado.motivoDoSilencio ?? 'motivo desconhecido'}`,
+        )
+      }
+    } catch (causa) {
+      setError(causa instanceof Error ? causa.message : 'Não foi possível enviar o aviso.')
+    } finally {
+      setAvisando(null)
+    }
+  }
+
   async function confirmarEAvisar(appointmentId: string) {
     if (!clinicId) return
     await acao(
@@ -557,6 +616,9 @@ export default function Agenda({
             setCancelando(null)
             void carregarBase()
             void carregarUnidade()
+            // Se o aviso falhou, a consulta acabou de virar pendência: a lista
+            // precisa saber disso agora, e não no próximo acesso à tela.
+            void carregarPendentes()
             onSolicitacoesMudaram?.()
           }}
           onCancelar={(motivo, avisar, sugerir) =>
@@ -574,6 +636,48 @@ export default function Agenda({
         <div className="rounded-[16px] border border-[#3fa88a]/30 bg-[#eef7f4] p-3 text-[11px] font-bold text-[#2f6f5e]">
           {aviso}
         </div>
+      )}
+
+      {/* Cancelada sem aviso: a família acha que tem consulta marcada e vai
+          aparecer na unidade, com a criança, no dia. É a pendência mais cara da
+          agenda, então fica acima de tudo - e some sozinha quando resolvida. */}
+      {semAviso.length > 0 && (
+        <section className="rounded-[22px] border border-[#f0a202]/40 bg-[#fffaf0] p-4">
+          <div className="flex items-center gap-2">
+            <BellOff className="h-4 w-4 text-[#a86a00]" />
+            <p className="text-[11px] font-extrabold uppercase tracking-wide text-[#a86a00]">
+              Canceladas sem aviso ({semAviso.length})
+            </p>
+          </div>
+          <p className="mt-1 text-[10px] font-semibold text-[#8a6520]">
+            Estas consultas foram canceladas e o paciente não soube. Enquanto ninguém avisar, a
+            família continua achando que tem horário marcado.
+          </p>
+          <div className="mt-3 space-y-2">
+            {semAviso.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-[14px] bg-white px-3.5 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-extrabold uppercase text-[#081b2c]">{item.paciente}</p>
+                  <p className="mt-0.5 text-[10px] font-semibold text-slate-500">
+                    {[fmtDataHora(item.quando), item.unidade, item.motivo].filter(Boolean).join(' · ')}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={avisando === item.id}
+                  onClick={() => void avisarAgora(item)}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#a86a00] px-3.5 py-2 text-[10px] font-extrabold text-white transition hover:bg-[#8a5600] disabled:cursor-wait disabled:opacity-60"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  {avisando === item.id ? 'Enviando...' : 'Avisar agora'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {units.length === 0 ? (

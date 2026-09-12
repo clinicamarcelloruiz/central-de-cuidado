@@ -1,4 +1,4 @@
-import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
+import { adminClient, corsHeaders, json, toBrazilE164, userClient } from '../_shared/whatsapp.ts'
 
 /**
  * Cancela uma consulta e avisa o paciente pelo WhatsApp.
@@ -32,6 +32,14 @@ type Pedido = {
    * noticia.
    */
   sugerirDatas?: boolean
+  /**
+   * So avisar: a consulta ja foi cancelada e o paciente ficou sem saber.
+   *
+   * Sem isto, a unica forma de reenviar seria cancelar de novo - o que a
+   * funcao recusa, e com razao. O aviso que falha na hora nao pode virar um
+   * beco sem saida: alguem tem de poder tentar outra vez.
+   */
+  apenasAvisar?: boolean
 }
 
 type Horario = { inicio: string; fim: string }
@@ -100,8 +108,14 @@ Deno.serve(async (req) => {
     const corpo = (await req.json()) as Pedido
     if (!corpo.appointmentId) return json({ error: 'Consulta não informada.' }, 400)
 
+    // Reenvio: a consulta ja esta cancelada e o que falta e avisar. Acontece
+    // quando o aviso falhou na hora - Meta fora do ar, modelo nao aprovado, ou
+    // o furo do telefone que existiu ate 11/09/2026 - e alguem precisa poder
+    // tentar de novo sem cancelar nada duas vezes.
+    const soAvisar = corpo.apenasAvisar === true
+
     const motivo = (corpo.motivo ?? '').trim()
-    if (!motivo) return json({ error: 'Escolha ou escreva o motivo.' }, 400)
+    if (!motivo && !soAvisar) return json({ error: 'Escolha ou escreva o motivo.' }, 400)
 
     const escopo = userClient(autorizacao)
     const admin = adminClient()
@@ -109,34 +123,45 @@ Deno.serve(async (req) => {
     // A RLS e a autorizacao: consulta de outra clinica nao aparece.
     const { data: consulta } = await escopo
       .from('appointments')
-      .select('id,clinic_id,patient_id,starts_at,status,unit_id')
+      .select(
+        'id,clinic_id,patient_id,starts_at,status,unit_id,contact_phone,contact_name,cancellation_reason',
+      )
       .eq('id', corpo.appointmentId)
       .maybeSingle()
 
     if (!consulta) return json({ error: 'Consulta não encontrada.', code: 'NOT_VISIBLE' }, 403)
-    if (consulta.status === 'cancelled') {
+    if (consulta.status === 'cancelled' && !soAvisar) {
       return json({ error: 'Esta consulta já estava cancelada.', code: 'JA_CANCELADA' }, 409)
+    }
+    if (soAvisar && consulta.status !== 'cancelled') {
+      return json({ error: 'Esta consulta não está cancelada.', code: 'NAO_CANCELADA' }, 409)
     }
 
     const { data: usuario } = await escopo.auth.getUser()
     const agora = new Date().toISOString()
 
+    // No reenvio o motivo e o que ja foi gravado no cancelamento: a familia
+    // precisa ler a mesma explicacao, e nao uma nova versao dos fatos.
+    const motivoFinal = soAvisar ? (consulta.cancellation_reason ?? '').trim() || 'imprevisto na agenda' : motivo
+
     // Primeiro cancela. O horario tem de ser liberado mesmo que o aviso falhe:
     // o pior resultado possivel seria uma vaga presa por causa da Meta.
-    const { error: erroCancelar } = await admin
-      .from('appointments')
-      .update({
-        status: 'cancelled',
-        cancelled_at: agora,
-        cancellation_reason: motivo.slice(0, 300),
-        cancelled_by: usuario?.user?.id ?? null,
-      })
-      .eq('id', consulta.id)
-      .neq('status', 'cancelled')
+    if (!soAvisar) {
+      const { error: erroCancelar } = await admin
+        .from('appointments')
+        .update({
+          status: 'cancelled',
+          cancelled_at: agora,
+          cancellation_reason: motivoFinal.slice(0, 300),
+          cancelled_by: usuario?.user?.id ?? null,
+        })
+        .eq('id', consulta.id)
+        .neq('status', 'cancelled')
 
-    if (erroCancelar) {
-      console.error('Falha ao cancelar', erroCancelar)
-      return json({ error: 'Não foi possível cancelar a consulta.' }, 500)
+      if (erroCancelar) {
+        console.error('Falha ao cancelar', erroCancelar)
+        return json({ error: 'Não foi possível cancelar a consulta.' }, 500)
+      }
     }
 
     if (corpo.avisarPaciente === false) {
@@ -145,20 +170,54 @@ Deno.serve(async (req) => {
 
     // ---- Aviso ao paciente ----
 
-    const { data: conversa } = await admin
-      .from('whatsapp_conversations')
-      .select('id,wa_id,status,profile_name')
-      .eq('clinic_id', consulta.clinic_id)
-      .eq('patient_id', consulta.patient_id)
-      .order('last_message_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+    /**
+     * A conversa desta pessoa, pelo cadastro OU pelo telefone.
+     *
+     * Procurar so pelo `patient_id` era um furo grande: quem marca sozinho pelo
+     * WhatsApp entra na agenda SEM cadastro, com o nome e o telefone que o robo
+     * coletou. Nessas consultas o `patient_id` e nulo, a busca nao achava nada,
+     * e a tela dizia "este paciente nunca conversou pelo WhatsApp da clinica" -
+     * justamente sobre quem tinha acabado de conversar para marcar. A consulta
+     * era cancelada e ninguem avisava a familia.
+     *
+     * O telefone e a chave que sempre existe: e por ele que a conversa e
+     * identificada no WhatsApp, com ou sem prontuario.
+     */
+    async function acharConversa() {
+      if (consulta.patient_id) {
+        const { data } = await admin
+          .from('whatsapp_conversations')
+          .select('id,wa_id,status,profile_name')
+          .eq('clinic_id', consulta.clinic_id)
+          .eq('patient_id', consulta.patient_id)
+          .order('last_message_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (data) return data
+      }
+
+      const telefone = (consulta.contact_phone ?? '').trim()
+      if (!telefone) return null
+      const { data } = await admin
+        .from('whatsapp_conversations')
+        .select('id,wa_id,status,profile_name')
+        .eq('clinic_id', consulta.clinic_id)
+        .eq('wa_id', toBrazilE164(telefone))
+        .order('last_message_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      return data
+    }
+
+    const conversa = await acharConversa()
 
     if (!conversa) {
       return json({
         ok: true,
         avisado: false,
-        motivoDoSilencio: 'Este paciente nunca conversou pelo WhatsApp da clínica.',
+        motivoDoSilencio: consulta.contact_phone
+          ? 'Não encontrei conversa no WhatsApp da clínica para este telefone.'
+          : 'Esta consulta não tem telefone nem cadastro, então não há para onde avisar.',
       })
     }
     if (conversa.status === 'opted_out') {
@@ -187,11 +246,9 @@ Deno.serve(async (req) => {
     // dias de antecedencia, quando o paciente nao escreve ha muito tempo.
     const porModelo = !dentroDaJanela
 
-    const { data: paciente } = await admin
-      .from('patients')
-      .select('name')
-      .eq('id', consulta.patient_id)
-      .maybeSingle()
+    const { data: paciente } = consulta.patient_id
+      ? await admin.from('patients').select('name').eq('id', consulta.patient_id).maybeSingle()
+      : { data: null }
 
     const { data: unidade } = consulta.unit_id
       ? await admin.from('clinic_units').select('name').eq('id', consulta.unit_id).maybeSingle()
@@ -230,7 +287,9 @@ Deno.serve(async (req) => {
       minute: '2-digit',
     }).replace('-feira', '')
 
-    const primeiroNome = (paciente?.name ?? conversa.profile_name ?? '')
+    // Sem cadastro, o nome que a familia deu ao marcar vale mais do que o
+    // apelido do WhatsApp - foi ele que a pessoa escreveu para a clinica.
+    const primeiroNome = (paciente?.name || consulta.contact_name || conversa.profile_name || '')
       .trim()
       .split(/\s+/)[0] ?? ''
 
@@ -252,7 +311,7 @@ Deno.serve(async (req) => {
       primeiroNome,
       quando,
       unidade?.name ?? null,
-      motivo,
+      motivoFinal,
       sugestoes,
       fuso,
     )
@@ -305,7 +364,7 @@ Deno.serve(async (req) => {
           parameters: [
             { type: 'text', text: (primeiroNome || 'tudo bem').slice(0, 60) },
             { type: 'text', text: quando.slice(0, 120) },
-            { type: 'text', text: motivo.slice(0, 200) },
+            { type: 'text', text: motivoFinal.slice(0, 200) },
           ],
         }],
       },
