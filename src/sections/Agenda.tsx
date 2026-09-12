@@ -5,6 +5,7 @@ import {
   BellOff,
   Building2,
   Check,
+  ChevronDown,
   CalendarOff,
   CalendarPlus,
   Clock,
@@ -353,6 +354,9 @@ export default function Agenda({
   // aviso sai - é tarefa, não histórico.
   const [semAviso, setSemAviso] = useState<CancelamentoSemAviso[]>([])
   const [avisando, setAvisando] = useState<string | null>(null)
+  // Fechado por padrão: é um aviso, não uma lista para percorrer. Aberto de
+  // cara, dezenove linhas empurravam a agenda inteira para fora da tela.
+  const [pendentesAbertas, setPendentesAbertas] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
@@ -643,18 +647,40 @@ export default function Agenda({
           agenda, então fica acima de tudo - e some sozinha quando resolvida. */}
       {semAviso.length > 0 && (
         <section className="rounded-[22px] border border-[#f0a202]/40 bg-[#fffaf0] p-4">
-          <div className="flex items-center gap-2">
-            <BellOff className="h-4 w-4 text-[#a86a00]" />
-            <p className="text-[11px] font-extrabold uppercase tracking-wide text-[#a86a00]">
+          <button
+            type="button"
+            onClick={() => setPendentesAbertas((antes) => !antes)}
+            className="flex w-full items-center gap-2 text-left"
+          >
+            <BellOff className="h-4 w-4 shrink-0 text-[#a86a00]" />
+            <span className="flex-1 text-[11px] font-extrabold uppercase tracking-wide text-[#a86a00]">
               Canceladas sem aviso ({semAviso.length})
+            </span>
+            <span className="text-[10px] font-extrabold text-[#a86a00]">
+              {pendentesAbertas ? 'Fechar' : 'Ver'}
+            </span>
+            <ChevronDown
+              className={`h-4 w-4 shrink-0 text-[#a86a00] transition-transform ${
+                pendentesAbertas ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
+          {!pendentesAbertas && (
+            <p className="mt-1 pl-6 text-[10px] font-semibold text-[#8a6520]">
+              A família continua achando que tem horário marcado. Toque para ver e avisar.
             </p>
-          </div>
+          )}
+
+          {pendentesAbertas && (
+          <>
           <p className="mt-1 text-[10px] font-semibold text-[#8a6520]">
             Estas consultas foram canceladas e o paciente não soube. Enquanto ninguém avisar, a
             família continua achando que tem horário marcado.
           </p>
           <div className="mt-3 space-y-2">
-            {semAviso.map((item) => (
+            {/* Só as cinco mais recentes. Cancelamento antigo se resolve por
+                telefone, não por uma lista que ninguém termina de ler. */}
+            {semAviso.slice(0, 5).map((item) => (
               <div
                 key={item.id}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-[14px] bg-white px-3.5 py-2.5"
@@ -677,6 +703,15 @@ export default function Agenda({
               </div>
             ))}
           </div>
+          {semAviso.length > 5 && (
+            <p className="mt-2 text-[10px] font-semibold text-[#8a6520]">
+              E mais {semAviso.length - 5}{' '}
+              {semAviso.length - 5 === 1 ? 'cancelamento mais antigo' : 'cancelamentos mais antigos'}.
+              Conforme você for avisando, os próximos aparecem aqui.
+            </p>
+          )}
+          </>
+          )}
         </section>
       )}
 
