@@ -336,6 +336,9 @@ Deno.serve(async (req) => {
           booking_options: sugestoes,
           booking_unit_id: consulta.unit_id,
           booking_patient_id: consulta.patient_id,
+          // Carimbo obrigatorio: a etapa expira 24h depois desta data. Sem ele
+          // a conversa nasceria vencida e o toque do paciente cairia no menu.
+          booking_updated_at: new Date().toISOString(),
         })
         .eq('id', conversa.id)
     } else {
@@ -351,6 +354,7 @@ Deno.serve(async (req) => {
           booking_unit_id: null,
           booking_patient_id: consulta.patient_id,
           booking_replaces_id: null,
+          booking_updated_at: new Date().toISOString(),
         })
         .eq('id', conversa.id)
     }

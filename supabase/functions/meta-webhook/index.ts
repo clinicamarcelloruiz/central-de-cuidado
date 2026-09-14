@@ -196,15 +196,45 @@ Deno.serve(async (req) => {
 
           // Estado da conversa ANTES de gravar esta mensagem. E o que diz se a
           // pessoa e nova: depois do upsert a linha ja existe sempre.
-          const { data: conversaAnterior } = await admin
+          const { data: linhaAnterior } = await admin
             .from('whatsapp_conversations')
             .select(
               'id,booking_state,booking_options,booking_unit_id,booking_patient_id,' +
-                'booking_replaces_id,booking_intake_id,booking_modality,needs_attention,profile_name',
+                'booking_replaces_id,booking_intake_id,booking_modality,needs_attention,' +
+                'profile_name,booking_updated_at',
             )
             .eq('clinic_id', clinicId)
             .eq('wa_id', waId)
             .maybeSingle()
+
+          // Etapa vencida: depois de 24h parada, a conversa recomeca do zero.
+          //
+          // A varredura de hora em hora (liberar_conversas_travadas) limpa o
+          // banco e a tela, mas ela roda no minuto 10. Sem esta conferencia,
+          // quem escrevesse 24h05 depois cairia na etapa velha ate a hora
+          // cheia seguinte - o robo cobrando o CPF de um agendamento que a
+          // pessoa ja esqueceu, ou calado porque a equipe "assumiu" ontem.
+          //
+          // 24h e a janela da Meta: passou dela, a sessao anterior acabou de
+          // verdade e esta mensagem inaugura outra.
+          const carimbo = linhaAnterior?.booking_updated_at as string | null | undefined
+          const etapaVenceu = Boolean(
+            linhaAnterior?.booking_state &&
+              (!carimbo || Date.now() - new Date(carimbo).getTime() > 24 * 60 * 60 * 1000),
+          )
+          const conversaAnterior =
+            linhaAnterior && etapaVenceu
+              ? {
+                  ...linhaAnterior,
+                  booking_state: null,
+                  booking_options: null,
+                  booking_unit_id: null,
+                  booking_patient_id: null,
+                  booking_replaces_id: null,
+                  booking_intake_id: null,
+                  booking_modality: null,
+                }
+              : linhaAnterior
 
           // A ultima coisa que NOS mandamos foi um lembrete de consulta ou um
           // acompanhamento? So nesse caso "1", "2" e "3" significam confirmar,
@@ -476,7 +506,12 @@ Deno.serve(async (req) => {
               if (pediuAjuda) {
                 await admin
                   .from('whatsapp_conversations')
-                  .update({ booking_state: 'atendente', booking_options: null })
+                  .update({
+                    booking_state: 'atendente',
+                    booking_options: null,
+                    // Sem o carimbo a espera pela equipe ja nasceria vencida.
+                    booking_updated_at: new Date().toISOString(),
+                  })
                   .eq('id', conversation.id)
               }
             }
