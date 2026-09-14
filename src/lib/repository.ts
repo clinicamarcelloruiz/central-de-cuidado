@@ -1333,6 +1333,9 @@ export async function resetConversationBot(conversationId: string) {
       // Zerar tambem o menu_sent_at faz o robo poder recomecar na hora, sem
       // esperar o intervalo que evita repetir o menu.
       menu_sent_at: null,
+      // E a contagem de respostas prontas dadas na espera pela equipe: soltar o
+      // robo com o limite ja estourado seria soltar pela metade.
+      ...({ auto_replies_while_waiting: 0 } as Record<string, unknown>),
       needs_attention: false,
       attention_reason: null,
     })
