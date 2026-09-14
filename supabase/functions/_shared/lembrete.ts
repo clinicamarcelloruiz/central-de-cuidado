@@ -73,24 +73,45 @@ export function equipeFalouRecentemente(
 export function interpretarResposta(escolhido: string, dentroDaJanela: boolean): Resposta {
   const r = normalizarResposta(escolhido)
 
-  // Palavra sozinha ou numero do botao: o paciente responde dos dois jeitos, e
-  // o numero so vale dentro da janela para nao roubar as opcoes do menu.
-  const confirma = dentroDaJanela && (r === 'confirmar' || r === 'confirmo' || r === '1')
-  const remarca =
-    dentroDaJanela &&
-    (r === 'reagendar' || r === 'remarcar' || r === 'reagendar consulta' || r === '2')
-  const cancela =
-    dentroDaJanela && (r === 'cancelar' || r === 'cancelo' || r === 'cancelar consulta' || r === '3')
+  // Palavra CONTIDA na resposta, e nao a resposta inteira.
+  //
+  // Ate 14/09/2026 a comparacao era exata: valia "confirmar", nao valia
+  // "confirmar presenca". Isso amarrava o sistema ao rotulo do botao aprovado na
+  // Meta - e o rotulo mora la, nao aqui. Um botao escrito "Confirmar presenca"
+  // devolvia exatamente esse texto, nao batia com nada, e a consulta nao era
+  // confirmada. Sem erro na tela, sem registro: o paciente tocava em confirmar e
+  // para a clinica era como se ele nao tivesse respondido.
+  //
+  // Com "contem", o mesmo codigo entende o botao curto, o botao longo e a pessoa
+  // que digitou "quero confirmar minha consulta". Trocar o texto do botao na
+  // Meta deixa de ser uma mudanca que quebra o sistema em silencio.
+  const tem = (...palavras: string[]) => palavras.some((p) => r.includes(p))
 
-  const pediuAjuda = r === 'preciso de ajuda'
+  // "Nao posso confirmar", "nao vou poder", "nao quero cancelar": a negacao
+  // inverte o sentido da frase inteira. Melhor cair no atendimento humano do que
+  // confirmar uma consulta que a pessoa acabou de dizer que nao vai comparecer.
+  const negou = /(^|\s)nao(\s|$)/.test(r)
+
+  // O numero so vale dentro da janela para nao roubar as opcoes do menu.
+  const confirma = dentroDaJanela && !negou && (r === '1' || tem('confirmar', 'confirmo', 'confirmado'))
+  const remarca =
+    dentroDaJanela && !negou && (r === '2' || tem('remarcar', 'reagendar', 'trocar a data', 'outro horario'))
+  const cancela =
+    dentroDaJanela && !negou && (r === '3' || tem('cancelar', 'cancelo', 'desmarcar'))
+
+  const pediuAjuda = tem('preciso de ajuda', 'preciso falar')
 
   return {
     confirma,
     remarca,
     cancela,
     respondeuLembrete: confirma || remarca || cancela,
-    optedOut: r === 'sair' || r === 'nao quero receber',
-    isWell: r === 'estou bem',
+    // "sair" continua exato: contido, ele apareceria em "vou sair de viagem" e
+    // descadastraria quem so estava avisando que viaja.
+    optedOut: r === 'sair' || tem('nao quero receber', 'nao quero mais receber'),
+    // Nada de "tudo bem" aqui: "bom dia, tudo bem?" e cumprimento, nao resposta
+    // ao acompanhamento, e trata-lo como resposta faria o robo se calar.
+    isWell: tem('estou bem', 'estamos bem', 'ele esta bem', 'ela esta bem'),
     pediuAjuda,
     // Remarcar e cancelar exigem alguem da equipe: no primeiro caso ninguem
     // escolheu o novo horario ainda; no segundo a agenda abriu um buraco que a
