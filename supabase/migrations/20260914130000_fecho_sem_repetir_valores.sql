@@ -28,11 +28,20 @@ set whatsapp_menu_info_text =
   -- dizendo "digite 9 para falar com a nossa equipe", mandar 3 duas linhas
   -- acima era dar dois numeros para a mesma coisa.
   E'🙋 Quer falar com alguém da equipe? Digite *9*.\n\n' ||
-  E'📞 Se preferir ligar:\n(13) 3273-6828\n(13) 99786-7273\n\n' ||
+  -- Sem os telefones da recepcao.
+  --
+  -- O contato da clinica passou a ser um so: este numero, o do robo. E o que
+  -- esta no site e na bio do Instagram, e oferecer dois telefones alternativos
+  -- aqui desfazia essa escolha - quem liga para a recepcao sai do sistema, e
+  -- a conversa, o agendamento e o historico ficam sem registro.
   E'⏰ Segunda a sexta, 8h às 18h. Fora desse horário, respondemos no próximo dia útil.'
 where strpos(whatsapp_menu_info_text, '450') > 0
    or strpos(whatsapp_menu_info_text, 'convênio') > 0
    or strpos(whatsapp_menu_info_text, 'convenio') > 0
-   or strpos(whatsapp_menu_info_text, 'teleconsulta') > 0;
+   or strpos(whatsapp_menu_info_text, 'teleconsulta') > 0
+   -- Tambem pega o texto que ja foi corrigido a mao na tela mas continua
+   -- oferecendo os telefones da recepcao.
+   or strpos(whatsapp_menu_info_text, '3273-6828') > 0
+   or strpos(whatsapp_menu_info_text, '99786-7273') > 0;
 
 commit;

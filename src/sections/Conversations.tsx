@@ -73,10 +73,17 @@ const MOTIVO_ATENCAO: Record<
   NonNullable<Conversation['attentionReason']>,
   { rotulo: string; classe: string; borda: string }
 > = {
+  // Vermelho porque do outro lado tem alguem parado esperando resposta. Era
+  // azul-escuro e se perdia entre as outras etiquetas: quem bate o olho na
+  // lista precisa achar estes cartoes antes de qualquer outro.
+  //
+  // Nao e o mesmo vermelho da urgencia (#b42318, com anel duplo): quem pediu
+  // atendente espera uma pessoa, quem pediu urgencia espera uma pessoa AGORA, e
+  // as duas coisas nao podem gritar igual.
   atendente: {
     rotulo: 'Quer falar com a equipe',
-    classe: 'bg-[#16456b] text-white',
-    borda: 'border-[#16456b] ring-1 ring-[#16456b]/30',
+    classe: 'bg-red-600 text-white',
+    borda: 'border-red-500 ring-1 ring-red-500/30',
   },
   remarcacao: {
     rotulo: 'Pediu para remarcar',

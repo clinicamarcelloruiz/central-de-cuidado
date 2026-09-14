@@ -620,6 +620,38 @@ async function responderPergunta(
  *
  * Com uma unidade so e sem telemedicina, nao ha o que perguntar: responde.
  */
+/**
+ * O que dizer quando a resposta nao foi o numero esperado.
+ *
+ * Antes era sempre "Nao entendi, responda com o numero". Mas quem escreve
+ * "Convenio" no meio da escolha da unidade nao errou: mudou de assunto, e o
+ * robo sabia responder aquilo. Insistir no numero era defender o proprio fluxo
+ * em vez de atender - a pessoa perguntava e ouvia que nao tinha sido entendida.
+ *
+ * Agora: se a mensagem casa com uma resposta pronta, ela vem primeiro e a
+ * pergunta da etapa e repetida logo abaixo, para a conversa continuar de onde
+ * parou. Sem casar com nada, o "Nao entendi" de sempre.
+ *
+ * A etapa nao muda em nenhum dos dois casos: responder uma duvida no meio do
+ * caminho nao pode tirar a pessoa do lugar onde ela estava.
+ *
+ * Assunto clinico nao entra aqui: acharResposta ja se recusa a responder
+ * sintoma e remedio, entao isso segue caindo no "Nao entendi" e, dai, na
+ * equipe.
+ */
+async function naoEntendi(
+  admin: Admin,
+  clinicId: string,
+  texto: string,
+  pergunta: string,
+): Promise<string> {
+  const achada = acharResposta(texto, await carregarRespostas(admin, clinicId))
+  // O texto curto da propria resposta, e nao a pergunta "Santos, SP ou
+  // telemedicina?" dos assuntos marcados: fazer outra pergunta a quem ja esta
+  // respondendo uma seria trocar uma confusao por outra.
+  return achada ? `${achada.resposta}\n\n${pergunta}` : `Não entendi. ${pergunta}`
+}
+
 async function perguntarLocalDasInformacoes(
   admin: Admin,
   clinicId: string,
@@ -2015,8 +2047,12 @@ export async function tratarConversa(opcoes: {
     if (indice === null) {
       if (pediuVoltar(texto)) return await mostrarMenu(admin, conversationId, saudacao)
       return {
-        resposta:
-          'Não entendi. Responda com o número da unidade da lista acima.\n\n' + VOLTA,
+        resposta: await naoEntendi(
+          admin,
+          clinicId,
+          texto,
+          'Responda com o número da unidade da lista acima.\n\n' + VOLTA,
+        ),
       }
     }
     return await responderInformacoes(admin, clinicId, conversationId, ids[indice], opcoes.textos.informacoes)
@@ -2054,9 +2090,13 @@ export async function tratarConversa(opcoes: {
     }
 
     return {
-      resposta:
-        'Não entendi. Digite CANCELAR para desmarcar, REMARCAR para trocar a data, ' +
-        'ou *0* para voltar ao início.',
+      resposta: await naoEntendi(
+        admin,
+        clinicId,
+        texto,
+        'Digite CANCELAR para desmarcar, REMARCAR para trocar a data, ' +
+          'ou *0* para voltar ao início.',
+      ),
       botoes: [
         { id: 'REMARCAR', titulo: 'Remarcar' },
         { id: 'CANCELAR', titulo: 'Cancelar consulta' },
@@ -2122,9 +2162,13 @@ export async function tratarConversa(opcoes: {
       )
     }
     return {
-      resposta:
-        'Não entendi. Responda 1 para remarcar, 2 para marcar mais uma consulta, ' +
-        'ou MENU para voltar ao início.',
+      resposta: await naoEntendi(
+        admin,
+        clinicId,
+        texto,
+        'Responda 1 para remarcar, 2 para marcar mais uma consulta, ' +
+          'ou MENU para voltar ao início.',
+      ),
     }
   }
 
@@ -2136,8 +2180,12 @@ export async function tratarConversa(opcoes: {
     const indice = escolha(texto, ids.length)
     if (indice === null) {
       return {
-        resposta:
-          'Não entendi. Responda com o número do paciente da lista acima.\n\n' + VOLTA,
+        resposta: await naoEntendi(
+          admin,
+          clinicId,
+          texto,
+          'Responda com o número do paciente da lista acima.\n\n' + VOLTA,
+        ),
       }
     }
 
@@ -2169,8 +2217,12 @@ export async function tratarConversa(opcoes: {
           : await mostrarMenu(admin, conversationId, saudacao)
       }
       return {
-        resposta:
-          'Não entendi. Responda com o número da unidade da lista acima.\n\n' + VOLTA,
+        resposta: await naoEntendi(
+          admin,
+          clinicId,
+          texto,
+          'Responda com o número da unidade da lista acima.\n\n' + VOLTA,
+        ),
       }
     }
 
@@ -2208,9 +2260,13 @@ export async function tratarConversa(opcoes: {
     const indice = porData >= 0 ? porData : escolha(texto, dias.length)
     if (indice === null) {
       return {
-        resposta:
-          'Não entendi. Responda com o número do dia da lista acima.\n' +
-          'Digite VOLTAR para escolher outra unidade, ou 0 para o início.',
+        resposta: await naoEntendi(
+          admin,
+          clinicId,
+          texto,
+          'Responda com o número do dia da lista acima.\n' +
+            'Digite VOLTAR para escolher outra unidade, ou 0 para o início.',
+        ),
       }
     }
     if (!unidadeEmAndamento) {
@@ -2289,9 +2345,13 @@ export async function tratarConversa(opcoes: {
     const indice = escolha(texto, lista.length)
     if (indice === null) {
       return {
-        resposta:
-          'Não entendi. Responda com o número do horário da lista acima.\n' +
-          'Digite VOLTAR para escolher outro dia, ou 0 para o início.',
+        resposta: await naoEntendi(
+          admin,
+          clinicId,
+          texto,
+          'Responda com o número do horário da lista acima.\n' +
+            'Digite VOLTAR para escolher outro dia, ou 0 para o início.',
+        ),
       }
     }
     if (!unidadeEmAndamento) {
