@@ -671,7 +671,16 @@ async function responderInformacoes(
   // a equipe, telefones, horario. E o mesmo para todos, editado uma vez so.
   // Sem texto da unidade nem fecho, volta ao menu em vez de mandar vazio.
   const fecho = textoGeral.trim()
-  const corpo = [informacoes, fecho].filter(Boolean).join('\n\n')
+  // Uma linha fina entre as duas partes. O que vem antes e daquele lugar
+  // (valor, endereco, o que levar); o que vem depois vale para todos. Sem a
+  // separacao, a mensagem parecia uma lista so, e o olho lia "estacionamento"
+  // e "telefones" com o mesmo peso. Traco leve de proposito: o pesado (━) ja e
+  // usado no comprovante da consulta, e dois riscos iguais em mensagens
+  // diferentes tiram o significado do primeiro.
+  const corpo =
+    informacoes && fecho
+      ? `${informacoes}\n\n──────────────\n\n${fecho}`
+      : [informacoes, fecho].filter(Boolean).join('\n\n')
   if (!corpo) {
     return await mostrarMenu(admin, conversationId, 'Olá!')
   }
