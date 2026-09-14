@@ -656,16 +656,26 @@ async function responderInformacoes(
   lugarId: string,
   textoGeral: string,
 ): Promise<Resultado> {
+  // Os OUTROS lugares, para a linha "Outra unidade" dizer para onde ela leva.
+  //
+  // Antes ela mostrava o lugar que a pessoa acabou de ler ("Você viu: Santos"),
+  // que e a unica informacao que ela ja tem. Quem toca ali quer saber de outro
+  // lugar, entao e o nome do outro lugar que precisa aparecer.
+  const outros = (await opcoesDeAtendimento(admin, clinicId)).filter((l) => l.id !== lugarId)
+  // 72 caracteres e o limite da descricao na lista do WhatsApp. Passou disso, a
+  // Meta recusa a mensagem inteira - melhor uma frase generica do que nenhuma
+  // resposta.
+  const nomesDosOutros = outros.map((l) => l.name).join(' ou ')
+  const descricaoOutros =
+    nomesDosOutros && nomesDosOutros.length <= 72 ? nomesDosOutros : 'Ver os outros atendimentos'
+
   let informacoes = ''
-  let titulo = ''
   if (lugarId === TELE_ID) {
     const tele = await telemedicinaDaClinica(admin, clinicId)
     informacoes = tele.informacoes
-    titulo = UNIDADE_TELE.name
   } else if (lugarId) {
     const unidade = await unidadePorId(admin, lugarId)
     informacoes = (unidade?.info_text ?? '').trim()
-    titulo = unidade?.name ?? ''
   }
   // O fecho comum vai no fim de qualquer lugar: como agendar, como falar com
   // a equipe, telefones, horario. E o mesmo para todos, editado uma vez so.
@@ -706,7 +716,7 @@ async function responderInformacoes(
       linhas: [
         { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
         ...(tele ? [{ id: 'URGENCIA', titulo: '🚨 É urgência', descricao: 'Falar com a equipe agora' }] : []),
-        { id: '1', titulo: 'Outra unidade', descricao: titulo ? `Você viu: ${titulo}` : 'Ver outras informações' },
+        { id: '1', titulo: 'Outra unidade', descricao: descricaoOutros },
         { id: '9', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
         { id: '0', titulo: 'Voltar ao menu' },
       ],
