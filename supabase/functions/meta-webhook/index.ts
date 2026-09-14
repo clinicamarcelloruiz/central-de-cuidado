@@ -201,7 +201,7 @@ Deno.serve(async (req) => {
             .select(
               'id,booking_state,booking_options,booking_unit_id,booking_patient_id,' +
                 'booking_replaces_id,booking_intake_id,booking_modality,needs_attention,' +
-                'profile_name,booking_updated_at',
+                'profile_name,booking_updated_at,auto_replies_while_waiting',
             )
             .eq('clinic_id', clinicId)
             .eq('wa_id', waId)
@@ -423,6 +423,11 @@ Deno.serve(async (req) => {
               consultaASubstituir: conversaAnterior?.booking_replaces_id ?? null,
               consultaEmCadastro: conversaAnterior?.booking_intake_id ?? null,
               modalidadeEmAndamento: (conversaAnterior?.booking_modality ?? null) as 'presencial' | 'telemedicina' | null,
+              // Quantas respostas prontas o robo ja deu nesta espera pela
+              // equipe. Etapa vencida recomeca do zero junto com o resto.
+              respostasNaEspera: etapaVenceu
+                ? 0
+                : Number(conversaAnterior?.auto_replies_while_waiting ?? 0),
               nomeDoPerfil: nomeDoPerfil || conversaAnterior?.profile_name || '',
               textos: {
                 saudacao: settings.whatsapp_autoreply_text ?? '',
@@ -511,6 +516,8 @@ Deno.serve(async (req) => {
                     booking_options: null,
                     // Sem o carimbo a espera pela equipe ja nasceria vencida.
                     booking_updated_at: new Date().toISOString(),
+                    // Espera nova, contagem nova de respostas prontas.
+                    auto_replies_while_waiting: 0,
                   })
                   .eq('id', conversation.id)
               }

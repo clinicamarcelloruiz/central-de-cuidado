@@ -724,11 +724,17 @@ async function responderInformacoes(
   }
 }
 
+/** Quantas respostas prontas o robo da enquanto a equipe nao assume. */
+const LIMITE_NA_ESPERA = 3
+
 async function chamarEquipe(admin: Admin, conversationId: string): Promise<Resultado> {
   await salvarEstado(admin, conversationId, {
     booking_state: 'atendente',
     booking_options: null,
     booking_unit_id: null,
+    // Cada espera comeca com o contador limpo: quem entrou na fila hoje nao
+    // paga pelas perguntas que fez semana passada.
+    auto_replies_while_waiting: 0,
   })
   // O primeiro paragrafo diz o que esta acontecendo agora; o segundo da uma
   // tarefa util para o tempo de espera; o terceiro diz quando esperar resposta.
@@ -1711,6 +1717,14 @@ export async function tratarConversa(opcoes: {
    * humana. Quem calcula e o webhook, que tem o historico em maos.
    */
   podeIniciarMenu: boolean
+  /**
+   * Quantas respostas prontas o robo ja deu nesta espera pela equipe.
+   *
+   * Passando de LIMITE_NA_ESPERA, ele para de responder ate alguem assumir a
+   * conversa. Ausente vale zero: quem chama sem informar esta comecando a
+   * contagem, e nao pulando o limite.
+   */
+  respostasNaEspera?: number
   texto: string
   telefone: string
   /**
@@ -1774,6 +1788,38 @@ export async function tratarConversa(opcoes: {
           '🚨 Avisei a nossa equipe de que é urgente. Alguém entra em contato o mais rápido possível.\n\n' +
           'Se for uma emergência com risco de vida, procure o pronto-socorro mais próximo ou ligue 192.',
         atencao: 'urgencia',
+      }
+    }
+
+    // Pergunta de sempre, respondida na espera - ate tres vezes.
+    //
+    // A fila pode durar a noite inteira, e nesse tempo a pessoa escreve
+    // "convenio?", "quanto custa?", "onde fica?". Calar diante de uma pergunta
+    // que a clinica ja respondeu mil vezes nao protege ninguem.
+    //
+    // Tres e o limite porque insistir costuma querer dizer que o texto pronto
+    // nao serviu: a quarta repeticao do mesmo paragrafo vira deboche. Passou
+    // disso, o robo cala e a conversa e so da equipe.
+    //
+    // podeIniciarMenu entra aqui porque ele e quem sabe se alguem da equipe
+    // escreveu ha pouco. Com atendimento humano em andamento, nem a resposta
+    // pronta deve aparecer: seria o robo falando por cima da atendente.
+    const jaRespondidas = opcoes.respostasNaEspera ?? 0
+    if (opcoes.podeIniciarMenu && jaRespondidas < LIMITE_NA_ESPERA) {
+      const achada = acharResposta(texto, await carregarRespostas(admin, clinicId))
+      // Sem perguntar a unidade: a pergunta "para qual atendimento?" mudaria a
+      // etapa da conversa e tiraria a pessoa da fila sem ela pedir. Vale o
+      // texto curto da propria resposta, que ja cobre os tres lugares.
+      if (achada) {
+        await admin
+          .from('whatsapp_conversations')
+          .update({ auto_replies_while_waiting: jaRespondidas + 1 })
+          .eq('id', conversationId)
+        return {
+          resposta:
+            `${achada.resposta}\n\n` +
+            '🙋 Sua conversa continua na fila: alguém da nossa equipe responde por aqui.',
+        }
       }
     }
     return null
