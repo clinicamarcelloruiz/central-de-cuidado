@@ -65,7 +65,7 @@ export type Estado =
   | 'dados_email'
   | 'informacoes_unidade'
   | 'atendente'
-export type MotivoAtencao = 'atendente' | 'falha' | 'cancelou_sozinho' | 'urgencia'
+export type MotivoAtencao = 'atendente' | 'falha' | 'cancelou_sozinho' | 'urgencia' | 'anexo'
 
 /**
  * A telemedicina como "unidade" do fluxo.
@@ -1750,6 +1750,13 @@ export async function tratarConversa(opcoes: {
    */
   podeIniciarMenu: boolean
   /**
+   * A mensagem e um anexo: foto, documento, audio ou video.
+   *
+   * Quem manda a foto de um exame quer que alguem OLHE. Responder o menu a isso
+   * e o robo dizendo "nao vi o que voce mandou, escolha uma opcao".
+   */
+  anexo?: boolean
+  /**
    * Quantas respostas prontas o robo ja deu nesta espera pela equipe.
    *
    * Passando de LIMITE_NA_ESPERA, ele para de responder ate alguem assumir a
@@ -1803,6 +1810,38 @@ export async function tratarConversa(opcoes: {
   // que prometemos em toda mensagem, e promessa que falha uma vez nao vale.
   if (pediuMenu(texto)) {
     return await mostrarMenu(admin, conversationId, saudacao)
+  }
+
+  // Anexo: foto, documento, audio ou video.
+  //
+  // O robo nao le nada disso, e fingir que leu seria pior. Quem manda a foto de
+  // um exame, uma receita antiga ou um audio contando o caso quer que uma
+  // pessoa olhe. Ate 15/09/2026 a mensagem virava "[image]" e a resposta era o
+  // menu inteiro: "como podemos ajudar hoje?" para quem acabou de mandar o
+  // ultrassom do filho.
+  //
+  // Entrega para a equipe e diz que entregou. Se a conversa ja estava com a
+  // equipe, silencio: a segunda foto nao precisa de outro "vou entregar".
+  //
+  // Vem antes do bloco da equipe para que o anexo de quem NAO estava na fila
+  // entre nela, e depois do MENU para nao tirar a saida de emergencia de
+  // ninguem.
+  if (opcoes.anexo) {
+    if (estadoAtual === 'atendente') return null
+    await salvarEstado(admin, conversationId, {
+      booking_state: 'atendente',
+      booking_options: null,
+      booking_unit_id: null,
+      auto_replies_while_waiting: 0,
+    })
+    return {
+      resposta:
+        '📎 Recebi o que você enviou e já avisei a nossa equipe: alguém do consultório vai olhar e responder por aqui.\n\n' +
+        'Se quiser, escreva junto o que é e o que você gostaria de saber. Isso ajuda quem for responder.\n\n' +
+        'Atendemos de segunda a sexta, das 8h às 18h. Fora desse horário, respondemos no próximo dia útil.\n\n' +
+        VOLTA,
+      atencao: 'anexo',
+    }
   }
 
   // Equipe assumiu a conversa. O robo cala a boca - falar por cima de uma

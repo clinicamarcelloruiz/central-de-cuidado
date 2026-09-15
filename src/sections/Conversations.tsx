@@ -110,6 +110,13 @@ const MOTIVO_ATENCAO: Record<
     classe: 'bg-red-600 text-white',
     borda: 'border-red-500 ring-1 ring-red-500/30',
   },
+  // Mandou foto, exame, documento ou audio. O robo nao le nada disso e entrega
+  // para a equipe: tem um arquivo esperando alguem abrir.
+  anexo: {
+    rotulo: '📎 Enviou um arquivo',
+    classe: 'bg-[#eef5fd] text-[#16456b]',
+    borda: 'border-[#2f7fc1]',
+  },
   // Pediu urgencia na telemedicina: uma crianca passando mal e alguem
   // esperando ligacao. E a unica bandeira que precisa gritar mais que a falha.
   urgencia: {

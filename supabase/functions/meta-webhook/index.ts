@@ -47,6 +47,18 @@ function idDoToque(message: WebhookMessage): string {
   return ''
 }
 
+/**
+ * A mensagem e um arquivo, e nao texto.
+ *
+ * Foto, documento, audio, video, figurinha: o robo nao le nenhum deles. Servem
+ * para decidir entregar para a equipe em vez de responder o menu. Localizacao e
+ * contato ficam de fora porque tambem nao sao pergunta - mas sao raros o
+ * bastante para nao valer regra propria hoje.
+ */
+function ehAnexo(message: WebhookMessage) {
+  return ['image', 'document', 'audio', 'video', 'sticker', 'voice'].includes(String(message.type))
+}
+
 function messageBody(message: WebhookMessage) {
   if (message.type === 'text') return message.text?.body ?? ''
   if (message.type === 'button') return message.button?.text ?? message.button?.payload ?? ''
@@ -122,6 +134,20 @@ Deno.serve(async (req) => {
         for (const message of value.messages ?? []) {
           const externalId = String(message.id ?? '')
           if (!externalId) continue
+
+          // Reacao (o emoji apertado em cima de uma mensagem) nao e conversa.
+          //
+          // A Meta manda a reacao pelo mesmo caminho de uma mensagem de texto.
+          // Como ela nao tem corpo, virava "[reaction]" e o robo respondia o
+          // menu inteiro. Aconteceu com o Gabriel em 15/09/2026: ele respondeu
+          // "Estou bem" ao acompanhamento, recebeu o "que bom saber", reagiu com
+          // um emoji e levou de volta "Como podemos ajudar hoje?", como se
+          // tivesse perguntado alguma coisa.
+          //
+          // Ignorada por inteiro, e nao so na resposta: guardar "[reaction]" no
+          // historico suja a leitura de quem abre a conversa depois para
+          // entender o caso.
+          if (message.type === 'reaction') continue
 
           const { error: eventError } = await admin.from('whatsapp_webhook_events').insert({
             event_key: `message:${externalId}`,
@@ -201,7 +227,7 @@ Deno.serve(async (req) => {
             .select(
               'id,booking_state,booking_options,booking_unit_id,booking_patient_id,' +
                 'booking_replaces_id,booking_intake_id,booking_modality,needs_attention,' +
-                'profile_name,booking_updated_at,auto_replies_while_waiting',
+                'attention_reason,profile_name,booking_updated_at,auto_replies_while_waiting',
             )
             .eq('clinic_id', clinicId)
             .eq('wa_id', waId)
@@ -218,9 +244,16 @@ Deno.serve(async (req) => {
           // 24h e a janela da Meta: passou dela, a sessao anterior acabou de
           // verdade e esta mensagem inaugura outra.
           const carimbo = linhaAnterior?.booking_updated_at as string | null | undefined
+          // 48h quando a clinica e que puxou assunto e ficou devendo resposta: o
+          // anexo que alguem precisa abrir e o "Preciso de ajuda" respondido ao
+          // acompanhamento. Nesses dois a equipe costuma precisar de mais de um
+          // dia util, e o robo voltando a falar no meio seria atropelo. Nos
+          // outros casos, 24h.
+          const motivoDaEspera = String(linhaAnterior?.attention_reason ?? '')
+          const horasDeEspera = motivoDaEspera === 'anexo' || motivoDaEspera === 'ajuda' ? 48 : 24
           const etapaVenceu = Boolean(
             linhaAnterior?.booking_state &&
-              (!carimbo || Date.now() - new Date(carimbo).getTime() > 24 * 60 * 60 * 1000),
+              (!carimbo || Date.now() - new Date(carimbo).getTime() > horasDeEspera * 60 * 60 * 1000),
           )
           const conversaAnterior =
             linhaAnterior && etapaVenceu
@@ -428,6 +461,7 @@ Deno.serve(async (req) => {
               respostasNaEspera: etapaVenceu
                 ? 0
                 : Number(conversaAnterior?.auto_replies_while_waiting ?? 0),
+              anexo: ehAnexo(message),
               nomeDoPerfil: nomeDoPerfil || conversaAnterior?.profile_name || '',
               textos: {
                 saudacao: settings.whatsapp_autoreply_text ?? '',
