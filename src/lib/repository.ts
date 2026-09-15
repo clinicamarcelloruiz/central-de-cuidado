@@ -447,6 +447,14 @@ export interface Appointment {
   }
   /** Quantas vezes esta consulta ja trocou de data. Zero na primeira. */
   rescheduleCount: number
+  /**
+   * A data da consulta anterior, quando esta marcacao cai dentro dos 30 dias.
+   *
+   * Nula quando nao e retorno, quando o paciente nao tem cadastro, ou quando
+   * ele veio de antes do sistema e a consulta antiga nunca foi registrada aqui.
+   * Serve para a etiqueta na agenda avisar a recepcao, nao para decidir preco.
+   */
+  retornoDe: string | null
 }
 
 export const WEEKDAY_LABEL = [
@@ -731,10 +739,17 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
 
   const rows = data ?? []
   const patientIds = [...new Set(rows.map((r) => r.patient_id).filter(Boolean))] as string[]
+  // consultation_date junto do nome: e a data da ultima consulta do paciente, e
+  // e ela que diz se a proxima e retorno. Vem do cadastro, e nao do prontuario,
+  // de proposito: a recepcao enxerga o cadastro, e e a recepcao quem precisa
+  // desta informacao na hora de cobrar.
   const { data: patients } = patientIds.length
-    ? await supabase.from('patients').select('id,name').in('id', patientIds)
+    ? await supabase.from('patients').select('id,name,consultation_date').in('id', patientIds)
     : { data: [] }
   const nameById = new Map((patients ?? []).map((p) => [p.id, p.name]))
+  const ultimaConsultaPorPaciente = new Map(
+    (patients ?? []).map((p) => [p.id, (p as { consultation_date?: string | null }).consultation_date ?? null]),
+  )
   const fichas = await fichasDasConsultas(clinicId, unitId)
 
   return rows.map((row) => ({
@@ -761,7 +776,36 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
     rescheduleRequestedAt: row.reschedule_requested_at,
     reminderSentAt: row.reminder_sent_at,
     rescheduleCount: row.reschedule_count ?? 0,
+    retornoDe: dataDoRetorno(
+      row.patient_id ? ultimaConsultaPorPaciente.get(row.patient_id) ?? null : null,
+      row.starts_at,
+    ),
   }))
+}
+
+/**
+ * A data da consulta anterior, quando esta marcacao e retorno.
+ *
+ * Retorno em ate 30 dias esta incluido no valor da consulta, e quem olha a
+ * agenda nao tem como saber disso: "retorno" so existe dentro do prontuario,
+ * escrito pelo medico no fim do atendimento. A recepcao cobrava no escuro.
+ *
+ * A conta e simples de proposito - ultima consulta, 30 dias, acabou. Nao vale
+ * como veredicto: devolve a data para a etiqueta MOSTRAR, e quem decide o que
+ * cobrar continua sendo a pessoa. A regra dos 30 dias e do consultorio, e
+ * consultorio abre excecao.
+ *
+ * Estritamente ANTES: consulta e marcacao no mesmo dia e a propria consulta
+ * sendo registrada, nao um retorno dela.
+ */
+function dataDoRetorno(ultimaConsulta: string | null, inicioDaMarcacao: string): string | null {
+  if (!ultimaConsulta) return null
+  const anterior = new Date(`${ultimaConsulta}T12:00:00`)
+  const marcada = new Date(inicioDaMarcacao)
+  if (Number.isNaN(anterior.getTime()) || Number.isNaN(marcada.getTime())) return null
+
+  const dias = Math.floor((marcada.getTime() - anterior.getTime()) / 86_400_000)
+  return dias > 0 && dias <= 30 ? ultimaConsulta : null
 }
 
 export interface PendingRequest {
