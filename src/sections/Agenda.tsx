@@ -500,6 +500,16 @@ export default function Agenda({
    * segue confirmada do mesmo jeito e a tela diz que o aviso nao saiu. Deixar
    * a confirmacao presa a um envio seria pior.
    */
+  /** "20/08" - a data da consulta anterior cabe na etiqueta assim. */
+  function fmtDiaMes(data: string) {
+    // Meio-dia para a data nao andar um dia por causa de fuso: "2026-08-20"
+    // lido como meia-noite UTC vira 19/08 no horario de Brasilia.
+    const d = new Date(`${data}T12:00:00`)
+    return Number.isNaN(d.getTime())
+      ? data
+      : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  }
+
   async function confirmarEAvisar(appointmentId: string) {
     if (!clinicId) return
     await acao(
@@ -848,6 +858,24 @@ export default function Agenda({
                               <span className="mt-1 ml-1 inline-flex items-center gap-1 rounded-full bg-[#7ab8ea] px-2 py-0.5 text-[9px] font-extrabold text-[#081b2c]">
                                 <Video className="h-2.5 w-2.5" strokeWidth={3} />
                                 Telemedicina
+                              </span>
+                            )}
+                            {/* Retorno dentro dos 30 dias: esta incluido no valor
+                                da consulta anterior, e quem olha a agenda nao
+                                tinha como saber - "retorno" so existia dentro do
+                                prontuario. Leva a data junto porque e ela que
+                                decide, e evita abrir a ficha para conferir.
+
+                                Avisa, nao manda: o valor nao muda, nada e
+                                bloqueado, e a regra dos 30 dias e do consultorio,
+                                que abre excecao quando quer. */}
+                            {item.retornoDe && (
+                              <span
+                                className="mt-1 ml-1 inline-flex items-center gap-1 rounded-full bg-[#3fa88a] px-2 py-0.5 text-[9px] font-extrabold text-white"
+                                title="O paciente se consultou há menos de 30 dias. O retorno costuma estar incluído no valor da consulta anterior."
+                              >
+                                <RotateCcw className="h-2.5 w-2.5" strokeWidth={3} />
+                                Retorno · consulta em {fmtDiaMes(item.retornoDe)}
                               </span>
                             )}
                             <p className="text-[9px] font-bold text-white/60">
