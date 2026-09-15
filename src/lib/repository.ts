@@ -1176,6 +1176,7 @@ export interface Conversation {
     | 'cancelamento'
     | 'ajuda'
     | 'falha'
+    | 'anexo'
     | 'cancelou_sozinho'
     | 'urgencia'
     | null
