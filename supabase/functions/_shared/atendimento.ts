@@ -131,17 +131,24 @@ function normalizar(texto: string) {
 /** Frases que abrem o agendamento sem passar pelo menu. */
 export function pediuAgendamento(texto: string) {
   const t = normalizar(texto)
-  return (
-    t === 'agendar' ||
-    t === 'agendamento' ||
-    t === 'marcar' ||
-    t === 'marcar consulta' ||
-    t === 'agendar consulta' ||
-    t === 'quero agendar' ||
-    t === 'quero marcar' ||
-    t === 'horarios' ||
-    t === 'horario'
-  )
+
+  // Remarcar e desmarcar contem "marcar" e sao o oposto: quem pede isso ja tem
+  // consulta, e precisa do caminho de remarcacao, nao de uma consulta nova.
+  if (/\b(remarc|desmarc|cancel)/.test(t)) return false
+
+  // Palavra solta e nao frase inteira.
+  //
+  // Ate 15/09/2026 a lista era de frases exatas: valia "quero marcar", nao
+  // valia "quero marcar retorno para o Anthony", nem "queria marcar uma
+  // consulta", nem "gostaria de agendar para meu filho". Ninguem escreve no
+  // WhatsApp do jeito que o programador previu, e cada frase de fora caia no
+  // menu ou, pior, numa resposta pronta que nao tinha nada a ver - foi o que
+  // aconteceu com a Sonia, que pediu para marcar retorno e recebeu a lista de
+  // documentos para levar.
+  //
+  // "consulta" sozinha fica de fora de proposito: "quanto custa a consulta?" e
+  // pergunta de preco, e abriria a escolha de unidade sem ninguem pedir.
+  return /\b(marcar|marcacao|agendar|agendamento|horarios?)\b/.test(t)
 }
 
 /** A saida de emergencia. Vale em qualquer etapa, inclusive com a equipe. */
@@ -307,7 +314,12 @@ const OPCOES = [
   '*1* 💬 Dúvidas sobre a consulta',
   // 🗓️ e nao 📅: o calendario cheio desenha uma data fixa dentro do icone, e um
   // "24 de fevereiro" ao lado de uma consulta de setembro confunde quem le.
-  '*2* 🗓️ Marcar uma consulta',
+  // "ou retorno" escrito na linha porque quem volta em 30 dias nao tinha como
+  // saber que este era o caminho dele: "marcar uma consulta" soa como comecar
+  // do zero, e o paciente de retorno ia para o *3* pedir gente. A lista abaixo
+  // nao cabe essa frase (24 caracteres por linha, limite da Meta), entao ali a
+  // palavra vai na descricao.
+  '*2* 🗓️ Marcar uma consulta ou retorno',
   // 🗣️ e nao 👩‍⚕️: o emoji de profissional de saude e composto por dois
   // caracteres colados por um invisivel, e em Android antigo a cola falha e
   // aparecem dois desenhos soltos - justamente no aparelho mais simples.
@@ -550,7 +562,7 @@ export async function mostrarMenu(
       rotulo: 'Ver opções',
       linhas: [
         { id: '1', titulo: 'Dúvidas sobre a consulta', descricao: 'Valores, contatos e orientações' },
-        { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
+        { id: '2', titulo: 'Marcar uma consulta', descricao: 'Consulta nova ou retorno · unidade, dia e horário' },
         { id: '3', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
         { id: '4', titulo: 'Minha consulta', descricao: 'Ver, remarcar ou cancelar' },
       ],
@@ -602,7 +614,7 @@ async function responderPergunta(
     lista: {
       rotulo: 'Ver opções',
       linhas: [
-        { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
+        { id: '2', titulo: 'Marcar uma consulta', descricao: 'Consulta nova ou retorno · unidade, dia e horário' },
         { id: '9', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
         { id: '0', titulo: 'Voltar ao menu' },
       ],
@@ -746,7 +758,7 @@ async function responderInformacoes(
     lista: {
       rotulo: 'Ver opções',
       linhas: [
-        { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
+        { id: '2', titulo: 'Marcar uma consulta', descricao: 'Consulta nova ou retorno · unidade, dia e horário' },
         ...(tele ? [{ id: 'URGENCIA', titulo: '🚨 É urgência', descricao: 'Falar com a equipe agora' }] : []),
         { id: '1', titulo: 'Outra unidade', descricao: descricaoOutros },
         { id: '9', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
@@ -811,7 +823,7 @@ async function mostrarMinhaConsulta(
       lista: {
         rotulo: 'Ver opções',
         linhas: [
-          { id: '2', titulo: 'Marcar uma consulta', descricao: 'Escolher unidade, dia e horário' },
+          { id: '2', titulo: 'Marcar uma consulta', descricao: 'Consulta nova ou retorno · unidade, dia e horário' },
           { id: '9', titulo: 'Falar com a equipe' },
           { id: '0', titulo: 'Voltar ao menu' },
         ],
@@ -1875,8 +1887,12 @@ export async function tratarConversa(opcoes: {
     // podeIniciarMenu entra aqui porque ele e quem sabe se alguem da equipe
     // escreveu ha pouco. Com atendimento humano em andamento, nem a resposta
     // pronta deve aparecer: seria o robo falando por cima da atendente.
+    // Pedido de agendamento na fila nao recebe resposta pronta: quem escreveu
+    // "quero marcar retorno para o Anthony" nao perguntou o que levar na
+    // consulta, e responder isso e pior do que ficar quieto. A equipe ja esta
+    // com a conversa e marca junto, conferindo o cadastro antigo.
     const jaRespondidas = opcoes.respostasNaEspera ?? 0
-    if (opcoes.podeIniciarMenu && jaRespondidas < LIMITE_NA_ESPERA) {
+    if (!pediuAgendamento(texto) && opcoes.podeIniciarMenu && jaRespondidas < LIMITE_NA_ESPERA) {
       const achada = acharResposta(texto, await carregarRespostas(admin, clinicId))
       // Sem perguntar a unidade: a pergunta "para qual atendimento?" mudaria a
       // etapa da conversa e tiraria a pessoa da fila sem ela pedir. Vale o
@@ -1936,7 +1952,11 @@ export async function tratarConversa(opcoes: {
 
   // ---- Sem etapa em andamento ----
   if (!estadoAtual) {
-    if (pediuAgendamento(texto)) {
+    // Sintoma junto do pedido nao abre a agenda direto. "Meu filho tem refluxo,
+    // queria marcar" e as duas coisas: o robo diz que nao orienta sobre sintoma
+    // e mostra o menu, de onde a pessoa marca pelo *2*. Pular essa frase seria
+    // o robo fingir que nao leu a parte que mais importava.
+    if (pediuAgendamento(texto) && !assuntoClinico(texto)) {
       return await iniciarAgendamento(
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
       )
@@ -2060,7 +2080,11 @@ export async function tratarConversa(opcoes: {
       return await mostrarMinhaConsulta(admin, clinicId, conversationId, opcoes.consultas)
     }
 
-    if (pediuAgendamento(texto)) {
+    // Sintoma junto do pedido nao abre a agenda direto. "Meu filho tem refluxo,
+    // queria marcar" e as duas coisas: o robo diz que nao orienta sobre sintoma
+    // e mostra o menu, de onde a pessoa marca pelo *2*. Pular essa frase seria
+    // o robo fingir que nao leu a parte que mais importava.
+    if (pediuAgendamento(texto) && !assuntoClinico(texto)) {
       return await iniciarAgendamento(
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
       )
