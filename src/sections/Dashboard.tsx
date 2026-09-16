@@ -172,17 +172,25 @@ function Ranking({
   title,
   items,
   color,
+  maiusculo = false,
 }: {
   title: string
   items: [string, number][]
   color: string
+  /**
+   * Nome do CID, cidade, bairro e convênio vêm digitados de mil jeitos
+   * ("santos", "Santos", "SANTOS"). Em caixa alta as três viram a mesma coisa
+   * aos olhos de quem lê o painel, e a coluna para de parecer bagunçada.
+   * Só a aparência muda: o que está gravado continua como foi escrito.
+   */
+  maiusculo?: boolean
 }) {
   const max = Math.max(...items.map((item) => item[1]), 1)
   return (
     <div>
       <p className="mb-3 text-[10px] font-extrabold uppercase tracking-[0.15em] text-slate-400">{title}</p>
       {items.length ? (
-        <div className="space-y-3">
+        <div className={`space-y-3 ${maiusculo ? 'uppercase' : ''}`}>
           {items.map(([label, value]) => (
             <DataBar key={label} label={label} value={value} max={max} color={color} />
           ))}
@@ -431,9 +439,9 @@ export default function Dashboard({
             <div className="grid gap-7 lg:grid-cols-3 lg:divide-x lg:divide-[#081b2c]/[0.07]">
               {/* "do paciente" no rotulo de proposito: sem isso, cidade e
                   bairro se confundem com o endereco da unidade. */}
-              <Ranking title="Cidade do paciente" items={cities} color={SAGE} />
+              <Ranking title="Cidade do paciente" items={cities} color={SAGE} maiusculo />
               <div className="lg:pl-7">
-                <Ranking title="Bairro / região do paciente" items={neighborhoods} color={AZUL} />
+                <Ranking title="Bairro / região do paciente" items={neighborhoods} color={AZUL} maiusculo />
               </div>
               <div className="lg:pl-7">
                 <Ranking title="Unidade de atendimento" items={units} color={NAVY} />
@@ -447,7 +455,7 @@ export default function Dashboard({
 
           <Panel title="Leitura da base clínica" subtitle="Principais recortes para apoiar decisões da rotina" icon={Stethoscope}>
             <div className="grid gap-7 lg:grid-cols-2 lg:divide-x lg:divide-[#081b2c]/[0.07]">
-              <Ranking title="CID-10 mais frequentes" items={cids} color={AZUL} />
+              <Ranking title="CID-10 mais frequentes" items={cids} color={AZUL} maiusculo />
               <div className="lg:pl-7">
                 <Ranking title="Convênios" items={healthPlans} color={NAVY} />
               </div>
