@@ -492,6 +492,7 @@ export type Database = {
           address: string
           archived_at: string | null
           clinic_id: string
+          cnes: string
           created_at: string
           id: string
           name: string
@@ -501,6 +502,7 @@ export type Database = {
           address?: string
           archived_at?: string | null
           clinic_id: string
+          cnes?: string
           created_at?: string
           id?: string
           name: string
@@ -510,6 +512,7 @@ export type Database = {
           address?: string
           archived_at?: string | null
           clinic_id?: string
+          cnes?: string
           created_at?: string
           id?: string
           name?: string

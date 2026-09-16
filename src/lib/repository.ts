@@ -379,6 +379,8 @@ export interface Unit {
   id: string
   name: string
   address: string
+  /** Numero do estabelecimento de saude. Vazio ate a clinica levantar. */
+  cnes: string
 }
 
 export interface AvailabilityRule {
@@ -470,7 +472,7 @@ export const WEEKDAY_LABEL = [
 export async function listUnits(clinicId: string): Promise<Unit[]> {
   const { data, error } = await supabase
     .from('clinic_units')
-    .select('id,name,address')
+    .select('id,name,address,cnes')
     .eq('clinic_id', clinicId)
     .is('archived_at', null)
     .order('name')
@@ -482,10 +484,26 @@ export async function createUnit(clinicId: string, name: string, address: string
   const { data, error } = await supabase
     .from('clinic_units')
     .insert({ clinic_id: clinicId, name: name.trim(), address: address.trim() })
-    .select('id,name,address')
+    .select('id,name,address,cnes')
     .single()
   if (error) fail(error)
   return data
+}
+
+/**
+ * Guarda o CNES da unidade.
+ *
+ * Existe porque a unidade nasceu sem esse campo e não havia como editá-la:
+ * dava para cadastrar e arquivar, nada no meio. Trocar o número de um
+ * estabelecimento não deveria custar recadastrar a unidade e perder o vínculo
+ * das consultas antigas com ela.
+ */
+export async function saveUnitCnes(unitId: string, cnes: string) {
+  const { error } = await supabase
+    .from('clinic_units')
+    .update({ cnes: cnes.replace(/\D/g, '') })
+    .eq('id', unitId)
+  if (error) fail(error)
 }
 
 /** Arquiva em vez de apagar: agendamentos antigos continuam apontando para a unidade. */
@@ -1450,6 +1468,31 @@ export async function getReplyWindow(conversationId: string): Promise<string | n
 }
 
 /**
+ * O motivo, em português, que a Edge Function devolveu.
+ *
+ * As funções recusam com uma frase pronta ("esta pessoa não tem consulta futura
+ * marcada", "a janela de 24 horas fechou"). Só que o supabase-js embrulha
+ * qualquer status fora do 2xx num FunctionsHttpError cujo `context` é a Response
+ * crua - e ali `body` é um stream, não o JSON já lido. Nós líamos
+ * `context.body.error`, que é sempre undefined: o motivo real se perdia e a tela
+ * mostrava a frase genérica, ou nada que explicasse o 409 do console.
+ *
+ * O `clone()` existe porque o corpo só pode ser lido uma vez.
+ */
+async function motivoDaFuncao(causa: unknown, data: unknown, padrao: string): Promise<string> {
+  const contexto = (causa as { context?: unknown }).context
+  if (contexto instanceof Response) {
+    try {
+      const corpo = (await contexto.clone().json()) as { error?: string } | null
+      if (corpo?.error) return corpo.error
+    } catch {
+      // Corpo vazio ou que não é JSON: fica o texto padrão.
+    }
+  }
+  return (data as { error?: string } | null)?.error || padrao
+}
+
+/**
  * Manda o menu do robo para a conversa e devolve a pessoa ao atendimento
  * automatico. So funciona com a janela de 24h aberta, como qualquer mensagem.
  */
@@ -1458,10 +1501,7 @@ export async function sendConversationMenu(conversationId: string) {
     body: { conversationId, menu: true },
   })
   if (error) {
-    const detalhe =
-      (error as { context?: { body?: { error?: string } } }).context?.body?.error ??
-      (data as { error?: string } | null)?.error
-    throw new Error(detalhe || 'Não foi possível enviar o menu.')
+    throw new Error(await motivoDaFuncao(error, data, 'Não foi possível enviar o menu.'))
   }
   if ((data as { error?: string } | null)?.error) {
     throw new Error((data as { error: string }).error)
@@ -1479,10 +1519,7 @@ export async function sendConversationQuestionnaire(conversationId: string) {
     body: { conversationId, questionario: true },
   })
   if (error) {
-    const detalhe =
-      (error as { context?: { body?: { error?: string } } }).context?.body?.error ??
-      (data as { error?: string } | null)?.error
-    throw new Error(detalhe || 'Não foi possível enviar o questionário.')
+    throw new Error(await motivoDaFuncao(error, data, 'Não foi possível enviar o questionário.'))
   }
   if ((data as { error?: string } | null)?.error) {
     throw new Error((data as { error: string }).error)
@@ -1502,10 +1539,7 @@ export async function sendConversationReply(
   if (error) {
     // O corpo da resposta traz a mensagem em portugues; o error do invoke traz
     // so "non-2xx status code", que nao ajuda ninguem na tela.
-    const detalhe =
-      (error as { context?: { body?: { error?: string } } }).context?.body?.error ??
-      (data as { error?: string } | null)?.error
-    throw new Error(detalhe || 'Não foi possível enviar a mensagem.')
+    throw new Error(await motivoDaFuncao(error, data, 'Não foi possível enviar a mensagem.'))
   }
   if ((data as { error?: string } | null)?.error) {
     throw new Error((data as { error: string }).error)

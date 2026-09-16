@@ -68,6 +68,7 @@ import {
   getDadosDaClinica,
 } from '@/lib/repository'
 import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco'
+import { telefoneValidavel } from '@/lib/telefone'
 import type {
   Consultation,
   ConsultationDraft,
@@ -2223,11 +2224,10 @@ export default function PatientRecord({
       const local: LocalDeAtendimento = {
         nome: unidade.name,
         endereco: unidade.address,
-        // Os dois numeros no rodape da receita, quando a clinica tem dois.
-        telefone: [dadosDaClinica.telefone, dadosDaClinica.telefone2]
-          .map((numero) => numero.trim())
-          .filter(Boolean)
-          .join(' / '),
+        cnes: unidade.cnes || undefined,
+        // Um numero so, e o celular quando existe: o campo da Memed e validado
+        // e recusava tanto os dois juntos quanto o fixo de 10 digitos.
+        telefone: telefoneValidavel(dadosDaClinica.telefone, dadosDaClinica.telefone2),
       }
       await abrirPrescricao(patient, consultation, {
         onReceita: (dados) => {

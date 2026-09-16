@@ -25,6 +25,7 @@ import {
   createAvailabilityRule,
   createScheduleException,
   createUnit,
+  saveUnitCnes,
   deleteAvailabilityRule,
   deleteScheduleException,
   getCurrentMembership,
@@ -1247,6 +1248,25 @@ export default function Agenda({
                           <span className="font-normal text-slate-500"> · {u.address}</span>
                         )}
                       </span>
+                      {/* CNES: o número do estabelecimento de saúde, que a Memed
+                          passou a exigir de quem integra agora. É de cada
+                          unidade - a sala de Santos e a de São Paulo são
+                          estabelecimentos diferentes. Enquanto estiver vazio, a
+                          receita sai sem ele. */}
+                      <input
+                        defaultValue={u.cnes}
+                        onBlur={(e) => {
+                          const novo = e.target.value.replace(/\D/g, '')
+                          if (novo === u.cnes) return
+                          void acao(async () => {
+                            await saveUnitCnes(u.id, novo)
+                          }, 'CNES guardado.')
+                        }}
+                        placeholder="CNES"
+                        inputMode="numeric"
+                        title="Cadastro Nacional de Estabelecimentos de Saúde desta unidade. Sai impresso na receita."
+                        className="w-[88px] shrink-0 rounded-lg border border-[#081b2c]/10 bg-white px-2 py-1 text-[10px] font-semibold text-[#081b2c] outline-none focus:border-[#2f7fc1]"
+                      />
                       {units.length > 1 && (
                         <button
                           type="button"
