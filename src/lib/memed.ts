@@ -74,6 +74,10 @@ async function carregarScript(token: string, producao: boolean) {
   if (document.getElementById(ID_SCRIPT) && janela().MdHub) return Promise.resolve()
 
   carregando = new Promise<void>((resolve, reject) => {
+    // Guardado fora dos dois fechamentos para o prazo tambem conseguir parar a
+    // espera: sem isso, um carregamento que falhou continuaria perguntando pelo
+    // MdHub a cada 200ms para sempre.
+    let espera = 0
     // Prazo para o script se anunciar.
     //
     // A promessa só termina dentro do evento 'core:moduleInit' da Memed. Se
@@ -83,6 +87,7 @@ async function carregarScript(token: string, producao: boolean) {
     // Vinte segundos é folgado para um arquivo de 19 KB, e transforma um
     // travamento silencioso numa frase que a pessoa lê.
     const prazo = window.setTimeout(() => {
+      window.clearInterval(espera)
       carregando = null
       reject(new Error('A Memed não respondeu a tempo. Tente de novo em instantes.'))
     }, 20_000)
@@ -92,6 +97,7 @@ async function carregarScript(token: string, producao: boolean) {
     }
     const falhou = (causa: Error) => {
       window.clearTimeout(prazo)
+      window.clearInterval(espera)
       carregando = null
       reject(causa)
     }
@@ -109,15 +115,34 @@ async function carregarScript(token: string, producao: boolean) {
         return
       }
 
-      // Os ouvintes sao registrados uma vez so, na inicializacao do modulo, e
-      // repassam para quem estiver na tela naquele momento. Registrar a cada
-      // abertura acumularia callbacks e salvaria a mesma receita varias vezes.
-      memed.MdSinapsePrescricao.event.add('core:moduleInit', (modulo) => {
-        const dados = modulo as { name?: string }
-        if (dados?.name !== 'plataforma.prescricao') return
+      // Fechamento do modulo e evento do MdSinapsePrescricao, nao do MdHub.
+      memed.MdSinapsePrescricao.event.add('core:moduleHide', (modulo) => {
+        const dados = modulo as { moduleName?: string; name?: string }
+        const nome = dados?.moduleName ?? dados?.name
+        if (nome && nome !== 'plataforma.prescricao') return
+        ouvintes.onFechar?.()
+      })
 
+      // Espera o MdHub existir, e nao um evento com um nome especifico.
+      //
+      // Ate 16/09/2026 a promessa so terminava dentro do evento
+      // 'core:moduleInit' quando o modulo se chamasse 'plataforma.prescricao'.
+      // Isso funcionava em homologacao e travou no primeiro teste em producao:
+      // o console mostrava "Todos os modulos da plataforma foram carregados com
+      // sucesso", o MdHub existia, a prescricao abria quando chamada a mao - e
+      // o botao girava para sempre, porque o evento nunca casou com a condicao.
+      //
+      // Perguntar "o MdHub ja existe?" nao depende do nome nem do formato do
+      // evento, que sao deles e mudam sem aviso. O que a gente precisa saber e
+      // exatamente isso: da para mandar comando.
+      //
+      // Os ouvintes de receita sao registrados aqui, uma vez so. Registrar a
+      // cada abertura acumularia callbacks e salvaria a mesma receita varias
+      // vezes.
+      espera = window.setInterval(() => {
         const hub = janela().MdHub
         if (!hub) return
+        window.clearInterval(espera)
 
         hub.event.add('prescricaoImpressa', (receita) => ouvintes.onReceita?.(receita))
         hub.event.add('prescricaoExcluida', (dados) => {
@@ -126,15 +151,7 @@ async function carregarScript(token: string, producao: boolean) {
         })
 
         pronto()
-      })
-
-      // Fechamento do modulo e evento do MdSinapsePrescricao, nao do MdHub.
-      memed.MdSinapsePrescricao.event.add('core:moduleHide', (modulo) => {
-        const dados = modulo as { moduleName?: string; name?: string }
-        const nome = dados?.moduleName ?? dados?.name
-        if (nome && nome !== 'plataforma.prescricao') return
-        ouvintes.onFechar?.()
-      })
+      }, 200)
     }
 
     script.onerror = () => {
