@@ -227,7 +227,8 @@ Deno.serve(async (req) => {
             .select(
               'id,booking_state,booking_options,booking_unit_id,booking_patient_id,' +
                 'booking_replaces_id,booking_intake_id,booking_modality,needs_attention,' +
-                'attention_reason,profile_name,booking_updated_at,auto_replies_while_waiting',
+                'attention_reason,profile_name,booking_updated_at,auto_replies_while_waiting,' +
+                'menu_sent_at',
             )
             .eq('clinic_id', clinicId)
             .eq('wa_id', waId)
@@ -462,6 +463,9 @@ Deno.serve(async (req) => {
                 ? 0
                 : Number(conversaAnterior?.auto_replies_while_waiting ?? 0),
               anexo: ehAnexo(message),
+              // Etapa vencida zera o menu junto: depois de um dia parada, a
+              // conversa recomeca do zero e a pessoa ve a apresentacao de novo.
+              jaViuOMenu: !etapaVenceu && Boolean(linhaAnterior?.menu_sent_at),
               nomeDoPerfil: nomeDoPerfil || conversaAnterior?.profile_name || '',
               textos: {
                 saudacao: settings.whatsapp_autoreply_text ?? '',

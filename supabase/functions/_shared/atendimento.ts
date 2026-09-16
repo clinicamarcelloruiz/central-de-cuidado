@@ -1769,6 +1769,14 @@ export async function tratarConversa(opcoes: {
    */
   anexo?: boolean
   /**
+   * O robo ja mostrou o menu nesta conversa.
+   *
+   * Falso na primeira mensagem de alguem. Enquanto for falso, atalho nenhum
+   * pula a apresentacao: a pessoa precisa ver o que existe antes de ser levada
+   * para dentro de um fluxo.
+   */
+  jaViuOMenu?: boolean
+  /**
    * Quantas respostas prontas o robo ja deu nesta espera pela equipe.
    *
    * Passando de LIMITE_NA_ESPERA, ele para de responder ate alguem assumir a
@@ -1887,13 +1895,30 @@ export async function tratarConversa(opcoes: {
     // podeIniciarMenu entra aqui porque ele e quem sabe se alguem da equipe
     // escreveu ha pouco. Com atendimento humano em andamento, nem a resposta
     // pronta deve aparecer: seria o robo falando por cima da atendente.
-    // Pedido de agendamento na fila nao recebe resposta pronta: quem escreveu
-    // "quero marcar retorno para o Anthony" nao perguntou o que levar na
-    // consulta, e responder isso e pior do que ficar quieto. A equipe ja esta
-    // com a conversa e marca junto, conferindo o cadastro antigo.
+    // Na fila, so responde o que casa forte: duas palavras do assunto, e nao
+    // uma. Uma palavra solta pega frases que nao sao pergunta - "quero marcar
+    // retorno para o Anthony" casava com "retorno" e recebia a lista de
+    // documentos. Duas palavras separam a duvida de verdade do resto.
+    //
+    // A trava anterior era "pedido de agendamento nao recebe resposta pronta", e
+    // ela calou a Aline: a mensagem dela pedia informacoes PARA agendar, e a
+    // pergunta (AMIL, valor, formas de pagamento) ficou sem resposta. O peso do
+    // casamento resolve os dois casos sem precisar adivinhar a intencao.
     const jaRespondidas = opcoes.respostasNaEspera ?? 0
-    if (!pediuAgendamento(texto) && opcoes.podeIniciarMenu && jaRespondidas < LIMITE_NA_ESPERA) {
-      const achada = acharResposta(texto, await carregarRespostas(admin, clinicId))
+    if (opcoes.podeIniciarMenu && jaRespondidas < LIMITE_NA_ESPERA) {
+      const lista = await carregarRespostas(admin, clinicId)
+      // Casamento forte (duas palavras do assunto) responde sempre, mesmo que a
+      // frase fale em agendar: e o caso da Aline, que pediu informacoes PARA
+      // agendar e perguntou de AMIL, valor e formas de pagamento.
+      //
+      // Casamento fraco (uma palavra) so vale se a pessoa nao estiver pedindo
+      // para marcar: e o caso da Sonia, cujo "quero marcar retorno para o
+      // Anthony" casava com "retorno" e recebia a lista de documentos. Mas
+      // "convenio?" solto, que tambem casa com uma palavra e e pergunta de
+      // verdade, continua respondido.
+      const achada =
+        acharResposta(texto, lista, 2) ??
+        (pediuAgendamento(texto) ? null : acharResposta(texto, lista, 1))
       // Sem perguntar a unidade: a pergunta "para qual atendimento?" mudaria a
       // etapa da conversa e tiraria a pessoa da fila sem ela pedir. Vale o
       // texto curto da propria resposta, que ja cobre os tres lugares.
@@ -1952,11 +1977,22 @@ export async function tratarConversa(opcoes: {
 
   // ---- Sem etapa em andamento ----
   if (!estadoAtual) {
-    // Sintoma junto do pedido nao abre a agenda direto. "Meu filho tem refluxo,
-    // queria marcar" e as duas coisas: o robo diz que nao orienta sobre sintoma
-    // e mostra o menu, de onde a pessoa marca pelo *2*. Pular essa frase seria
-    // o robo fingir que nao leu a parte que mais importava.
-    if (pediuAgendamento(texto) && !assuntoClinico(texto)) {
+    // Atalho de agendamento so depois que a pessoa viu o menu.
+    //
+    // O botao do site manda "Vim pelo site e gostaria de agendar uma consulta"
+    // ja escrito. Com o atalho valendo na primeira mensagem, a conversa comecava
+    // em "Em qual unidade?", sem apresentacao e sem as outras opcoes - e quem so
+    // queria saber o valor antes de marcar ficava sem saber que podia perguntar.
+    //
+    // Entao: primeira mensagem sempre recebe o menu, com a saudacao e as quatro
+    // opcoes. Da segunda em diante o atalho vale, e "quero marcar retorno para o
+    // Anthony" abre a agenda direto. A pessoa ja sabe o que existe ali.
+    //
+    // Sintoma junto do pedido tambem nao abre a agenda direto. "Meu filho tem
+    // refluxo, queria marcar" e as duas coisas: o robo diz que nao orienta sobre
+    // sintoma e mostra o menu, de onde ela marca pelo *2*. Pular essa frase
+    // seria o robo fingir que nao leu a parte que mais importava.
+    if (opcoes.jaViuOMenu && pediuAgendamento(texto) && !assuntoClinico(texto)) {
       return await iniciarAgendamento(
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
       )
@@ -1965,6 +2001,15 @@ export async function tratarConversa(opcoes: {
     // Mandar menu depois de "Estou bem, obrigada", ou no meio de uma conversa
     // que a secretaria esta tocando, atrapalha em vez de ajudar.
     if (!opcoes.podeIniciarMenu) return null
+
+    // Quem pediu para marcar na primeira mensagem ve o MENU, e nao uma resposta
+    // pronta. Sem esta linha, "quero marcar retorno para o Anthony" caia no
+    // texto de documentos, porque "retorno" e palavra-chave dele - foi o que
+    // aconteceu com a Sonia. O pedido e claro demais para o robo responder
+    // outra coisa; so nao e claro o bastante para pular a apresentacao.
+    if (pediuAgendamento(texto) && !assuntoClinico(texto)) {
+      return await mostrarMenu(admin, conversationId, saudacao)
+    }
 
     // A pergunta vem antes do menu. Quem escreveu uma duvida que a clinica ja
     // respondeu mil vezes merece a resposta, e nao uma lista de opcoes.
@@ -2089,6 +2134,19 @@ export async function tratarConversa(opcoes: {
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
       )
     }
+
+    // Com alguem da equipe conversando, o robo para por aqui.
+    //
+    // Numero de menu ele ainda processa, porque a pessoa escolheu de propósito.
+    // Mas texto solto, daqui para baixo, vira resposta pronta ou "nao entendi" -
+    // e isso ele nao pode mandar por cima de uma conversa humana em andamento.
+    // Aconteceu com a Barbara em 15/09/2026: a equipe explicou a mao, as 11:50,
+    // que a Trasmontano e atendida; ela perguntou "Unimed nao?" as 12:23 e o
+    // robo repetiu a resposta pronta de convenio por cima da atendente.
+    //
+    // A trava ja existia (12 horas desde a ultima mensagem de gente), mas so
+    // valia para quem estava sem etapa nenhuma. No menu, ela nao valia.
+    if (!opcoes.podeIniciarMenu) return null
 
     // Antes de dizer "nao entendi": a pessoa pode ter ignorado a lista e
     // escrito a duvida dela, que e o que se faz num WhatsApp de verdade.
