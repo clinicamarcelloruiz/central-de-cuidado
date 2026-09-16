@@ -1569,11 +1569,13 @@ function pulou(texto: string) {
 }
 
 /** A fila guardada na conversa: o que falta e quantas tentativas ja houve. */
-function filaDaFicha(opcoes: unknown): { tentativas: number; faltam: string[] } {
-  const bruto = opcoes as { tentativas?: number; faltam?: unknown } | null
+function filaDaFicha(opcoes: unknown): { tentativas: number; faltam: string[]; manual: boolean } {
+  const bruto = opcoes as { tentativas?: number; faltam?: unknown; manual?: boolean } | null
   return {
     tentativas: Number(bruto?.tentativas ?? 0),
     faltam: Array.isArray(bruto?.faltam) ? (bruto?.faltam as string[]) : [],
+    // Questionario disparado pela equipe, e nao pelo fim de um agendamento.
+    manual: bruto?.manual === true,
   }
 }
 
@@ -1589,6 +1591,8 @@ async function terminarDados(
   conversationId: string,
   clinicId?: string,
   appointmentId?: string | null,
+  /** Questionario disparado pela equipe: fecha sem comprovante. */
+  manual = false,
 ): Promise<Resultado> {
   await salvarEstado(admin, conversationId, {
     booking_state: 'menu',
@@ -1627,15 +1631,22 @@ async function terminarDados(
   // O comprovante fecha a conversa. Remontado aqui, e nao guardado la atras,
   // porque entre a reserva e esta mensagem a familia respondeu varias vezes -
   // e o que vale e o estado da consulta agora.
+  //
+  // NUNCA no questionario manual. Ali a consulta usada e so o lugar onde as
+  // respostas ficam penduradas, e pode ser uma que ja passou: em 16/09/2026 o
+  // robo terminou o questionario anunciando "✅ Consulta marcada! segunda,
+  // 14/09" - uma consulta de dois dias ANTES, que ninguem tinha acabado de
+  // marcar. Comprovante e coisa de quem acabou de marcar.
   let comprovante = ''
-  if (clinicId && appointmentId) {
+  if (clinicId && appointmentId && !manual) {
     try {
       const { data: consulta } = await admin
         .from('appointments')
         .select('starts_at,modality,clinic_units(name,address)')
         .eq('id', appointmentId)
         .maybeSingle()
-      if (consulta) {
+      // Consulta que ja passou nao vira comprovante, venha de onde vier.
+      if (consulta && new Date(consulta.starts_at).getTime() > Date.now()) {
         const unidade = (Array.isArray(consulta.clinic_units)
           ? consulta.clinic_units[0]
           : consulta.clinic_units) as { name?: string; address?: string } | null
@@ -1657,11 +1668,12 @@ async function terminarDados(
   return {
     resposta:
       '✅ *Tudo certo, obrigado!* Já anotamos os dados' +
-      // Sem consulta em maos, o destino foi a ficha - e dizer "na sua consulta"
-      // para quem nao tem nenhuma marcada faria a pessoa procurar por ela.
+      // "Na sua consulta" so quando a pessoa acabou de marcar uma. No
+      // questionario manual a consulta e detalhe interno - quem leu "anotamos
+      // na sua consulta" sem ter marcado nada sai procurando qual.
       (virouCadastro
         ? ' e seu cadastro está feito'
-        : appointmentId
+        : appointmentId && !manual
           ? ' na sua consulta'
           : ' no seu cadastro') +
       '.\n\n' +
@@ -1707,7 +1719,7 @@ export async function iniciarQuestionario(
     await salvarEstado(admin, conversationId, { booking_patient_id: paciente.id })
   }
 
-  const resultado = await perguntarDados(admin, conversationId, consultaId, faltam)
+  const resultado = await perguntarDados(admin, conversationId, consultaId, faltam, '', true)
   return { resultado, faltam }
 }
 
@@ -1731,9 +1743,19 @@ async function perguntarDados(
   /** A fila do que falta, comecando pela pergunta a fazer agora. */
   faltam: string[],
   aviso = '',
+  /**
+   * Questionario disparado pela equipe, e nao pelo fim de um agendamento.
+   *
+   * Muda os botoes: sem "Voltar ao menu". No agendamento ele faz sentido - a
+   * pessoa estava num fluxo e pode querer sair dele. Aqui ela nao estava em
+   * fluxo nenhum: a clinica pediu quatro dados, e oferecer "voltar ao menu"
+   * transforma um pedido curto numa porta de saida para o menu inteiro.
+   * Quem quiser sair mesmo assim digita MENU ou 0, como em qualquer etapa.
+   */
+  manual = false,
 ): Promise<Resultado> {
   const pergunta = PERGUNTAS.find((p) => p.chave === faltam[0])
-  if (!pergunta) return await terminarDados(admin, conversationId)
+  if (!pergunta) return await terminarDados(admin, conversationId, undefined, null, manual)
 
   await salvarEstado(admin, conversationId, {
     booking_state: pergunta.estado,
@@ -1741,7 +1763,7 @@ async function perguntarDados(
     // A fila do que ainda falta, e as tentativas na pergunta atual. Na segunda
     // falha o robo segue em frente sozinho, em vez de prender quem nao tem
     // como responder.
-    booking_options: { tentativas: 0, faltam },
+    booking_options: { tentativas: 0, faltam, manual },
   })
   return {
     resposta:
@@ -1751,11 +1773,15 @@ async function perguntarDados(
         ? ''
         : '\n\n_Se preferir não responder agora, digite PULAR._'),
     botoes: pergunta.obrigatoria
-      ? [{ id: 'MENU', titulo: 'Voltar ao menu' }]
-      : [
-          { id: 'PULAR', titulo: 'Pular' },
-          { id: 'MENU', titulo: 'Voltar ao menu' },
-        ],
+      ? manual
+        ? undefined
+        : [{ id: 'MENU', titulo: 'Voltar ao menu' }]
+      : manual
+        ? [{ id: 'PULAR', titulo: 'Pular' }]
+        : [
+            { id: 'PULAR', titulo: 'Pular' },
+            { id: 'MENU', titulo: 'Voltar ao menu' },
+          ],
   }
 }
 
@@ -2119,7 +2145,7 @@ export async function tratarConversa(opcoes: {
     // marcada, e ate entao a primeira resposta caia neste return.
     if (!consulta && !pacienteDaConsulta) return await terminarDados(admin, conversationId)
 
-    const { tentativas, faltam } = filaDaFicha(opcoes.opcoesAtuais)
+    const { tentativas, faltam, manual } = filaDaFicha(opcoes.opcoesAtuais)
     const restantes = faltam.slice(1)
 
     // Pular vale nos campos opcionais, sem justificativa e sem insistir. Nos
@@ -2128,19 +2154,19 @@ export async function tratarConversa(opcoes: {
     if (pulou(texto) || pediuVoltar(texto)) {
       if (perguntaAtual.obrigatoria && tentativas < 1) {
         await salvarEstado(admin, conversationId, {
-          booking_options: { tentativas: tentativas + 1, faltam },
+          booking_options: { tentativas: tentativas + 1, faltam, manual },
         })
         return {
           resposta:
             'Esse dado o Dr. Marcello precisa ter no cadastro. Pode responder aqui, ' +
             'mesmo que não seja exato?\n\n' +
             perguntaAtual.texto,
-          botoes: [{ id: 'MENU', titulo: 'Voltar ao menu' }],
+          botoes: manual ? undefined : [{ id: 'MENU', titulo: 'Voltar ao menu' }],
         }
       }
       return restantes.length
-        ? await perguntarDados(admin, conversationId, consulta, restantes, 'Sem problema.')
-        : await terminarDados(admin, conversationId, clinicId, consulta)
+        ? await perguntarDados(admin, conversationId, consulta, restantes, 'Sem problema.', manual)
+        : await terminarDados(admin, conversationId, clinicId, consulta, manual)
     }
 
     const valor = perguntaAtual.ler(texto)
@@ -2152,29 +2178,34 @@ export async function tratarConversa(opcoes: {
           ? await perguntarDados(
               admin, conversationId, consulta, restantes,
               'Tudo bem, deixamos esse campo em branco: o Dr. Marcello completa na consulta.',
+              manual,
             )
-          : await terminarDados(admin, conversationId, clinicId, consulta)
+          : await terminarDados(admin, conversationId, clinicId, consulta, manual)
       }
       await salvarEstado(admin, conversationId, {
-        booking_options: { tentativas: tentativas + 1, faltam },
+        booking_options: { tentativas: tentativas + 1, faltam, manual },
       })
       return {
         resposta:
           perguntaAtual.erro +
           (perguntaAtual.obrigatoria ? '' : '\n\n_Ou digite PULAR para seguir sem esse dado._'),
         botoes: perguntaAtual.obrigatoria
-          ? [{ id: 'MENU', titulo: 'Voltar ao menu' }]
-          : [
-              { id: 'PULAR', titulo: 'Pular' },
-              { id: 'MENU', titulo: 'Voltar ao menu' },
-            ],
+          ? manual
+            ? undefined
+            : [{ id: 'MENU', titulo: 'Voltar ao menu' }]
+          : manual
+            ? [{ id: 'PULAR', titulo: 'Pular' }]
+            : [
+                { id: 'PULAR', titulo: 'Pular' },
+                { id: 'MENU', titulo: 'Voltar ao menu' },
+              ],
       }
     }
 
     await guardarDado(admin, consulta, perguntaAtual, valor, pacienteDaConsulta)
     return restantes.length
-      ? await perguntarDados(admin, conversationId, consulta, restantes)
-      : await terminarDados(admin, conversationId, clinicId, consulta)
+      ? await perguntarDados(admin, conversationId, consulta, restantes, '', manual)
+      : await terminarDados(admin, conversationId, clinicId, consulta, manual)
   }
 
   // ---- Menu ----
