@@ -616,8 +616,13 @@ export default function Conversations({
 
   return (
     <div className="space-y-4">
+      {/* Gruda no topo da tela em vez de ficar parado no começo da página.
+          O aviso nascia aqui em cima, e quem aperta um botão da conversa está
+          lá embaixo, depois de dezenas de mensagens: o servidor recusava o
+          envio com o motivo explicado, e para quem estava olhando o botão não
+          acontecia nada. Foi o que houve com o Questionário. */}
       {error && (
-        <div className="flex items-start gap-2 rounded-[16px] border border-red-200 bg-red-50 p-3 text-[11px] font-semibold text-red-700">
+        <div className="sticky top-2 z-30 flex items-start gap-2 rounded-[16px] border border-red-200 bg-red-50 p-3 text-[11px] font-semibold text-red-700 shadow-[0_4px_14px_rgba(11,20,26,.12)]">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>

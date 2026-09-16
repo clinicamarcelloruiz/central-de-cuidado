@@ -70,18 +70,49 @@ type Ajustes = {
   prescriber_specialty_id: number | null
   prescriber_city_id: number | null
   memed_cadastro_completo_em: string | null
+  memed_cadastro_dados: string | null
   clinic_phone: string | null
+  clinic_phone_alt: string | null
 }
 
 /**
  * Telefone da clinica como a Memed guarda no cadastro: um numero, so digitos.
- * Em Preferencias pode haver dois ("fixo / WhatsApp"); o cadastro leva o
- * primeiro, a receita leva os dois.
+ *
+ * Prefere o celular (11 digitos). Ate 16/09/2026 levava sempre o PRIMEIRO
+ * numero de Preferencias, que aqui e o fixo de Santos - 10 digitos. A validacao
+ * nova da Memed, a que veio com a exigencia da Anvisa, recusa esse numero: a
+ * tela de Identificacao mostrava 1332736828 com um X vermelho e "Informe seu
+ * telefone", e nao deixava passar. O celular passa, e e o numero que o paciente
+ * ja usa - o mesmo do site e da bio do Instagram.
  */
 function telefoneDaClinica(ajustes: Ajustes) {
-  const primeiro = (ajustes.clinic_phone ?? '').split(/[/;,]|\se\s/)[0] ?? ''
-  const digitos = soDigitos(primeiro)
-  return digitos || undefined
+  const candidatos = [ajustes.clinic_phone, ajustes.clinic_phone_alt]
+    .flatMap((numero) => (numero ?? '').split(/[/;,]|\se\s/))
+    .map(soDigitos)
+    .filter((numero) => numero.length >= 10)
+
+  return candidatos.find((numero) => numero.length === 11) ?? candidatos[0]
+}
+
+/**
+ * O que foi enviado ao cadastro da Memed da ultima vez.
+ *
+ * Servia so uma data ("ja completei"), e com ela o envio nunca mais acontecia:
+ * o telefone errado ficou preso la dentro, recusado a cada receita, e nao havia
+ * como corrigir sem mexer no banco a mao. Comparando a assinatura, qualquer
+ * mudanca em Preferencias chega a Memed sozinha na proxima prescricao.
+ */
+function assinaturaDoCadastro(
+  ajustes: Ajustes,
+  especialidade: number | null,
+  cidade: number | null,
+) {
+  return [
+    ajustes.prescriber_email ?? '',
+    telefoneDaClinica(ajustes) ?? '',
+    especialidade ?? '',
+    cidade ?? '',
+  ].join('|')
 }
 
 /**
@@ -129,10 +160,14 @@ async function completarCadastro(
   cpf: string,
   ajustes: Ajustes,
 ): Promise<{ feito: boolean; detalhe?: string }> {
-  if (ajustes.memed_cadastro_completo_em) return { feito: true, detalhe: 'ja estava completo' }
-
   const especialidade = ajustes.prescriber_specialty_id ?? (await idDaEspecialidade(api, credenciais))
   const cidade = ajustes.prescriber_city_id ?? (await idDaCidade(api, credenciais, 'Santos', 'SP'))
+  const assinatura = assinaturaDoCadastro(ajustes, especialidade, cidade)
+
+  // Nada mudou desde o ultimo envio: nao ha o que reenviar.
+  if (ajustes.memed_cadastro_completo_em && ajustes.memed_cadastro_dados === assinatura) {
+    return { feito: true, detalhe: 'sem mudanca desde o ultimo envio' }
+  }
 
   const relationships: Record<string, unknown> = {}
   if (especialidade) relationships.especialidade = { data: { type: 'especialidades', id: especialidade } }
@@ -164,6 +199,7 @@ async function completarCadastro(
     .from('clinic_settings')
     .update({
       memed_cadastro_completo_em: new Date().toISOString(),
+      memed_cadastro_dados: assinatura,
       ...(especialidade ? { prescriber_specialty_id: especialidade } : {}),
       ...(cidade ? { prescriber_city_id: cidade } : {}),
     })
@@ -195,7 +231,7 @@ Deno.serve(async (req) => {
     // Sem membership ativo nao vem linha nenhuma, e a funcao para aqui.
     const { data: ajustes } = await escopo
       .from('clinic_settings')
-      .select('clinic_id,signer_name,signer_crm,prescriber_email,prescriber_birth_date,prescriber_specialty_id,prescriber_city_id,memed_cadastro_completo_em,clinic_phone')
+      .select('clinic_id,signer_name,signer_crm,prescriber_email,prescriber_birth_date,prescriber_specialty_id,prescriber_city_id,memed_cadastro_completo_em,memed_cadastro_dados,clinic_phone,clinic_phone_alt')
       .maybeSingle()
 
     if (!ajustes) return json({ error: 'Clínica não encontrada.', code: 'SEM_CLINICA' }, 403)

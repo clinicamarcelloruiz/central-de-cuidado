@@ -225,6 +225,23 @@ export type LocalDeAtendimento = {
   nome: string
   endereco?: string
   telefone?: string
+  cidade?: string
+  /** Cadastro Nacional de Estabelecimentos de Saúde desta unidade. */
+  cnes?: string
+}
+
+/**
+ * A cidade dentro do nome da unidade.
+ *
+ * As unidades são cadastradas como "Liferty · Santos" e "Livance Ibirapuera ·
+ * São Paulo": o que vem depois do separador é a cidade. Só aceita "·" e " - "
+ * com espaços dos dois lados, para não partir um nome como "Santa-Cecília" no
+ * meio. Sem separador, devolve nada e a Memed usa a cidade do cadastro.
+ */
+function cidadeDoNome(nome: string): string | undefined {
+  const separador = nome.includes('·') ? '·' : nome.includes(' - ') ? ' - ' : null
+  if (!separador) return undefined
+  return nome.split(separador).pop()?.trim() || undefined
 }
 
 /**
@@ -282,22 +299,31 @@ export async function abrirPrescricao(
 
   const primeiroNome = patient.nome.trim().split(/\s+/)[0] ?? patient.nome
 
-  // O local de atendimento sai impresso no rodape da receita, e a Memed passou
-  // a exigir endereco e telefone do local na identificacao. Vai ANTES do
-  // paciente, na ordem que a Memed documenta: depois, o modulo ignorava e a
-  // receita saia sem endereco nem telefone. Vai o endereco da
-  // unidade cadastrada na Agenda; sem ele o medico teria de digitar a cada
-  // receita.
+  // O local de atendimento: endereco, cidade e telefone que a Memed imprime na
+  // receita e cobra na tela de Identificacao desde que a Anvisa passou a exigi-los.
+  //
+  // OS NOMES DOS CAMPOS SAO DELES, EM INGLES, E NAO PODEM SER TRADUZIDOS.
+  // Ate 16/09/2026 mandavamos id/nome/endereco/telefone/cidade/uf. A Memed nao
+  // reclama de campo que nao conhece - ela ignora. Resultado: mandavamos tudo
+  // certo e chegava nada, a tela de Identificacao abria com endereco, cidade e
+  // telefone em branco, e o medico preenchia a mao a cada receita. Os nomes
+  // certos, documentados em setWorkplace, sao: city, state, cnes, local_name,
+  // address, phone.
+  //
+  // Vai ANTES do paciente, na ordem que a Memed documenta. Se ela recusar, a
+  // receita ainda sai - local e cabecalho, nao e a prescricao.
   const nomeDoLocal = local?.nome ?? consultation?.unidade
   if (nomeDoLocal) {
-    // Local e detalhe do rodape: se a Memed recusar, a receita ainda sai.
     await comando(hub, 'setWorkplace', {
-      id: `central-de-cuidado-${nomeDoLocal}`,
-      nome: nomeDoLocal,
-      endereco: local?.endereco || undefined,
-      telefone: local?.telefone || undefined,
-      cidade: nomeDoLocal.split('·').pop()?.trim() || undefined,
-      uf: 'SP',
+      local_name: nomeDoLocal,
+      address: local?.endereco || undefined,
+      city: local?.cidade || cidadeDoNome(nomeDoLocal),
+      state: 'SP',
+      phone: local?.telefone || undefined,
+      // Obrigatorio para quem integra a partir de agora, e a clinica ainda vai
+      // levantar o numero de cada unidade. Enquanto nao houver, nao se manda o
+      // campo vazio: valor em branco e pior do que ausencia.
+      ...(local?.cnes ? { cnes: local.cnes } : {}),
     })
   }
 
