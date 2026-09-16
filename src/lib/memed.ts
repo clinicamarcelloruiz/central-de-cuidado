@@ -16,9 +16,16 @@ import type { Consultation, Patient } from '@/types/patient'
 
 const URL_SCRIPT_HOMOLOGACAO =
   'https://integrations.memed.com.br/modulos/plataforma.sinapse-prescricao/build/sinapse-prescricao.min.js'
-// Em producao a Memed serve o script por outro endereco (documentacao de
-// boas praticas, 2026). O de homologacao e o "sinapse-prescricao.min.js".
-const URL_SCRIPT_PRODUCAO = 'https://partners.memed.com.br/integration.js'
+// Producao: MESMO caminho da homologacao, so muda o dominio.
+//
+// Ate 16/09/2026 aqui estava 'https://partners.memed.com.br/integration.js',
+// tirado de um guia de boas praticas. Esse arquivo nao existe: no primeiro
+// teste com as chaves de producao o script falhou em silencio, e o botao
+// "Prescrever" ficou girando para sempre esperando algo que nunca chegava.
+// Conferido no ar: este endereco responde 200 com a versao 3.25.0; o outro
+// nao responde.
+const URL_SCRIPT_PRODUCAO =
+  'https://partners.memed.com.br/modulos/plataforma.sinapse-prescricao/build/sinapse-prescricao.min.js'
 // Id fixo exigido pela homologacao da Memed: e por ele que se garante que o
 // script entrou uma unica vez na pagina.
 const ID_SCRIPT = 'memed-prescricao-script'
@@ -67,6 +74,28 @@ async function carregarScript(token: string, producao: boolean) {
   if (document.getElementById(ID_SCRIPT) && janela().MdHub) return Promise.resolve()
 
   carregando = new Promise<void>((resolve, reject) => {
+    // Prazo para o script se anunciar.
+    //
+    // A promessa só termina dentro do evento 'core:moduleInit' da Memed. Se
+    // esse evento não vier - script inexistente, rede caída, mudança do lado
+    // deles -, o botão gira para sempre e ninguém sabe por quê. Foi o que
+    // aconteceu em 16/09/2026, com o endereço errado do script de produção.
+    // Vinte segundos é folgado para um arquivo de 19 KB, e transforma um
+    // travamento silencioso numa frase que a pessoa lê.
+    const prazo = window.setTimeout(() => {
+      carregando = null
+      reject(new Error('A Memed não respondeu a tempo. Tente de novo em instantes.'))
+    }, 20_000)
+    const pronto = () => {
+      window.clearTimeout(prazo)
+      resolve()
+    }
+    const falhou = (causa: Error) => {
+      window.clearTimeout(prazo)
+      carregando = null
+      reject(causa)
+    }
+
     const script = document.createElement('script')
     script.id = ID_SCRIPT
     script.src = producao ? URL_SCRIPT_PRODUCAO : URL_SCRIPT_HOMOLOGACAO
@@ -76,7 +105,7 @@ async function carregarScript(token: string, producao: boolean) {
     script.onload = () => {
       const memed = janela()
       if (!memed.MdSinapsePrescricao) {
-        reject(new Error('A Memed carregou mas não se anunciou.'))
+        falhou(new Error('A Memed carregou mas não se anunciou.'))
         return
       }
 
@@ -96,7 +125,7 @@ async function carregarScript(token: string, producao: boolean) {
           if (excluida?.id !== undefined) ouvintes.onExcluida?.(String(excluida.id))
         })
 
-        resolve()
+        pronto()
       })
 
       // Fechamento do modulo e evento do MdSinapsePrescricao, nao do MdHub.
@@ -109,8 +138,7 @@ async function carregarScript(token: string, producao: boolean) {
     }
 
     script.onerror = () => {
-      carregando = null
-      reject(new Error('Não foi possível carregar a prescrição da Memed.'))
+      falhou(new Error('Não foi possível carregar a prescrição da Memed.'))
     }
 
     document.body.appendChild(script)
