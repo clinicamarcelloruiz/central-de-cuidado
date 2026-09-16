@@ -10,7 +10,12 @@
  * gastroenterologia pediátrica. Código que não estiver na lista continua
  * aparecendo como código, nunca some nem vira "desconhecido". Para incluir um
  * novo, basta acrescentar a linha.
+ *
+ * Atrás dele, como rede, vem a tabela oficial do DATASUS (cid-tabela.ts). Os
+ * nomes daqui ganham dela por serem escritos em português com acento; a tabela
+ * cobre os outros seiscentos códigos dos mesmos capítulos.
  */
+import { TABELA } from './cid-tabela'
 
 const NOMES: Record<string, string> = {
   A09: 'Diarreia e gastroenterite de origem infecciosa presumível',
@@ -31,6 +36,7 @@ const NOMES: Record<string, string> = {
   K58: 'Síndrome do intestino irritável',
   'K58.0': 'Síndrome do intestino irritável com diarreia',
   'K58.9': 'Síndrome do intestino irritável sem diarreia',
+  K59: 'Transtorno intestinal funcional',
   'K59.0': 'Constipação',
   'K59.1': 'Diarreia funcional',
   'K60.2': 'Fissura anal',
@@ -41,6 +47,7 @@ const NOMES: Record<string, string> = {
   'K90.9': 'Má absorção intestinal',
   'K92.2': 'Hemorragia gastrointestinal',
   'P92.1': 'Regurgitação do recém-nascido',
+  R10: 'Dor abdominal',
   'R10.1': 'Dor no abdome superior',
   'R10.4': 'Dor abdominal',
   R11: 'Náusea e vômitos',
@@ -60,12 +67,27 @@ function normalizar(codigo: string): string {
 }
 
 /**
- * O nome da doença, ou o próprio código quando ele não está no dicionário.
- * Também tenta a categoria de três caracteres: quem escreve "K21.1" ainda
- * recebe "Refluxo gastroesofágico" se a subdivisão exata não estiver aqui.
+ * O nome da doença, ou o próprio código quando ele não está em lugar nenhum.
+ *
+ * A busca tem quatro degraus, do mais bonito ao mais bruto:
+ *
+ *  1. NOMES, com o código exato. São os do dia a dia da clínica, escritos com
+ *     acento e em português de gente.
+ *  2. TABELA, com o código exato. A tabela do DATASUS, capítulos K e R, sem
+ *     acento e em caixa alta, como o Ministério publica.
+ *  3. e 4. Os mesmos dois, agora pela categoria de três caracteres: quem
+ *     escreve "K21.9" recebe "Refluxo gastroesofágico" mesmo que a subdivisão
+ *     exata não esteja escrita.
+ *
+ * Sem nada disso, devolve o próprio código. Melhor "Z99.9" na tela do que uma
+ * doença inventada.
+ *
+ * Até 15/09/2026 só existia o degrau 1, e o painel mostrava "K59" e "R10" crus
+ * porque o dicionário tinha "K59.0" e "R10.4", mas não as categorias.
  */
 export function nomeDoCid(codigo: string): string {
   const limpo = normalizar(codigo)
   if (!limpo) return ''
-  return NOMES[limpo] ?? NOMES[limpo.slice(0, 3)] ?? limpo
+  const categoria = limpo.slice(0, 3)
+  return NOMES[limpo] ?? TABELA[limpo] ?? NOMES[categoria] ?? TABELA[categoria] ?? limpo
 }
