@@ -50,7 +50,13 @@ Deno.serve(async (req) => {
     const querQuestionario = body.questionario === true
     let texto = (body.text ?? '').trim()
     if (!body.conversationId) return json({ error: 'Conversa não informada.' }, 400)
-    if (!texto && !querMenu) return json({ error: 'Escreva a mensagem antes de enviar.' }, 400)
+    // So exige texto digitado quando e a equipe escrevendo. O menu e o
+    // questionario chegam aqui sem texto de proposito: quem monta a mensagem e
+    // o robo, mais abaixo. Sem esta ressalva o botao Questionario batia nesta
+    // linha e voltava "Escreva a mensagem antes de enviar" sem nunca enviar.
+    if (!texto && !querMenu && !querQuestionario) {
+      return json({ error: 'Escreva a mensagem antes de enviar.' }, 400)
+    }
     if (texto.length > LIMITE_CARACTERES) {
       return json({ error: `A mensagem passa de ${LIMITE_CARACTERES} caracteres.` }, 400)
     }
