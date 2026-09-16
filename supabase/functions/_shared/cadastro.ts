@@ -12,6 +12,8 @@ type Admin = ReturnType<typeof adminClient>
 
 export type ConsultaParaCadastro = {
   id: string
+  /** Preenchido quando a consulta ja esta ligada a uma ficha. */
+  patient_id?: string | null
   starts_at: string
   contact_name: string | null
   contact_phone: string | null

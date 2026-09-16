@@ -14,6 +14,16 @@ import { montarConteudo } from '../_shared/conteudo.ts'
 const JANELA_HORAS = 24
 const LIMITE_CARACTERES = 4096
 
+/** O que o questionario precisa saber da ficha: o que ja esta preenchido. */
+type PacienteDaFicha = {
+  id: string
+  name: string
+  nascimento: string | null
+  responsavel: string | null
+  cpf: string | null
+  email: string | null
+}
+
 type ReplyRequest = {
   conversationId?: string
   /**
@@ -132,58 +142,69 @@ Deno.serve(async (req) => {
 
     // Questionario do cadastro, disparado pela equipe.
     //
-    // As respostas precisam de uma consulta onde ficar penduradas, entao a
-    // proxima consulta futura desta pessoa e o alvo. Sem consulta futura nao ha
-    // o que perguntar: a recepcao marca primeiro, e o robo pergunta sozinho.
+    // As respostas precisam de um destino, e ha dois: a consulta e a ficha do
+    // paciente. Basta um.
+    //
+    // Ate 16/09/2026 exigia consulta FUTURA, e isso deixava de fora justamente
+    // quem a equipe mais quer alcancar: o paciente antigo que nunca deu o CPF e
+    // nao tem nada marcado. Agora a busca e, nesta ordem: consulta futura,
+    // consulta passada (a mais recente), ficha. So recusa quem nao tem nenhuma
+    // das tres - ai nao ha onde guardar nada, e marcar vem primeiro.
     if (querQuestionario) {
       const agora = new Date().toISOString()
       const telefone = visivel.wa_id
-      let consulta: { id: string } | null = null
-      if (visivel.patient_id) {
-        const { data } = await admin
-          .from('appointments')
-          .select('id')
-          .eq('clinic_id', visivel.clinic_id)
-          .eq('patient_id', visivel.patient_id)
-          .eq('status', 'scheduled')
-          .gte('starts_at', agora)
-          .order('starts_at', { ascending: true })
-          .limit(1)
-          .maybeSingle()
-        consulta = data
+
+      // A ficha que recebe as respostas quando nao ha consulta nenhuma.
+      //
+      // Procurada pelo TELEFONE, com a mesma regra do webhook (com e sem o 55
+      // do pais). Tem de ser a mesma: e o webhook que vai reconhecer a pessoa
+      // quando a resposta chegar, e um cadastro que ele nao encontra faria o
+      // robo perguntar e jogar fora o que a familia digitasse.
+      const digitos = (telefone ?? '').replace(/\D/g, '')
+      const semPais = digitos.startsWith('55') ? digitos.slice(2) : digitos
+      const { data: fichas } = await admin
+        .from('patients')
+        .select('id,name,nascimento:birth_date,responsavel:guardian_name,cpf,email')
+        .eq('clinic_id', visivel.clinic_id)
+        .is('archived_at', null)
+        .or(`phone_digits.eq.${digitos},phone_digits.eq.${semPais}`)
+        .order('name')
+      const encontradas = (fichas ?? []) as unknown as PacienteDaFicha[]
+      const paciente = encontradas.length === 1 ? encontradas[0] : null
+
+      // A consulta onde pendurar as respostas: a proxima futura; nao havendo,
+      // a ultima que ja passou. Qualquer uma serve - o que ela dá é um lugar
+      // para o dado ficar até alguém conferir.
+      const donoDaConsulta = visivel.patient_id ?? paciente?.id ?? null
+      const buscarConsulta = async (futura: boolean) => {
+        let busca = admin.from('appointments').select('id').eq('clinic_id', visivel.clinic_id)
+        busca = donoDaConsulta
+          ? busca.eq('patient_id', donoDaConsulta)
+          : busca.eq('contact_phone', telefone)
+        busca = futura
+          ? busca.eq('status', 'scheduled').gte('starts_at', agora).order('starts_at', { ascending: true })
+          : busca.lt('starts_at', agora).order('starts_at', { ascending: false })
+        const { data } = await busca.limit(1).maybeSingle()
+        return data as { id: string } | null
       }
-      if (!consulta && telefone) {
-        const { data } = await admin
-          .from('appointments')
-          .select('id')
-          .eq('clinic_id', visivel.clinic_id)
-          .eq('contact_phone', telefone)
-          .eq('status', 'scheduled')
-          .gte('starts_at', agora)
-          .order('starts_at', { ascending: true })
-          .limit(1)
-          .maybeSingle()
-        consulta = data
-      }
-      if (!consulta) {
+      const consulta = (await buscarConsulta(true)) ?? (await buscarConsulta(false))
+
+      if (!consulta && !paciente) {
         return json({
-          error: 'Esta pessoa não tem consulta futura marcada. Marque a consulta primeiro.',
-          code: 'SEM_CONSULTA',
+          error: encontradas.length > 1
+            // Mae com dois filhos cadastrados no mesmo celular: perguntar "qual
+            // é o CPF?" sem saber de quem seria gravar no irmao errado.
+            ? 'Há mais de um paciente cadastrado neste telefone, e sem consulta marcada não dá para saber de quem são as respostas. Marque a consulta primeiro.'
+            : 'Esta pessoa ainda não tem cadastro nem consulta nenhuma, então as respostas não teriam onde ficar. Marque a consulta primeiro - o robô já pergunta tudo na hora.',
+          code: 'SEM_DESTINO',
         }, 409)
       }
 
-      let paciente = null
-      if (visivel.patient_id) {
-        const { data } = await admin
-          .from('patients')
-          .select('id,name,nascimento:birth_date,responsavel:guardian_name,cpf,email')
-          .eq('id', visivel.patient_id)
-          .maybeSingle()
-        paciente = data
-      }
-
-      const inicio = await iniciarQuestionario(admin, visivel.id, consulta.id, paciente)
-      if (!inicio) {
+      const inicio = await iniciarQuestionario(admin, visivel.id, consulta?.id ?? null, paciente)
+      // Sem resultado nao ha primeira pergunta para mandar: ou o cadastro ja
+      // esta completo, ou a montagem da pergunta falhou. Nos dois casos e
+      // melhor a equipe ler o motivo do que a familia receber um vazio.
+      if (!inicio?.resultado) {
         return json({
           error: 'O cadastro desta pessoa já está completo. Não há o que perguntar.',
           code: 'CADASTRO_COMPLETO',
@@ -192,8 +213,7 @@ Deno.serve(async (req) => {
       const quantas =
         inicio.faltam.length === 1 ? 'uma pergunta rápida' : `${inicio.faltam.length} perguntas rápidas`
       texto =
-        `📋 Para completar o cadastro da sua consulta, ${quantas}.\n\n` +
-        (inicio.resultado.resposta ?? '')
+        `📋 Para completar o cadastro, ${quantas}.\n\n` + (inicio.resultado.resposta ?? '')
       toques = inicio.resultado.botoes ? { botoes: inicio.resultado.botoes } : undefined
     }
 
