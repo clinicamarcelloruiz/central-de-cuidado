@@ -1983,6 +1983,54 @@ export async function atualizarFotoDoPerfil() {
  * E o que a familia ve ao tocar no nome da conversa, e hoje esta vazio. Nao
  * mexe no nome de exibicao, que e outra coisa e depende da Meta.
  */
+/** O cartao de visita do WhatsApp, como a clinica escreve em Preferencias. */
+export interface PerfilDoWhatsApp {
+  /** Recado curto, no topo do perfil. A Meta corta em 139 caracteres. */
+  recado: string
+  endereco: string
+  descricao: string
+  email: string
+  site: string
+}
+
+const CAMPOS_DO_PERFIL =
+  'whatsapp_profile_about,whatsapp_profile_address,whatsapp_profile_description,' +
+  'whatsapp_profile_email,whatsapp_profile_website'
+
+export async function getPerfilDoWhatsApp(clinicId: string): Promise<PerfilDoWhatsApp> {
+  const { data, error } = await tabelaCrua('clinic_settings')
+    .select(CAMPOS_DO_PERFIL)
+    .eq('clinic_id', clinicId)
+    .order('clinic_id', { ascending: true })
+  if (error) fail(error)
+  const linha = ((data ?? []) as Record<string, string | null>[])[0] ?? {}
+  return {
+    recado: linha.whatsapp_profile_about ?? '',
+    endereco: linha.whatsapp_profile_address ?? '',
+    descricao: linha.whatsapp_profile_description ?? '',
+    email: linha.whatsapp_profile_email ?? '',
+    site: linha.whatsapp_profile_website ?? '',
+  }
+}
+
+export async function savePerfilDoWhatsApp(clinicId: string, perfil: PerfilDoWhatsApp) {
+  const atualizar = (supabase.from as unknown as (n: string) => {
+    update: (valores: Record<string, unknown>) => {
+      eq: (coluna: string, valor: string) => PromiseLike<{ error: { message: string } | null }>
+    }
+  })('clinic_settings')
+  const { error } = await atualizar
+    .update({
+      whatsapp_profile_about: perfil.recado.trim(),
+      whatsapp_profile_address: perfil.endereco.trim(),
+      whatsapp_profile_description: perfil.descricao.trim(),
+      whatsapp_profile_email: perfil.email.trim(),
+      whatsapp_profile_website: perfil.site.trim(),
+    })
+    .eq('clinic_id', clinicId)
+  if (error) fail(error)
+}
+
 export async function atualizarDadosDoPerfil() {
   const { error } = await supabase.functions.invoke('whatsapp-perfil', {
     body: { acao: 'dados' },

@@ -19,7 +19,11 @@ import { DEFAULT_TEMPLATES } from '@/lib/store'
 import {
   atualizarDadosDoPerfil,
   atualizarFotoDoPerfil,
+  getCurrentMembership,
+  getPerfilDoWhatsApp,
+  savePerfilDoWhatsApp,
   situacaoDoWhatsApp,
+  type PerfilDoWhatsApp,
   type SituacaoDoNumero,
 } from '@/lib/repository'
 import DadosDaClinica from '@/sections/DadosDaClinica'
@@ -57,6 +61,50 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
   const [avisoFoto, setAvisoFoto] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
 
   const [gravandoDados, setGravandoDados] = useState(false)
+
+  // Os textos do perfil, escritos pela clínica. Salvar aqui grava no banco; só
+  // o botão de cima é que envia para a Meta.
+  const [perfil, setPerfil] = useState<PerfilDoWhatsApp>({
+    recado: '',
+    endereco: '',
+    descricao: '',
+    email: '',
+    site: '',
+  })
+  const [clinicId, setClinicId] = useState<string | null>(null)
+  const [salvandoPerfil, setSalvandoPerfil] = useState(false)
+  const [perfilSalvo, setPerfilSalvo] = useState(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const membership = await getCurrentMembership()
+        if (!membership) return
+        setClinicId(membership.clinicId)
+        setPerfil(await getPerfilDoWhatsApp(membership.clinicId))
+      } catch {
+        // Silêncio: sem os textos a tela ainda serve para foto e situação do nome.
+      }
+    })()
+  }, [])
+
+  async function salvarPerfil() {
+    if (!clinicId) return
+    setSalvandoPerfil(true)
+    setAvisoFoto(null)
+    try {
+      await savePerfilDoWhatsApp(clinicId, perfil)
+      setPerfilSalvo(true)
+      window.setTimeout(() => setPerfilSalvo(false), 2500)
+    } catch (causa) {
+      setAvisoFoto({
+        tipo: 'erro',
+        texto: causa instanceof Error ? causa.message : 'Não foi possível salvar os textos.',
+      })
+    } finally {
+      setSalvandoPerfil(false)
+    }
+  }
 
   async function gravarDados() {
     setAvisoFoto(null)
@@ -369,9 +417,46 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
             {trocandoFoto ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ImageUp className="h-3.5 w-3.5" />}
             {trocandoFoto ? 'Enviando para a Meta...' : 'Atualizar foto do perfil'}
           </button>
-          {/* O cartao de visita da conta: site, endereco, descricao e e-mail.
-              Botao separado do da foto porque sao dois endpoints diferentes na
-              Meta, e porque um pode falhar sem o outro. */}
+          {/* O cartao de visita da conta, escrito pela clínica.
+              O endereço muda de sala, de prédio e até de unidade, então mora no
+              banco e não no código. Só vai para a Meta quando você aperta o
+              botão: salvar aqui não publica nada. */}
+          <div className="mt-4 space-y-2.5 rounded-[16px] border border-[#081b2c]/[0.07] bg-[#fafaf8] p-3.5">
+            <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
+              O que aparece ao tocar no nome da conversa
+            </p>
+            {([
+              ['Recado curto', 'recado', 'Gastroenterologia Pediátrica · Santos e São Paulo', 139],
+              ['Endereço', 'endereco', 'Rua, número, sala, bairro, cidade', 256],
+              ['Descrição', 'descricao', 'O que a clínica faz, em duas linhas', 512],
+              ['E-mail', 'email', 'contato@exemplo.com.br', 128],
+              ['Site', 'site', 'https://drmarcelloruiz.com.br', 256],
+            ] as const).map(([rotulo, campo, exemplo, limite]) => (
+              <label key={campo} className="block">
+                <span className="text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
+                  {rotulo}
+                </span>
+                <input
+                  value={perfil[campo]}
+                  onChange={(e) => {
+                    setPerfil({ ...perfil, [campo]: e.target.value })
+                    setPerfilSalvo(false)
+                  }}
+                  maxLength={limite}
+                  placeholder={exemplo}
+                  className="mt-1 w-full rounded-xl border border-[#081b2c]/10 bg-white px-3 py-2 text-[11px] font-semibold text-[#081b2c] outline-none focus:border-[#2f7fc1]"
+                />
+              </label>
+            ))}
+            <button
+              type="button"
+              onClick={() => void salvarPerfil()}
+              disabled={salvandoPerfil}
+              className="w-full rounded-xl bg-[#2f7fc1] px-4 py-2 text-[10px] font-extrabold text-white transition hover:bg-[#25649c] disabled:opacity-60"
+            >
+              {salvandoPerfil ? 'Salvando...' : perfilSalvo ? 'Salvo' : 'Salvar textos'}
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => void gravarDados()}

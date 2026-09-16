@@ -24,26 +24,34 @@ type Pedido = { imagemUrl?: string; acao?: 'foto' | 'status' | 'dados' }
  * Site, endereco, descricao e e-mail. Nada disso e o "nome de exibicao", que e
  * outra coisa e mora no Gerenciador; aqui e o cartao de visita da conta.
  *
- * Vale por dois motivos. O primeiro e simples: hoje esta vazio, e conta de
- * clinica sem endereco nem site parece conta improvisada. O segundo e o caso do
- * momento - o site cadastrado no portfolio empresarial aponta para um dominio
- * que nao e da clinica, e quem revisa o nome de exibicao tambem olha para este
- * perfil. Ter o endereco certo aqui nao conserta o cadastro, mas poe a prova no
- * lugar onde ela pode ser vista.
+ * Os textos sao da clinica e ficam no banco, editaveis em Preferencias: o
+ * endereco muda de sala, de predio e de unidade, e trocar isso nao pode
+ * depender de programador. Se algum campo estiver vazio, ele simplesmente nao
+ * vai para a Meta - e melhor um perfil incompleto do que um endereco errado.
  *
  * vertical 'HEALTH' e a categoria da Meta para saude, e aparece como rotulo.
+ * Essa fica no codigo porque e classificacao da Meta, e nao texto da clinica.
  */
-const PERFIL = {
-  about: 'Gastroenterologia Pediátrica · Santos e São Paulo',
-  address: 'Al. Armênio Mendes, 66, sala 2912, Aparecida, Santos - SP',
-  description:
-    'Consultório do Dr. Marcello Ruiz da Silva, gastroenterologista pediátrico. ' +
-    'Atendimento em Santos e São Paulo, e por telemedicina. Agendamento por aqui mesmo.',
-  // O mesmo e-mail da conta da clinica na Meta: existe, e lido, e ja e o
-  // endereco que o consultorio usa para assunto administrativo.
-  email: 'clinicamarcelloruiz@gmail.com',
-  vertical: 'HEALTH',
-  websites: ['https://drmarcelloruiz.com.br'],
+const LIMITES = { about: 139, address: 256, description: 512, email: 128 }
+
+function montarPerfil(linha: Record<string, unknown>) {
+  const texto = (campo: string, limite: number) =>
+    String(linha[campo] ?? '').trim().slice(0, limite)
+
+  const perfil: Record<string, unknown> = { vertical: 'HEALTH' }
+  const about = texto('whatsapp_profile_about', LIMITES.about)
+  const address = texto('whatsapp_profile_address', LIMITES.address)
+  const description = texto('whatsapp_profile_description', LIMITES.description)
+  const email = texto('whatsapp_profile_email', LIMITES.email)
+  const site = texto('whatsapp_profile_website', 256)
+
+  if (about) perfil.about = about
+  if (address) perfil.address = address
+  if (description) perfil.description = description
+  if (email) perfil.email = email
+  // A Meta aceita ate dois sites; a clinica tem um.
+  if (site) perfil.websites = [site]
+  return perfil
 }
 
 /**
@@ -126,6 +134,24 @@ Deno.serve(async (req) => {
     // inteiro num POST. Nao mexe no nome de exibicao nem gasta nenhuma das
     // tres trocas de nome permitidas a cada 30 dias.
     if (corpo.acao === 'dados') {
+      // Os textos vem do banco, escritos pela clinica em Preferencias.
+      const { data: linha } = await escopo
+        .from('clinic_settings')
+        .select(
+          'whatsapp_profile_about,whatsapp_profile_address,whatsapp_profile_description,' +
+            'whatsapp_profile_email,whatsapp_profile_website',
+        )
+        .eq('clinic_id', ajustes.clinic_id)
+        .maybeSingle()
+
+      const PERFIL = montarPerfil((linha ?? {}) as Record<string, unknown>)
+      if (Object.keys(PERFIL).length <= 1) {
+        return json({
+          error: 'Preencha o perfil em Preferências antes de enviar para a Meta.',
+          code: 'PERFIL_VAZIO',
+        }, 400)
+      }
+
       const resposta = await fetch(
         `https://graph.facebook.com/${versao}/${ajustes.whatsapp_phone_number_id}/whatsapp_business_profile`,
         {
