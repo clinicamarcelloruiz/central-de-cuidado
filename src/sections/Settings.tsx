@@ -16,7 +16,12 @@ import {
 } from 'lucide-react'
 import type { Db, FollowupKey } from '@/types/patient'
 import { DEFAULT_TEMPLATES } from '@/lib/store'
-import { atualizarFotoDoPerfil, situacaoDoWhatsApp, type SituacaoDoNumero } from '@/lib/repository'
+import {
+  atualizarDadosDoPerfil,
+  atualizarFotoDoPerfil,
+  situacaoDoWhatsApp,
+  type SituacaoDoNumero,
+} from '@/lib/repository'
 import DadosDaClinica from '@/sections/DadosDaClinica'
 import RespostasProntas from '@/sections/RespostasProntas'
 import InformacoesDoWhatsApp from '@/sections/InformacoesDoWhatsApp'
@@ -50,6 +55,28 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
 
   const [trocandoFoto, setTrocandoFoto] = useState(false)
   const [avisoFoto, setAvisoFoto] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+
+  const [gravandoDados, setGravandoDados] = useState(false)
+
+  async function gravarDados() {
+    setAvisoFoto(null)
+    setGravandoDados(true)
+    try {
+      await atualizarDadosDoPerfil()
+      setAvisoFoto({
+        tipo: 'ok',
+        texto:
+          'Perfil atualizado: site, endereço, descrição e e-mail. Aparece ao tocar no nome da conversa.',
+      })
+    } catch (causa) {
+      setAvisoFoto({
+        tipo: 'erro',
+        texto: causa instanceof Error ? causa.message : 'Não foi possível gravar o perfil.',
+      })
+    } finally {
+      setGravandoDados(false)
+    }
+  }
 
   async function trocarFoto() {
     setAvisoFoto(null)
@@ -341,6 +368,18 @@ export default function Settings({ db, setTemplates, importDb, clearAll }: Props
           >
             {trocandoFoto ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ImageUp className="h-3.5 w-3.5" />}
             {trocandoFoto ? 'Enviando para a Meta...' : 'Atualizar foto do perfil'}
+          </button>
+          {/* O cartao de visita da conta: site, endereco, descricao e e-mail.
+              Botao separado do da foto porque sao dois endpoints diferentes na
+              Meta, e porque um pode falhar sem o outro. */}
+          <button
+            type="button"
+            onClick={() => void gravarDados()}
+            disabled={gravandoDados}
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-[#081b2c]/12 bg-white px-4 py-2.5 text-[10px] font-extrabold text-[#081b2c] transition hover:bg-[#f3f6f9] disabled:cursor-wait disabled:opacity-70"
+          >
+            {gravandoDados ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+            {gravandoDados ? 'Gravando...' : 'Atualizar site e endereço do perfil'}
           </button>
           {avisoFoto && (
             <p

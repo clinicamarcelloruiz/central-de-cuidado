@@ -1977,6 +1977,19 @@ export async function atualizarFotoDoPerfil() {
   if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível trocar a foto.'))
 }
 
+/**
+ * Grava o cartao de visita da conta: site, endereco, descricao e e-mail.
+ *
+ * E o que a familia ve ao tocar no nome da conversa, e hoje esta vazio. Nao
+ * mexe no nome de exibicao, que e outra coisa e depende da Meta.
+ */
+export async function atualizarDadosDoPerfil() {
+  const { error } = await supabase.functions.invoke('whatsapp-perfil', {
+    body: { acao: 'dados' },
+  })
+  if (error) throw new Error(await motivoDaFalha(error, 'Não foi possível gravar o perfil.'))
+}
+
 // ---------------------------------------------------------------------------
 // Receitas emitidas pela Memed
 // ---------------------------------------------------------------------------

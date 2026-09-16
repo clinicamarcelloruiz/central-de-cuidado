@@ -16,7 +16,35 @@ import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.
  * arquivo la e chamar isto de novo.
  */
 
-type Pedido = { imagemUrl?: string; acao?: 'foto' | 'status' }
+type Pedido = { imagemUrl?: string; acao?: 'foto' | 'status' | 'dados' }
+
+/**
+ * O perfil que a familia ve ao tocar no nome da conversa.
+ *
+ * Site, endereco, descricao e e-mail. Nada disso e o "nome de exibicao", que e
+ * outra coisa e mora no Gerenciador; aqui e o cartao de visita da conta.
+ *
+ * Vale por dois motivos. O primeiro e simples: hoje esta vazio, e conta de
+ * clinica sem endereco nem site parece conta improvisada. O segundo e o caso do
+ * momento - o site cadastrado no portfolio empresarial aponta para um dominio
+ * que nao e da clinica, e quem revisa o nome de exibicao tambem olha para este
+ * perfil. Ter o endereco certo aqui nao conserta o cadastro, mas poe a prova no
+ * lugar onde ela pode ser vista.
+ *
+ * vertical 'HEALTH' e a categoria da Meta para saude, e aparece como rotulo.
+ */
+const PERFIL = {
+  about: 'Gastroenterologia Pediátrica · Santos e São Paulo',
+  address: 'Al. Armênio Mendes, 66, sala 2912, Aparecida, Santos - SP',
+  description:
+    'Consultório do Dr. Marcello Ruiz da Silva, gastroenterologista pediátrico. ' +
+    'Atendimento em Santos e São Paulo, e por telemedicina. Agendamento por aqui mesmo.',
+  // O mesmo e-mail da conta da clinica na Meta: existe, e lido, e ja e o
+  // endereco que o consultorio usa para assunto administrativo.
+  email: 'clinicamarcelloruiz@gmail.com',
+  vertical: 'HEALTH',
+  websites: ['https://drmarcelloruiz.com.br'],
+}
 
 /**
  * Como a Meta chama cada situacao do nome, em portugues.
@@ -90,6 +118,31 @@ Deno.serve(async (req) => {
         situacaoDoPedido: traduz(dados.new_name_status),
         qualidade: dados.quality_rating ?? null,
       })
+    }
+
+    // Grava o cartao de visita da conta: site, endereco, descricao, e-mail.
+    //
+    // Endpoint diferente do da foto e de uma vez so - a Meta aceita o objeto
+    // inteiro num POST. Nao mexe no nome de exibicao nem gasta nenhuma das
+    // tres trocas de nome permitidas a cada 30 dias.
+    if (corpo.acao === 'dados') {
+      const resposta = await fetch(
+        `https://graph.facebook.com/${versao}/${ajustes.whatsapp_phone_number_id}/whatsapp_business_profile`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messaging_product: 'whatsapp', ...PERFIL }),
+        },
+      )
+      const dados = await resposta.json()
+      if (!resposta.ok) {
+        console.error('Falha ao gravar o perfil', dados)
+        return json({
+          error: 'A Meta recusou a gravação do perfil.',
+          details: JSON.stringify(dados).slice(0, 400),
+        }, 502)
+      }
+      return json({ ok: true, perfil: PERFIL })
     }
 
     const imagemUrl = corpo.imagemUrl?.trim() || PADRAO
