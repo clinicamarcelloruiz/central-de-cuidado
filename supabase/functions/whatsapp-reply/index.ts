@@ -1,5 +1,5 @@
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
-import { mostrarMenu } from '../_shared/atendimento.ts'
+import { iniciarQuestionario, mostrarMenu } from '../_shared/atendimento.ts'
 import { montarConteudo } from '../_shared/conteudo.ts'
 
 /**
@@ -29,6 +29,12 @@ type ReplyRequest = {
    * conversa e quer devolver a pessoa ao atendimento automatico.
    */
   menu?: boolean
+  /**
+   * Em vez de texto, refaz as perguntas do cadastro (nome, nascimento,
+   * responsavel, CPF, e-mail) na conversa. Serve para quem marcou e abandonou
+   * a ficha: a recepcao dispara pelo botao em vez de ligar.
+   */
+  questionario?: boolean
 }
 
 Deno.serve(async (req) => {
@@ -41,6 +47,7 @@ Deno.serve(async (req) => {
 
     const body = (await req.json()) as ReplyRequest
     const querMenu = body.menu === true
+    const querQuestionario = body.questionario === true
     let texto = (body.text ?? '').trim()
     if (!body.conversationId) return json({ error: 'Conversa não informada.' }, 400)
     if (!texto && !querMenu) return json({ error: 'Escreva a mensagem antes de enviar.' }, 400)
@@ -117,6 +124,73 @@ Deno.serve(async (req) => {
       toques = menu?.lista ? { lista: menu.lista } : undefined
     }
 
+    // Questionario do cadastro, disparado pela equipe.
+    //
+    // As respostas precisam de uma consulta onde ficar penduradas, entao a
+    // proxima consulta futura desta pessoa e o alvo. Sem consulta futura nao ha
+    // o que perguntar: a recepcao marca primeiro, e o robo pergunta sozinho.
+    if (querQuestionario) {
+      const agora = new Date().toISOString()
+      const telefone = visivel.wa_id
+      let consulta: { id: string } | null = null
+      if (visivel.patient_id) {
+        const { data } = await admin
+          .from('appointments')
+          .select('id')
+          .eq('clinic_id', visivel.clinic_id)
+          .eq('patient_id', visivel.patient_id)
+          .eq('status', 'scheduled')
+          .gte('starts_at', agora)
+          .order('starts_at', { ascending: true })
+          .limit(1)
+          .maybeSingle()
+        consulta = data
+      }
+      if (!consulta && telefone) {
+        const { data } = await admin
+          .from('appointments')
+          .select('id')
+          .eq('clinic_id', visivel.clinic_id)
+          .eq('contact_phone', telefone)
+          .eq('status', 'scheduled')
+          .gte('starts_at', agora)
+          .order('starts_at', { ascending: true })
+          .limit(1)
+          .maybeSingle()
+        consulta = data
+      }
+      if (!consulta) {
+        return json({
+          error: 'Esta pessoa não tem consulta futura marcada. Marque a consulta primeiro.',
+          code: 'SEM_CONSULTA',
+        }, 409)
+      }
+
+      let paciente = null
+      if (visivel.patient_id) {
+        const { data } = await admin
+          .from('patients')
+          .select('id,name,nascimento:birth_date,responsavel:guardian_name,cpf,email')
+          .eq('id', visivel.patient_id)
+          .maybeSingle()
+        paciente = data
+      }
+
+      const inicio = await iniciarQuestionario(admin, visivel.id, consulta.id, paciente)
+      if (!inicio) {
+        return json({
+          error: 'O cadastro desta pessoa já está completo. Não há o que perguntar.',
+          code: 'CADASTRO_COMPLETO',
+        }, 409)
+      }
+      const quantas =
+        inicio.faltam.length === 1 ? 'uma pergunta rápida' : `${inicio.faltam.length} perguntas rápidas`
+      texto =
+        `📋 Para completar o cadastro da sua consulta, ${quantas}.\n\n` +
+        (inicio.resultado.resposta ?? '')
+      toques = inicio.resultado.botoes ? { botoes: inicio.resultado.botoes } : undefined
+    }
+
     if (!settings?.whatsapp_phone_number_id) {
       return json({ error: 'Configuração do WhatsApp incompleta.', code: 'INCOMPLETE' }, 409)
     }
@@ -150,7 +224,7 @@ Deno.serve(async (req) => {
         conversation_id: visivel.id,
         patient_id: visivel.patient_id,
         direction: 'outbound',
-        automatic: body.automatico === true || querMenu,
+        automatic: body.automatico === true || querMenu || querQuestionario,
         message_type: toques ? 'interactive' : 'text',
         body: texto,
         status: 'failed',
@@ -168,7 +242,7 @@ Deno.serve(async (req) => {
         patient_id: visivel.patient_id,
         external_message_id: corpo?.messages?.[0]?.id ?? null,
         direction: 'outbound',
-        automatic: body.automatico === true || querMenu,
+        automatic: body.automatico === true || querMenu || querQuestionario,
         message_type: toques ? 'interactive' : 'text',
         body: texto,
         status: 'accepted',

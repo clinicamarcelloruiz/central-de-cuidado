@@ -1373,8 +1373,18 @@ async function marcar(
   // ultimo campo. Perguntar antes de marcar transformaria cinco perguntas em
   // cinco chances de perder o horario para outra pessoa.
   //
-  // Numa remarcacao nao se pergunta nada: os dados ja vieram na primeira vez.
-  const faltam = substitui ? [] : camposQueFaltam(paciente)
+  // Pergunta o que falta, inclusive na remarcacao.
+  //
+  // Ate 16/09/2026 a remarcacao pulava a ficha inteira, com o comentario "os
+  // dados ja vieram na primeira vez". Nao vieram: quem toca em "Voltar ao menu"
+  // no meio das perguntas fica com a consulta marcada e a ficha vazia, e a
+  // remarcacao virava a porta dos fundos para nunca mais responder nada. Foi o
+  // caso do Sandro em 16/09: escolheu o horario, saiu na primeira pergunta,
+  // remarcou em seguida e recebeu "Consulta remarcada!" sem cadastro nenhum.
+  //
+  // Paciente completo continua sem ser interrogado: camposQueFaltam devolve
+  // lista vazia para quem ja tem tudo, remarcando ou nao.
+  const faltam = camposQueFaltam(paciente)
   const comprovante =
     `✅ ${aviso}\n\n🗓️ ${quando}\n${tele ? "💻" : "📍"} ${onde}\n\n` +
     '*Um dia antes da consulta enviamos uma mensagem aqui pelo WhatsApp para ' +
@@ -1647,6 +1657,31 @@ async function terminarDados(
       (comprovante ? `━━━━━━━━━━━━━━\n${comprovante}` : '') +
       VOLTA,
   }
+}
+
+/**
+ * Recomeça o questionário do cadastro, a pedido da equipe.
+ *
+ * O caminho normal é o robô perguntar logo depois de marcar. Mas quem toca em
+ * "Voltar ao menu" no meio, ou some, fica com a consulta marcada e a ficha
+ * vazia - e aí só a recepção percebe, olhando a agenda na véspera. O botão
+ * "Questionário" na tela de Respostas serve para essa hora: manda as perguntas
+ * de novo, na conversa que já existe, sem ninguém ter de ligar.
+ *
+ * Devolve null quando não há o que perguntar: sem consulta futura para
+ * pendurar as respostas, ou com o cadastro já completo. Quem chamou avisa a
+ * equipe na tela, em vez de mandar mensagem à toa para a família.
+ */
+export async function iniciarQuestionario(
+  admin: Admin,
+  conversationId: string,
+  consultaId: string,
+  paciente: Paciente | null,
+): Promise<{ resultado: Resultado; faltam: string[] } | null> {
+  const faltam = camposQueFaltam(paciente)
+  if (faltam.length === 0) return null
+  const resultado = await perguntarDados(admin, conversationId, consultaId, faltam)
+  return { resultado, faltam }
 }
 
 /**
