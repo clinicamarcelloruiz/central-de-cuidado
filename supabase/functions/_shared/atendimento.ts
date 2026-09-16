@@ -19,7 +19,7 @@
  */
 
 import type { adminClient } from './whatsapp.ts'
-import { cadastrarDaFicha } from './cadastro.ts'
+import { cadastrarDaFicha, type ConsultaParaCadastro } from './cadastro.ts'
 import { acharResposta, assuntoClinico, carregarRespostas } from './respostas.ts'
 
 /** Dias oferecidos de uma vez. Cabe a quinzena inteira numa mensagem so. */
@@ -1611,8 +1611,13 @@ async function terminarDados(
         )
         .eq('id', appointmentId)
         .maybeSingle()
-      if (consulta && !consulta.patient_id) {
-        virouCadastro = Boolean(await cadastrarDaFicha(admin, clinicId, consulta))
+      // O cliente do Deno nao consegue tipar select com tabela aninhada
+      // (clinic_units(name)) e devolve um tipo de erro no lugar da linha. O
+      // formato e o que ConsultaParaCadastro descreve, e e o proprio select
+      // acima que garante isso.
+      const ficha = consulta as unknown as ConsultaParaCadastro | null
+      if (ficha && !ficha.patient_id) {
+        virouCadastro = Boolean(await cadastrarDaFicha(admin, clinicId, ficha))
       }
     } catch (causa) {
       console.error('Nao consegui criar o cadastro a partir da ficha', causa)
@@ -1652,7 +1657,13 @@ async function terminarDados(
   return {
     resposta:
       '✅ *Tudo certo, obrigado!* Já anotamos os dados' +
-      (virouCadastro ? ' e seu cadastro está feito' : ' na sua consulta') +
+      // Sem consulta em maos, o destino foi a ficha - e dizer "na sua consulta"
+      // para quem nao tem nenhuma marcada faria a pessoa procurar por ela.
+      (virouCadastro
+        ? ' e seu cadastro está feito'
+        : appointmentId
+          ? ' na sua consulta'
+          : ' no seu cadastro') +
       '.\n\n' +
       (comprovante ? `━━━━━━━━━━━━━━\n${comprovante}` : '') +
       VOLTA,
@@ -1668,18 +1679,34 @@ async function terminarDados(
  * "Questionário" na tela de Respostas serve para essa hora: manda as perguntas
  * de novo, na conversa que já existe, sem ninguém ter de ligar.
  *
- * Devolve null quando não há o que perguntar: sem consulta futura para
- * pendurar as respostas, ou com o cadastro já completo. Quem chamou avisa a
- * equipe na tela, em vez de mandar mensagem à toa para a família.
+ * Devolve null quando não há o que perguntar, isto é, quando o cadastro já
+ * está completo. Quem chamou avisa a equipe na tela, em vez de mandar mensagem
+ * à toa para a família.
  */
 export async function iniciarQuestionario(
   admin: Admin,
   conversationId: string,
-  consultaId: string,
+  /**
+   * A consulta onde pendurar as respostas, quando existe.
+   *
+   * Aceita null desde 16/09/2026. Antes exigia consulta FUTURA, e isso deixava
+   * de fora justamente quem a equipe mais quer alcançar: o paciente antigo sem
+   * CPF na ficha, que não tem nada marcado. Sem consulta, as respostas vão
+   * direto para o cadastro.
+   */
+  consultaId: string | null,
   paciente: Paciente | null,
 ): Promise<{ resultado: Resultado; faltam: string[] } | null> {
   const faltam = camposQueFaltam(paciente)
   if (faltam.length === 0) return null
+
+  // Deixa escrito de quem são as respostas. Sem consulta, é só isto que liga o
+  // que a família vai digitar a uma ficha - e num telefone com dois irmãos
+  // cadastrados, é o que impede o CPF de um cair no cadastro do outro.
+  if (paciente) {
+    await salvarEstado(admin, conversationId, { booking_patient_id: paciente.id })
+  }
+
   const resultado = await perguntarDados(admin, conversationId, consultaId, faltam)
   return { resultado, faltam }
 }
@@ -1694,7 +1721,13 @@ export async function iniciarQuestionario(
 async function perguntarDados(
   admin: Admin,
   conversationId: string,
-  appointmentId: string,
+  /**
+   * A consulta onde as respostas ficam penduradas, quando ha uma.
+   *
+   * Null quando a equipe disparou o questionario para alguem que ja tem ficha
+   * mas nao tem consulta marcada: ai as respostas vao direto para o cadastro.
+   */
+  appointmentId: string | null,
   /** A fila do que falta, comecando pela pergunta a fazer agora. */
   faltam: string[],
   aviso = '',
@@ -1735,16 +1768,19 @@ async function perguntarDados(
  */
 async function guardarDado(
   admin: Admin,
-  appointmentId: string,
+  /** Null quando o questionario foi disparado sem consulta: so ficha. */
+  appointmentId: string | null,
   pergunta: (typeof PERGUNTAS)[number],
   valor: string,
   paciente: Paciente | null,
 ) {
-  const { error } = await admin
-    .from('appointments')
-    .update({ [pergunta.coluna]: valor })
-    .eq('id', appointmentId)
-  if (error) console.error('Falha ao guardar dado do agendamento', { coluna: pergunta.coluna, error })
+  if (appointmentId) {
+    const { error } = await admin
+      .from('appointments')
+      .update({ [pergunta.coluna]: valor })
+      .eq('id', appointmentId)
+    if (error) console.error('Falha ao guardar dado do agendamento', { coluna: pergunta.coluna, error })
+  }
 
   // Paciente ja cadastrado: o dado vai tambem para a ficha dele, que e de onde
   // a receita e o prontuario leem. So preenche buraco - nunca sobrescreve o que
@@ -2076,9 +2112,12 @@ export async function tratarConversa(opcoes: {
   const perguntaAtual = PERGUNTAS.find((p) => p.estado === estadoAtual)
   if (perguntaAtual) {
     const consulta = opcoes.consultaEmCadastro
-    // Sem a consulta em maos nao ha onde guardar. Encerra em vez de continuar
-    // perguntando para o vazio.
-    if (!consulta) return await terminarDados(admin, conversationId)
+    // Precisa de um destino: a consulta, ou a ficha de quem ja e paciente.
+    // Sem nenhum dos dois, encerra em vez de continuar perguntando para o
+    // vazio. A ficha entrou aqui em 16/09/2026: a equipe passou a poder
+    // disparar o questionario para quem tem cadastro e nenhuma consulta
+    // marcada, e ate entao a primeira resposta caia neste return.
+    if (!consulta && !pacienteDaConsulta) return await terminarDados(admin, conversationId)
 
     const { tentativas, faltam } = filaDaFicha(opcoes.opcoesAtuais)
     const restantes = faltam.slice(1)
