@@ -1468,6 +1468,27 @@ export async function sendConversationMenu(conversationId: string) {
   }
 }
 
+/**
+ * Refaz as perguntas do cadastro na conversa, a pedido da equipe.
+ *
+ * Para quem marcou e abandonou a ficha: em vez de ligar atrás do CPF, a
+ * recepção dispara o questionário e o robô conduz, como teria feito na hora.
+ */
+export async function sendConversationQuestionnaire(conversationId: string) {
+  const { data, error } = await supabase.functions.invoke('whatsapp-reply', {
+    body: { conversationId, questionario: true },
+  })
+  if (error) {
+    const detalhe =
+      (error as { context?: { body?: { error?: string } } }).context?.body?.error ??
+      (data as { error?: string } | null)?.error
+    throw new Error(detalhe || 'Não foi possível enviar o questionário.')
+  }
+  if ((data as { error?: string } | null)?.error) {
+    throw new Error((data as { error: string }).error)
+  }
+}
+
 /** Envia uma resposta escrita pela equipe. O servidor revalida a janela de 24h. */
 export async function sendConversationReply(
   conversationId: string,

@@ -15,6 +15,7 @@ import {
   Sparkles,
   UserPlus,
   X,
+  ClipboardList,
   List as ListIcon,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -34,6 +35,7 @@ import {
   saveAutoReply,
   sendConversationReply,
   sendConversationMenu,
+  sendConversationQuestionnaire,
   type AutoReplySettings,
   type Conversation,
   type ConversationMessage,
@@ -405,6 +407,21 @@ export default function Conversations({
       void load(true)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Não foi possível enviar o menu.')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  async function enviarQuestionario() {
+    if (!selectedId || enviando) return
+    setEnviando(true)
+    setError('')
+    try {
+      await sendConversationQuestionnaire(selectedId)
+      setMessages(await listConversationMessages(selectedId))
+      void load(true)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível enviar o questionário.')
     } finally {
       setEnviando(false)
     }
@@ -1162,6 +1179,22 @@ export default function Conversations({
                         >
                           <ListIcon className="h-3.5 w-3.5" />
                           Enviar menu de opções
+                        </button>
+                        {/* O cadastro que ficou pela metade.
+                            Quem marca e toca em "Voltar ao menu" no meio das
+                            perguntas fica com consulta e ficha vazia, e a
+                            clínica só descobre na véspera. Este botão manda as
+                            perguntas de novo, na conversa que já existe, em vez
+                            de alguém ligar atrás do CPF. */}
+                        <button
+                          type="button"
+                          disabled={enviando}
+                          onClick={() => void enviarQuestionario()}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-white px-3 py-2 text-[10px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c] disabled:opacity-40"
+                          title="Refaz as perguntas do cadastro (nome, nascimento, responsável, CPF e e-mail) para a próxima consulta desta pessoa"
+                        >
+                          <ClipboardList className="h-3.5 w-3.5" />
+                          Questionário
                         </button>
                         <button
                           type="button"
