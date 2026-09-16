@@ -227,6 +227,37 @@ export type LocalDeAtendimento = {
   telefone?: string
 }
 
+/**
+ * Manda um comando para a Memed sem deixar a tela presa nele.
+ *
+ * Os comandos devolvem promessa, e promessa que nunca termina trava o botao
+ * para sempre - foi o que aconteceu nos testes de producao de 16/09/2026, com
+ * a Memed carregada e visivel no console, e o "Prescrever" girando. Oito
+ * segundos e muito mais do que qualquer um deles leva.
+ *
+ * Nunca lanca: um comando recusado vira aviso no console e a prescricao segue.
+ * Preferir abrir a tela com um campo em branco a nao abrir tela nenhuma.
+ */
+async function comando(
+  hub: NonNullable<MemedGlobal['MdHub']>,
+  passo: string,
+  dados: unknown,
+  prazo = 8000,
+) {
+  try {
+    await Promise.race([
+      hub.command.send('plataforma.prescricao', passo, dados),
+      new Promise((_, rejeitar) =>
+        window.setTimeout(() => rejeitar(new Error('sem resposta')), prazo),
+      ),
+    ])
+    return true
+  } catch (causa) {
+    console.warn(`[Memed] ${passo} não respondeu`, causa)
+    return false
+  }
+}
+
 export async function abrirPrescricao(
   patient: Patient,
   consultation: Consultation | null,
@@ -247,13 +278,7 @@ export async function abrirPrescricao(
   // So o VIDaaS na lista de certificadoras: e o certificado que o medico ja
   // usa para assinar o prontuario. Sem isto a Memed oferece sete opcoes e a
   // pessoa tem de saber qual e a sua. O resto fica no padrao da Memed.
-  try {
-    await hub.command.send('plataforma.prescricao', 'setFeatureToggle', {
-      setAllowedSignatureProviders: ['vidaas'],
-    })
-  } catch {
-    // Preferencia de tela: se a Memed recusar, a prescricao segue igual.
-  }
+  await comando(hub, 'setFeatureToggle', { setAllowedSignatureProviders: ['vidaas'] })
 
   const primeiroNome = patient.nome.trim().split(/\s+/)[0] ?? patient.nome
 
@@ -265,24 +290,18 @@ export async function abrirPrescricao(
   // receita.
   const nomeDoLocal = local?.nome ?? consultation?.unidade
   if (nomeDoLocal) {
-    try {
-      await hub.command.send('plataforma.prescricao', 'setWorkplace', {
-        id: `central-de-cuidado-${nomeDoLocal}`,
-        nome: nomeDoLocal,
-        endereco: local?.endereco || undefined,
-        telefone: local?.telefone || undefined,
-        cidade: nomeDoLocal.split('·').pop()?.trim() || undefined,
-        uf: 'SP',
-      })
-    } catch (causa) {
-      // Local e detalhe do rodape: se a Memed recusar, a receita ainda sai.
-      // Mas fica registrado, porque "endereco em branco" sem pista custou
-      // uma tarde de teste.
-      console.warn('[Memed] setWorkplace recusado', causa)
-    }
+    // Local e detalhe do rodape: se a Memed recusar, a receita ainda sai.
+    await comando(hub, 'setWorkplace', {
+      id: `central-de-cuidado-${nomeDoLocal}`,
+      nome: nomeDoLocal,
+      endereco: local?.endereco || undefined,
+      telefone: local?.telefone || undefined,
+      cidade: nomeDoLocal.split('·').pop()?.trim() || undefined,
+      uf: 'SP',
+    })
   }
 
-  await hub.command.send('plataforma.prescricao', 'setPaciente', {
+  await comando(hub, 'setPaciente', {
     // Prefixo do parceiro, como a Memed pede: o id sozinho colidiria com o
     // de outros sistemas no ambiente compartilhado de homologacao.
     idExterno: `central-de-cuidado-${patient.id}`,
@@ -300,7 +319,13 @@ export async function abrirPrescricao(
     cidade: patient.cidade || undefined,
   })
 
-  await hub.module.show('plataforma.prescricao')
+  // A tela abre mesmo que algum comando acima tenha falhado: com o paciente em
+  // branco o medico digita o nome e prescreve; com o botao girando, ele nao faz
+  // nada.
+  await Promise.race([
+    hub.module.show('plataforma.prescricao'),
+    new Promise((resolver) => window.setTimeout(resolver, 8000)),
+  ])
   return primeiroNome
 }
 
