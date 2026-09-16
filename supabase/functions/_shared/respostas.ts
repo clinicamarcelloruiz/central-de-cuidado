@@ -109,9 +109,23 @@ function pontos(palavras: string[], daMensagem: Set<string>): number {
  * As respostas chegam na ordem de exibição, então empate de pontuação fica com
  * a que a clínica colocou primeiro - que é o que ela considera mais provável.
  */
+/**
+ * A resposta pronta que melhor casa com a mensagem.
+ *
+ * `minimoDePontos` e quantas palavras do assunto precisam aparecer. Uma basta
+ * na conversa comum: quem escreve "convenio?" quer a resposta de convenio.
+ *
+ * Na fila da equipe o robo pede duas, e a diferenca importa. "Quero marcar
+ * retorno para o Anthony" casa com UMA palavra ("retorno", do assunto de
+ * documentos) e nao e pergunta nenhuma - responder ali seria falar do que
+ * ninguem perguntou. Ja "ele aceita AMIL? Qual o valor da consulta particular e
+ * as formas de pagamento?" casa com quatro, e e exatamente a duvida que a
+ * clinica responde vinte vezes por dia. Duas palavras separam as duas coisas.
+ */
 export function acharResposta(
   texto: string,
   respostas: RespostaPronta[],
+  minimoDePontos = 1,
 ): RespostaPronta | null {
   if (!texto.trim() || respostas.length === 0) return null
   if (assuntoClinico(texto)) return null
@@ -128,7 +142,7 @@ export function acharResposta(
       melhorPonto = ponto
     }
   }
-  return melhor
+  return melhorPonto >= minimoDePontos ? melhor : null
 }
 
 type Admin = {
