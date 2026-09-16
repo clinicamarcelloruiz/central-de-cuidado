@@ -238,13 +238,22 @@ export default function Conversations({
    * impressão de que a mensagem não tinha sido enviada. O botão "Ir para o fim"
    * existia justamente porque isto faltava.
    *
-   * Na primeira vez o salto é seco; depois, com a conversa já aberta, mensagem
-   * nova desce suave, como no aplicativo.
+   * Depois disso a tela é de quem está lendo. A lista se atualiza sozinha (a
+   * cada mensagem nova, a cada confirmação de entrega que muda o tiquinho), e
+   * antes cada uma dessas atualizações puxava a página para baixo - quem tinha
+   * subido para reler uma conversa antiga perdia o lugar no meio da leitura.
+   *
+   * Agora só há dois motivos para a tela se mover sozinha: abrir a conversa, e
+   * a própria equipe ter acabado de enviar algo (aí a mensagem que ela mandou
+   * precisa aparecer, senão parece que não saiu). Para o resto existe o botão
+   * "Ir para o fim".
    */
   useEffect(() => {
     if (!selectedId || loadingMessages || messages.length === 0) return
     const primeiraVez = conversaRolada.current !== selectedId
     conversaRolada.current = selectedId
+    if (!primeiraVez && !acabamosDeEnviar.current) return
+    acabamosDeEnviar.current = false
     fimDasMensagens.current?.scrollIntoView({
       behavior: primeiraVez ? 'auto' : 'smooth',
       block: 'end',
@@ -262,6 +271,9 @@ export default function Conversations({
   // Qual conversa ja foi posicionada no fim. Sem isto, cada mensagem nova
   // rolaria a tela de novo enquanto alguem le algo mais acima.
   const conversaRolada = useRef<string | null>(null)
+  // Levantada pelos botoes de envio da equipe, e so por eles. E a unica coisa
+  // que autoriza a tela a descer com a conversa ja aberta.
+  const acabamosDeEnviar = useRef(false)
   const [resumo, setResumo] = useState<ResumoDoPaciente | null>(null)
   selectedIdRef.current = selectedId
 
@@ -384,6 +396,7 @@ export default function Conversations({
     try {
       await sendConversationReply(selectedId, texto)
       setResposta('')
+      acabamosDeEnviar.current = true
       // O tempo real ja traz a mensagem nova, mas recarregar aqui evita a
       // sensacao de "sumiu" caso a assinatura esteja fora do ar.
       setMessages(await listConversationMessages(selectedId))
@@ -403,6 +416,7 @@ export default function Conversations({
     setError('')
     try {
       await sendConversationMenu(selectedId)
+      acabamosDeEnviar.current = true
       setMessages(await listConversationMessages(selectedId))
       void load(true)
     } catch (cause) {
@@ -418,6 +432,7 @@ export default function Conversations({
     setError('')
     try {
       await sendConversationQuestionnaire(selectedId)
+      acabamosDeEnviar.current = true
       setMessages(await listConversationMessages(selectedId))
       void load(true)
     } catch (cause) {
@@ -458,6 +473,7 @@ export default function Conversations({
     try {
       await sendTemplateReply(selectedId, resposta)
       setResposta('')
+      acabamosDeEnviar.current = true
       setMessages(await listConversationMessages(selectedId))
       void load(true)
     } catch (causa) {
