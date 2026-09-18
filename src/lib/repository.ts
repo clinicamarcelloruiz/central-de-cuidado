@@ -924,14 +924,37 @@ async function marcarPresencaPeloProntuario(
     // seguinte, e uma janela em UTC deixaria o fim do expediente de fora.
     const inicio = new Date(`${dia}T00:00:00`)
     const fim = new Date(`${dia}T23:59:59.999`)
+
+    // A consulta nem sempre está ligada à ficha. Quando a equipe marca pela
+    // Agenda, ela digita nome e telefone na mão e o appointment nasce sem
+    // patient_id - é o caso da maioria da agenda desta clínica. Procurar só
+    // pelo vínculo deixaria de marcar justamente esses.
+    const { data: ficha } = await supabase
+      .from('patients')
+      .select('name,phone')
+      .eq('id', patientId)
+      .maybeSingle()
+
+    // Últimos 8 dígitos: a agenda guarda o telefone com o 55 do país e o
+    // cadastro sem ele. O número do assinante é o que sobrevive aos dois
+    // formatos, ao nono dígito e ao DDD escrito de jeitos diferentes.
+    const digitos = (ficha?.phone ?? '').replace(/\D/g, '')
+    const finalDoTelefone = digitos.length >= 8 ? digitos.slice(-8) : ''
+    // Vírgula e parênteses quebram a sintaxe do filtro "ou" do PostgREST.
+    const nome = (ficha?.name ?? '').trim().replace(/[(),]/g, ' ')
+
+    const alternativas = [`patient_id.eq.${patientId}`]
+    if (finalDoTelefone) alternativas.push(`contact_phone.like.*${finalDoTelefone}`)
+    if (nome) alternativas.push(`contact_name.ilike.${nome}`)
+
     await supabase
       .from('appointments')
       .update({ status: 'attended' })
       .eq('clinic_id', clinicId)
-      .eq('patient_id', patientId)
       .eq('status', 'scheduled')
       .gte('starts_at', inicio.toISOString())
       .lte('starts_at', fim.toISOString())
+      .or(alternativas.join(','))
   } catch (causa) {
     console.warn('Não consegui marcar presença a partir do prontuário', causa)
   }
