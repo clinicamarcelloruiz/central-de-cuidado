@@ -919,14 +919,19 @@ async function marcarPresencaPeloProntuario(
   try {
     const dia = data.slice(0, 10)
     if (!dia) return
+    // O dia no relógio de quem atende, e não em UTC. Sem o "Z" o JavaScript lê
+    // a data como local: em Santos, a consulta das 22h é 01h UTC do dia
+    // seguinte, e uma janela em UTC deixaria o fim do expediente de fora.
+    const inicio = new Date(`${dia}T00:00:00`)
+    const fim = new Date(`${dia}T23:59:59.999`)
     await supabase
       .from('appointments')
       .update({ status: 'attended' })
       .eq('clinic_id', clinicId)
       .eq('patient_id', patientId)
       .eq('status', 'scheduled')
-      .gte('starts_at', `${dia}T00:00:00.000Z`)
-      .lte('starts_at', `${dia}T23:59:59.999Z`)
+      .gte('starts_at', inicio.toISOString())
+      .lte('starts_at', fim.toISOString())
   } catch (causa) {
     console.warn('Não consegui marcar presença a partir do prontuário', causa)
   }
