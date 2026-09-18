@@ -744,6 +744,20 @@ async function fichasDasConsultas(clinicId: string, unitId: string) {
   return vazio
 }
 
+/**
+ * Meia-noite de hoje, no relógio de quem está olhando a tela.
+ *
+ * A agenda passou a começar aqui, e não em "agora". Antes, a consulta das 8h
+ * sumia da tela às 8h01: quem estava na recepção não conseguia nem conferir
+ * quem já tinha chegado, e marcar presença seria impossível num horário que
+ * some sozinho. O dia inteiro fica à vista até virar meia-noite.
+ */
+function inicioDeHoje() {
+  const hoje = new Date()
+  hoje.setHours(0, 0, 0, 0)
+  return hoje.toISOString()
+}
+
 export async function listAppointments(clinicId: string, unitId: string): Promise<Appointment[]> {
   const { data, error } = await supabase
     .from('appointments')
@@ -751,7 +765,7 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
     .eq('clinic_id', clinicId)
     .eq('unit_id', unitId)
     .neq('status', 'cancelled')
-    .gte('starts_at', new Date().toISOString())
+    .gte('starts_at', inicioDeHoje())
     .order('starts_at')
   if (error) fail(error)
 
@@ -799,6 +813,123 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
       row.starts_at,
     ),
   }))
+}
+
+/**
+ * O que já passou: dias anteriores a hoje, do mais recente para trás.
+ *
+ * Diferente da agenda em dois pontos, e os dois de propósito. Traz os
+ * cancelados, porque histórico sem cancelamento mente sobre como o dia foi.
+ * E vem em ordem decrescente, porque quem abre o histórico quer ver ontem, e
+ * não o primeiro dia de atendimento da clínica.
+ */
+export async function listAppointmentHistory(
+  clinicId: string,
+  unitId: string,
+  dias = 90,
+): Promise<Appointment[]> {
+  const desde = new Date()
+  desde.setHours(0, 0, 0, 0)
+  desde.setDate(desde.getDate() - dias)
+
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at,confirmed_at,reschedule_requested_at,reminder_sent_at,reschedule_count')
+    .eq('clinic_id', clinicId)
+    .eq('unit_id', unitId)
+    .gte('starts_at', desde.toISOString())
+    .lt('starts_at', inicioDeHoje())
+    .order('starts_at', { ascending: false })
+  if (error) fail(error)
+
+  const rows = data ?? []
+  const patientIds = [...new Set(rows.map((r) => r.patient_id).filter(Boolean))] as string[]
+  const { data: patients } = patientIds.length
+    ? await supabase.from('patients').select('id,name').in('id', patientIds)
+    : { data: [] }
+  const nameById = new Map((patients ?? []).map((p) => [p.id, p.name]))
+
+  return rows.map((row) => ({
+    id: row.id,
+    unitId: row.unit_id,
+    patientId: row.patient_id,
+    patientName:
+      (row.patient_id && nameById.get(row.patient_id)) ||
+      row.contact_name ||
+      'Sem paciente vinculado',
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    status: row.status,
+    source: row.source,
+    staffNote: row.staff_note,
+    ficha: FICHA_VAZIA,
+    contactName: row.contact_name,
+    contactPhone: formatarTelefone(row.contact_phone || ''),
+    confirmedByClinic: row.confirmed_by_clinic,
+    holdExpiresAt: row.hold_expires_at,
+    confirmedAt: row.confirmed_at,
+    rescheduleRequestedAt: row.reschedule_requested_at,
+    reminderSentAt: row.reminder_sent_at,
+    rescheduleCount: row.reschedule_count ?? 0,
+    retornoDe: null,
+  }))
+}
+
+/**
+ * Registra que o paciente compareceu, ou que faltou.
+ *
+ * Os dois estados existem no banco desde a primeira migration da agenda, em
+ * 24/08/2026, e nunca foram gravados por ninguém: toda consulta nascia
+ * "scheduled" e morria assim. Sem isso não existe taxa de falta, que é o
+ * número que uma clínica mais quer ver e o que justifica a confirmação na
+ * véspera.
+ *
+ * Aceita voltar para "marcada": quem clicou errado precisa poder desfazer, e
+ * um registro de presença errado é pior do que nenhum.
+ */
+export async function marcarPresenca(
+  appointmentId: string,
+  presenca: 'attended' | 'no_show' | 'scheduled',
+) {
+  const { error } = await supabase
+    .from('appointments')
+    .update({ status: presenca })
+    .eq('id', appointmentId)
+  if (error) fail(error)
+}
+
+/**
+ * Marca presença sozinha quando o médico salva a evolução da consulta.
+ *
+ * Se existe prontuário escrito daquele dia, o paciente esteve lá - não há
+ * cenário em que alguém redija a evolução de quem faltou. Poupa a recepção de
+ * clicar, que é o tipo de tarefa que se esquece justamente nos dias cheios.
+ *
+ * Só mexe em consulta que ainda está "marcada". Se a recepção já registrou
+ * falta, o registro dela vale: ela estava lá e o sistema não.
+ *
+ * Nunca interrompe o salvamento do prontuário. O prontuário é o documento; a
+ * presença é a etiqueta em cima dele.
+ */
+async function marcarPresencaPeloProntuario(
+  clinicId: string,
+  patientId: string,
+  data: string,
+) {
+  try {
+    const dia = data.slice(0, 10)
+    if (!dia) return
+    await supabase
+      .from('appointments')
+      .update({ status: 'attended' })
+      .eq('clinic_id', clinicId)
+      .eq('patient_id', patientId)
+      .eq('status', 'scheduled')
+      .gte('starts_at', `${dia}T00:00:00.000Z`)
+      .lte('starts_at', `${dia}T23:59:59.999Z`)
+  } catch (causa) {
+    console.warn('Não consegui marcar presença a partir do prontuário', causa)
+  }
 }
 
 /**
@@ -1712,6 +1843,7 @@ export async function createConsultation(
     .single()
 
   if (error) fail(error)
+  await marcarPresencaPeloProntuario(clinicId, patientId, draft.data)
   return {
     consultation: mapConsultation(data as ConsultationRow),
     patient: await patientById(clinicId, patientId),
@@ -1755,6 +1887,7 @@ export async function editConsultation(
     .single()
 
   if (error) fail(error)
+  await marcarPresencaPeloProntuario(clinicId, patientId, draft.data)
   return {
     consultation: mapConsultation(data as ConsultationRow),
     patient: await patientById(clinicId, patientId),

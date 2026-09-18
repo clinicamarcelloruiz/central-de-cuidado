@@ -33,6 +33,8 @@ import {
   confirmAppointment,
   notifyAppointmentConfirmed,
   listAppointments,
+  listAppointmentHistory,
+  marcarPresenca,
   listAvailabilityRules,
   listAvailableSlots,
   listScheduleExceptions,
@@ -55,7 +57,7 @@ import {
 } from '@/components/ui/sheet'
 import type { Patient } from '@/types/patient'
 
-type Aba = 'calendario' | 'configuracao'
+type Aba = 'calendario' | 'historico' | 'configuracao'
 
 /**
  * Sugestoes de paciente mostradas de uma vez ao vincular uma consulta.
@@ -124,6 +126,174 @@ function agruparPorDia(slots: string[], appointments: Appointment[], bloqueios: 
   for (const item of appointments) garantir(item.startsAt.slice(0, 10)).marcados.push(item)
   for (const bloqueio of bloqueios) garantir(bloqueio.date).bloqueio = bloqueio
   return [...dias.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+}
+
+/**
+ * O que já aconteceu, dia a dia, do mais recente para trás.
+ *
+ * Existe por um pedido simples que não tinha resposta: "quero ver em formato de
+ * agenda os atendimentos realizados". A agenda só carregava daqui para a
+ * frente, então o dia anterior desaparecia sem deixar rastro na tela.
+ *
+ * Mostra também os cancelados, de propósito. Histórico que esconde cancelamento
+ * conta uma versão otimista do mês e some justamente com o número que a clínica
+ * precisa olhar.
+ */
+function HistoricoDaAgenda({
+  itens,
+  marcando,
+  onMarcar,
+}: {
+  itens: Appointment[]
+  marcando: string | null
+  onMarcar: (id: string, presenca: 'attended' | 'no_show' | 'scheduled') => void
+}) {
+  const dias = new Map<string, Appointment[]>()
+  for (const item of itens) {
+    const chave = item.startsAt.slice(0, 10)
+    if (!dias.has(chave)) dias.set(chave, [])
+    dias.get(chave)!.push(item)
+  }
+
+  const compareceu = itens.filter((i) => i.status === 'attended').length
+  const faltou = itens.filter((i) => i.status === 'no_show').length
+  const cancelou = itens.filter((i) => i.status === 'cancelled').length
+  // Só conta onde alguém registrou o que houve. Misturar as consultas ainda não
+  // marcadas no denominador inventaria uma taxa de falta menor do que a real.
+  const registradas = compareceu + faltou
+  const taxa = registradas > 0 ? Math.round((faltou / registradas) * 100) : null
+
+  if (itens.length === 0) {
+    return (
+      <div className="surface-card rounded-[22px] p-8 text-center text-xs font-semibold text-slate-500">
+        Nenhuma consulta nos últimos 90 dias nesta unidade.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="surface-card flex flex-wrap items-center gap-4 rounded-[20px] px-4 py-3">
+        <Resumo rotulo="Compareceram" valor={compareceu} cor="#3fa88a" />
+        <Resumo rotulo="Faltaram" valor={faltou} cor="#b42318" />
+        <Resumo rotulo="Canceladas" valor={cancelou} cor="#94a3b8" />
+        {taxa !== null && (
+          <div className="ml-auto text-right">
+            <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400">
+              Taxa de falta
+            </p>
+            <p className="text-lg font-extrabold leading-none text-[#081b2c]">{taxa}%</p>
+          </div>
+        )}
+      </div>
+
+      {[...dias.entries()].map(([dia, consultas]) => (
+        <div key={dia} className="surface-card rounded-[20px] p-4">
+          <p className="text-xs font-extrabold capitalize text-[#081b2c]">
+            {diaLegivel(dia + 'T12:00:00')}
+          </p>
+          <div className="mt-3 space-y-1.5">
+            {consultas.map((item) => (
+              <div
+                key={item.id}
+                className={`flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 ${
+                  item.status === 'cancelled' ? 'bg-[#fafaf8]' : 'bg-[#081b2c]'
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`truncate text-[11px] font-extrabold ${
+                      item.status === 'cancelled' ? 'text-slate-400 line-through' : 'text-white'
+                    }`}
+                  >
+                    {hora(item.startsAt)} · {item.patientName}
+                  </p>
+                  <p
+                    className={`truncate text-[10px] font-semibold ${
+                      item.status === 'cancelled' ? 'text-slate-400' : 'text-white/60'
+                    }`}
+                  >
+                    {item.source === 'whatsapp' ? 'marcado pelo paciente no WhatsApp' : 'marcado pela equipe'}
+                    {item.contactPhone ? ` · ${item.contactPhone}` : ''}
+                  </p>
+                </div>
+
+                {item.status === 'cancelled' ? (
+                  <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[9px] font-extrabold text-slate-500">
+                    Cancelada
+                  </span>
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <BotaoPresenca
+                      ativo={item.status === 'attended'}
+                      corAtiva="#3fa88a"
+                      rotulo="Compareceu"
+                      ocupado={marcando === item.id}
+                      onClick={() =>
+                        onMarcar(item.id, item.status === 'attended' ? 'scheduled' : 'attended')
+                      }
+                    />
+                    <BotaoPresenca
+                      ativo={item.status === 'no_show'}
+                      corAtiva="#b42318"
+                      rotulo="Faltou"
+                      ocupado={marcando === item.id}
+                      onClick={() =>
+                        onMarcar(item.id, item.status === 'no_show' ? 'scheduled' : 'no_show')
+                      }
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function Resumo({ rotulo, valor, cor }: { rotulo: string; valor: number; cor: string }) {
+  return (
+    <div>
+      <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{rotulo}</p>
+      <p className="text-lg font-extrabold leading-none" style={{ color: cor }}>
+        {valor}
+      </p>
+    </div>
+  )
+}
+
+/** Clicar de novo desfaz: registro de presença errado é pior do que nenhum. */
+function BotaoPresenca({
+  ativo,
+  corAtiva,
+  rotulo,
+  ocupado,
+  onClick,
+}: {
+  ativo: boolean
+  corAtiva: string
+  rotulo: string
+  ocupado: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={ocupado}
+      onClick={onClick}
+      title={ativo ? `Clique para desfazer "${rotulo}"` : rotulo}
+      className="rounded-lg px-2 py-1 text-[9px] font-extrabold transition disabled:opacity-40"
+      style={
+        ativo
+          ? { backgroundColor: corAtiva, color: '#fff' }
+          : { backgroundColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.7)' }
+      }
+    >
+      {rotulo}
+    </button>
+  )
 }
 
 /**
@@ -336,6 +506,10 @@ export default function Agenda({
   }) => void
 }) {
   const [aba, setAba] = useState<Aba>('calendario')
+  // Os dias que já passaram. Carregados junto com a agenda, e não só quando a
+  // aba abre: são poucas linhas, e assim trocar de aba é instantâneo.
+  const [historico, setHistorico] = useState<Appointment[]>([])
+  const [marcando, setMarcando] = useState<string | null>(null)
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [units, setUnits] = useState<Unit[]>([])
   const [unitId, setUnitId] = useState<string | null>(null)
@@ -401,17 +575,20 @@ export default function Agenda({
       setRules([])
       setSlots([])
       setAppointments([])
+      setHistorico([])
       return
     }
     try {
-      const [regras, livres, marcados] = await Promise.all([
+      const [regras, livres, marcados, passadas] = await Promise.all([
         listAvailabilityRules(unitId),
         listAvailableSlots(unitId),
         listAppointments(clinicId, unitId),
+        listAppointmentHistory(clinicId, unitId),
       ])
       setRules(regras)
       setSlots(livres)
       setAppointments(marcados)
+      setHistorico(passadas)
     } catch (causa) {
       setError(causa instanceof Error ? causa.message : 'Não foi possível carregar os horários.')
     }
@@ -655,7 +832,7 @@ export default function Agenda({
                 ))}
               </select>
               <div className="flex rounded-xl bg-[#eef3f2] p-0.5">
-                {(['calendario', 'configuracao'] as Aba[]).map((chave) => (
+                {(['calendario', 'historico', 'configuracao'] as Aba[]).map((chave) => (
                   <button
                     key={chave}
                     type="button"
@@ -664,7 +841,11 @@ export default function Agenda({
                       aba === chave ? 'bg-white text-[#081b2c] shadow-sm' : 'text-[#557f75]'
                     }`}
                   >
-                    {chave === 'calendario' ? 'Calendário' : 'Configuração'}
+                    {chave === 'calendario'
+                      ? 'Calendário'
+                      : chave === 'historico'
+                        ? 'Histórico'
+                        : 'Configuração'}
                   </button>
                 ))}
               </div>
@@ -679,7 +860,26 @@ export default function Agenda({
             </button>
           </div>
 
-          {aba === 'calendario' ? (
+          {aba === 'historico' ? (
+            <HistoricoDaAgenda
+              itens={historico}
+              marcando={marcando}
+              onMarcar={async (id, presenca) => {
+                setMarcando(id)
+                setError('')
+                try {
+                  await marcarPresenca(id, presenca)
+                  await carregarUnidade()
+                } catch (causa) {
+                  setError(
+                    causa instanceof Error ? causa.message : 'Não foi possível registrar a presença.',
+                  )
+                } finally {
+                  setMarcando(null)
+                }
+              }}
+            />
+          ) : aba === 'calendario' ? (
             <div className="space-y-3">
               {rules.length === 0 && (
                 <div className="flex items-start gap-2 rounded-[16px] border border-[#2f7fc1]/40 bg-[#eef5fd] p-3 text-[11px] font-bold text-[#16456b]">
