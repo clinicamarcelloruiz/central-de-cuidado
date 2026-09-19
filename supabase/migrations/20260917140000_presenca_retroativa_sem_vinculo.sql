@@ -35,7 +35,12 @@ begin;
 with casamentos as (
   select
     a.id as agendamento,
-    min(p.id) as paciente,
+    -- array_agg e nao min(): o Postgres nao tem min() para uuid, e essa linha
+    -- derrubou o db push inteiro em 17/09/2026. Como a migration que falha
+    -- bloqueia todas as seguintes, tres dias de alteracoes de banco ficaram
+    -- paradas - e o robo foi ao ar pedindo colunas que nunca chegaram.
+    -- Como so vale quando quantos = 1, qualquer elemento serve.
+    (array_agg(p.id))[1] as paciente,
     count(p.id) as quantos
   from public.appointments as a
   join public.patients as p

@@ -324,7 +324,12 @@ export default function Dashboard({
   // sido lidos. Nao precisou de nada no banco.
   const neighborhoods = topN(countBy(patients, (patient) => patient.bairro), 5)
   const units = topN(countBy(patients, (patient) => patient.unidade), 5)
-  const healthPlans = topN(countBy(patients, (patient) => patient.convenio), 5)
+  // Normaliza antes de contar, senão o mesmo plano vira duas barras por causa
+  // de quem digitou com outra caixa.
+  const healthPlans = topN(
+    countBy(patients, (patient) => patient.convenio.trim().toUpperCase()),
+    5,
+  )
 
   const months: { label: string; value: number }[] = []
   const now = new Date()
@@ -444,7 +449,7 @@ export default function Dashboard({
                 <Ranking title="Bairro / região do paciente" items={neighborhoods} color={AZUL} maiusculo />
               </div>
               <div className="lg:pl-7">
-                <Ranking title="Unidade de atendimento" items={units} color={NAVY} />
+                <Ranking title="Unidade de atendimento" items={units} color={NAVY} maiusculo />
               </div>
             </div>
             <div className="mt-6 flex items-center gap-2 border-t border-[#081b2c]/[0.06] pt-4 text-[10px] font-semibold text-slate-400">
@@ -457,7 +462,10 @@ export default function Dashboard({
             <div className="grid gap-7 lg:grid-cols-2 lg:divide-x lg:divide-[#081b2c]/[0.07]">
               <Ranking title="CID-10 mais frequentes" items={cids} color={AZUL} maiusculo />
               <div className="lg:pl-7">
-                <Ranking title="Convênios" items={healthPlans} color={NAVY} />
+                {/* Maiúsculo como o CID: o convênio é digitado à mão em cada
+                    cadastro, e vinha "TRASMONTANO" de um e "Trasmontano" de
+                    outro - duas linhas no gráfico para o mesmo plano. */}
+                <Ranking title="Convênios" items={healthPlans} color={NAVY} maiusculo />
               </div>
             </div>
             <div className="mt-6 flex items-center gap-2 border-t border-[#081b2c]/[0.06] pt-4 text-[10px] font-semibold text-slate-400">

@@ -222,17 +222,43 @@ Deno.serve(async (req) => {
 
           // Estado da conversa ANTES de gravar esta mensagem. E o que diz se a
           // pessoa e nova: depois do upsert a linha ja existe sempre.
+          //
+          // A coluna nova vem num segundo pedido, e nao junto das outras. O
+          // Postgres nao ignora coluna que nao existe: recusa a consulta
+          // INTEIRA. Em 19/09/2026 esta linha pediu booking_insurance antes de
+          // a migration rodar, linhaAnterior voltou nula, e o webhook passou a
+          // tratar TODA mensagem como a primeira da conversa - com a regra de
+          // "primeira mensagem sempre mostra o menu", o paciente digitava 1 e
+          // recebia o menu, tres vezes seguidas, sem nenhum erro aparente.
+          //
+          // Perder o convenio e um arranhao. Perder o estado da conversa
+          // desliga o atendimento inteiro. Por isso os dois pedidos.
+          const COLUNAS_ESTAVEIS =
+            'id,booking_state,booking_options,booking_unit_id,booking_patient_id,' +
+            'booking_replaces_id,booking_intake_id,booking_modality,needs_attention,' +
+            'attention_reason,profile_name,booking_updated_at,auto_replies_while_waiting,' +
+            'menu_sent_at'
+
           const { data: linhaAnterior } = await admin
             .from('whatsapp_conversations')
-            .select(
-              'id,booking_state,booking_options,booking_unit_id,booking_patient_id,' +
-                'booking_replaces_id,booking_intake_id,booking_modality,booking_insurance,needs_attention,' +
-                'attention_reason,profile_name,booking_updated_at,auto_replies_while_waiting,' +
-                'menu_sent_at',
-            )
+            .select(COLUNAS_ESTAVEIS)
             .eq('clinic_id', clinicId)
             .eq('wa_id', waId)
             .maybeSingle()
+
+          // O convenio vem num pedido proprio, e nao junto: se a coluna ainda
+          // nao existe, so ele se perde.
+          let convenioEmAndamento: string | null = null
+          if (linhaAnterior) {
+            const { data: extra } = await admin
+              .from('whatsapp_conversations')
+              .select('booking_insurance')
+              .eq('clinic_id', clinicId)
+              .eq('wa_id', waId)
+              .maybeSingle()
+            convenioEmAndamento =
+              (extra as { booking_insurance?: string | null } | null)?.booking_insurance ?? null
+          }
 
           // Etapa vencida: depois de 24h parada, a conversa recomeca do zero.
           //
@@ -267,9 +293,9 @@ Deno.serve(async (req) => {
                   booking_replaces_id: null,
                   booking_intake_id: null,
                   booking_modality: null,
-                  booking_insurance: null,
                 }
               : linhaAnterior
+          if (etapaVenceu) convenioEmAndamento = null
 
           // A ultima coisa que NOS mandamos foi um lembrete de consulta ou um
           // acompanhamento? So nesse caso "1", "2" e "3" significam confirmar,
@@ -457,7 +483,7 @@ Deno.serve(async (req) => {
               consultas,
               consultaASubstituir: conversaAnterior?.booking_replaces_id ?? null,
               consultaEmCadastro: conversaAnterior?.booking_intake_id ?? null,
-              convenioEmAndamento: conversaAnterior?.booking_insurance ?? null,
+              convenioEmAndamento,
               modalidadeEmAndamento: (conversaAnterior?.booking_modality ?? null) as 'presencial' | 'telemedicina' | null,
               // Quantas respostas prontas o robo ja deu nesta espera pela
               // equipe. Etapa vencida recomeca do zero junto com o resto.

@@ -390,15 +390,55 @@ function comVoltar(linhas: Toque[]): Toque[] {
   ]
 }
 
+/**
+ * Colunas que nasceram depois de alguma versao da funcao ja estar no ar.
+ *
+ * A funcao, o frontend e as migrations sobem por caminhos diferentes, e a
+ * funcao costuma chegar primeiro. Quando ela grava uma coluna que o banco
+ * ainda nao tem, o Postgres NAO ignora o campo desconhecido: ele recusa o
+ * UPDATE inteiro.
+ *
+ * Em 19/09/2026 isso derrubou o atendimento de um jeito que nao parecia erro.
+ * O estado da conversa deixou de ser gravado, entao o robo nunca saia do
+ * menu: o paciente digitava 1, recebia o menu, digitava 1 de novo, recebia o
+ * menu. Tres vezes, sem nenhuma mensagem de erro em lugar nenhum.
+ *
+ * Perder o campo novo e um arranhao; perder o estado da conversa trava o
+ * atendimento. Entao o campo novo e o que cede.
+ */
+const COLUNAS_RECENTES = ['booking_insurance']
+
 async function salvarEstado(
   admin: Admin,
   conversationId: string,
   campos: Record<string, unknown>,
 ) {
-  await admin
+  const tudo = { booking_updated_at: new Date().toISOString(), ...campos }
+  const { error } = await admin
     .from('whatsapp_conversations')
-    .update({ booking_updated_at: new Date().toISOString(), ...campos })
+    .update(tudo)
     .eq('id', conversationId)
+  if (!error) return
+
+  const semAsNovas: Record<string, unknown> = { ...tudo }
+  let tirouAlguma = false
+  for (const coluna of COLUNAS_RECENTES) {
+    if (coluna in semAsNovas) {
+      delete semAsNovas[coluna]
+      tirouAlguma = true
+    }
+  }
+  if (!tirouAlguma) {
+    console.error('Falha ao salvar o estado da conversa', error)
+    return
+  }
+
+  console.warn('Coluna recente ausente no banco; salvando o estado sem ela', error)
+  const { error: aindaFalha } = await admin
+    .from('whatsapp_conversations')
+    .update(semAsNovas)
+    .eq('id', conversationId)
+  if (aindaFalha) console.error('Falha ao salvar o estado da conversa', aindaFalha)
 }
 
 /**
@@ -457,24 +497,59 @@ async function telemedicinaDaClinica(
  * Todo lugar que precisava reler a unidade do banco passa por aqui, para a
  * telemedicina nao virar "unidade nao encontrada" no meio do fluxo.
  */
+/**
+ * As colunas da unidade, e o plano B quando uma delas ainda nao existe.
+ *
+ * A funcao, o frontend e as migrations sobem por caminhos diferentes, e a
+ * funcao costuma chegar primeiro. Quando ela pede uma coluna que o banco ainda
+ * nao tem, o Postgres NAO ignora a coluna desconhecida: recusa a consulta
+ * INTEIRA e devolve nulo.
+ *
+ * Em 19/09/2026 isso derrubou o atendimento sem parecer erro: sem unidades, a
+ * opcao 1 nao tinha o que mostrar e devolvia o menu. O paciente digitava 1,
+ * recebia o menu, digitava 1 de novo, recebia o menu.
+ *
+ * Entao toda coluna nova entra com um plano B: tenta com ela, e se falhar
+ * refaz sem. A unidade volta sem convenio - que e o mesmo que "so particular",
+ * o estado anterior do mundo - e o atendimento segue de pe.
+ */
+const COLUNAS_DA_UNIDADE = 'id,name,address,info_text,accepts_insurance'
+const COLUNAS_ANTIGAS_DA_UNIDADE = 'id,name,address,info_text'
+
 async function unidadePorId(admin: Admin, id: string): Promise<Unidade | null> {
   if (id === TELE_ID) return UNIDADE_TELE
-  const { data } = await admin
+  const { data, error } = await admin
     .from('clinic_units')
-    .select('id,name,address,info_text,accepts_insurance')
+    .select(COLUNAS_DA_UNIDADE)
     .eq('id', id)
     .maybeSingle()
-  return (data as Unidade | null) ?? null
+  if (!error && data) return data as Unidade
+
+  const { data: basico } = await admin
+    .from('clinic_units')
+    .select(COLUNAS_ANTIGAS_DA_UNIDADE)
+    .eq('id', id)
+    .maybeSingle()
+  return (basico as Unidade | null) ?? null
 }
 
 async function unidadesAtivas(admin: Admin, clinicId: string) {
-  const { data } = await admin
+  const { data, error } = await admin
     .from('clinic_units')
-    .select('id,name,address,info_text')
+    .select(COLUNAS_DA_UNIDADE)
     .eq('clinic_id', clinicId)
     .is('archived_at', null)
     .order('name')
-  return (data ?? []) as Unidade[]
+  if (!error && data) return data as Unidade[]
+
+  console.warn('clinic_units sem accepts_insurance; seguindo so com particular', error)
+  const { data: basico } = await admin
+    .from('clinic_units')
+    .select(COLUNAS_ANTIGAS_DA_UNIDADE)
+    .eq('clinic_id', clinicId)
+    .is('archived_at', null)
+    .order('name')
+  return (basico ?? []) as Unidade[]
 }
 
 /** As unidades fisicas e, quando a clinica oferece, a telemedicina no fim. */
