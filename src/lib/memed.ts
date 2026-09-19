@@ -139,6 +139,9 @@ async function carregarScript(token: string, producao: boolean) {
       // Os ouvintes de receita sao registrados aqui, uma vez so. Registrar a
       // cada abertura acumularia callbacks e salvaria a mesma receita varias
       // vezes.
+      // 60ms, e não 200: como isto agora roda antes do clique, o custo de
+      // perguntar com mais frequência é invisível, e a diferença aparece
+      // inteira no caso em que o médico clica logo que abre o prontuário.
       espera = window.setInterval(() => {
         const hub = janela().MdHub
         if (!hub) return
@@ -151,7 +154,7 @@ async function carregarScript(token: string, producao: boolean) {
         })
 
         pronto()
-      }, 200)
+      }, 60)
     }
 
     script.onerror = () => {
@@ -275,15 +278,50 @@ async function comando(
   }
 }
 
+/**
+ * O trabalho pesado, feito ANTES de alguém clicar em Prescrever.
+ *
+ * Abrir a prescrição custava a soma de três esperas em série, todas depois do
+ * clique: a função do servidor buscando o token (que por sua vez consulta a
+ * Memed), o download do script deles, e o módulo subindo até aceitar comando.
+ * O médico ficava olhando o botão girar por isso.
+ *
+ * Nada disso depende do paciente, e nada disso precisa acontecer naquele
+ * momento. Chamando esta função quando o prontuário abre, a espera acontece
+ * enquanto ele lê a ficha - e o clique fica só com o que é do paciente.
+ *
+ * Roda UMA VEZ por sessão. O script da Memed é global e carrega uma vez só de
+ * qualquer jeito, e o token vai grudado nele; então preparar no primeiro
+ * prontuário do dia serve para todos os outros, sem repetir chamada à Memed.
+ *
+ * Falha não incomoda ninguém: a promessa é descartada e a próxima tentativa
+ * acontece no clique, do jeito antigo, com o erro aparecendo aí sim na tela.
+ */
+let preparacao: Promise<{ token: string; producao: boolean; cadastro?: { feito: boolean; detalhe?: string } }> | null = null
+
+export function prepararPrescricao() {
+  if (!preparacao) {
+    preparacao = (async () => {
+      const dados = await tokenDoPrescritor()
+      await carregarScript(dados.token, dados.producao)
+      return dados
+    })()
+    preparacao.catch(() => {
+      preparacao = null
+    })
+  }
+  return preparacao
+}
+
 export async function abrirPrescricao(
   patient: Patient,
   consultation: Consultation | null,
   ouvir: Ouvintes,
   local?: LocalDeAtendimento | null,
 ) {
-  const { token, producao, cadastro } = await tokenDoPrescritor()
+  // Se o prontuário já preparou, isto retorna na hora.
+  const { cadastro } = await prepararPrescricao()
   ultimoCadastro = cadastro
-  await carregarScript(token, producao)
 
   ouvintes.onReceita = ouvir.onReceita
   ouvintes.onExcluida = ouvir.onExcluida

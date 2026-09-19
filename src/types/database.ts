@@ -608,6 +608,7 @@ export type Database = {
           created_by: string | null
           ends_at: string
           id: string
+          insurance: string
           patient_id: string | null
           patient_note: string
           source: Database["public"]["Enums"]["appointment_source"]
@@ -635,6 +636,7 @@ export type Database = {
           created_by?: string | null
           ends_at: string
           id?: string
+          insurance?: string
           patient_id?: string | null
           patient_note?: string
           source?: Database["public"]["Enums"]["appointment_source"]
@@ -662,6 +664,7 @@ export type Database = {
           created_by?: string | null
           ends_at?: string
           id?: string
+          insurance?: string
           patient_id?: string | null
           patient_note?: string
           source?: Database["public"]["Enums"]["appointment_source"]

@@ -226,7 +226,7 @@ Deno.serve(async (req) => {
             .from('whatsapp_conversations')
             .select(
               'id,booking_state,booking_options,booking_unit_id,booking_patient_id,' +
-                'booking_replaces_id,booking_intake_id,booking_modality,needs_attention,' +
+                'booking_replaces_id,booking_intake_id,booking_modality,booking_insurance,needs_attention,' +
                 'attention_reason,profile_name,booking_updated_at,auto_replies_while_waiting,' +
                 'menu_sent_at',
             )
@@ -267,6 +267,7 @@ Deno.serve(async (req) => {
                   booking_replaces_id: null,
                   booking_intake_id: null,
                   booking_modality: null,
+                  booking_insurance: null,
                 }
               : linhaAnterior
 
@@ -456,6 +457,7 @@ Deno.serve(async (req) => {
               consultas,
               consultaASubstituir: conversaAnterior?.booking_replaces_id ?? null,
               consultaEmCadastro: conversaAnterior?.booking_intake_id ?? null,
+              convenioEmAndamento: conversaAnterior?.booking_insurance ?? null,
               modalidadeEmAndamento: (conversaAnterior?.booking_modality ?? null) as 'presencial' | 'telemedicina' | null,
               // Quantas respostas prontas o robo ja deu nesta espera pela
               // equipe. Etapa vencida recomeca do zero junto com o resto.
