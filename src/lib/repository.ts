@@ -710,7 +710,7 @@ type LinhaComFicha = {
   intake_email?: string | null
 }
 
-const FICHA_VAZIA = { nome: '', nascimento: '', responsavel: '', cpf: '', email: '', telemedicina: false }
+const FICHA_VAZIA = { nome: '', nascimento: '', responsavel: '', cpf: '', email: '', telemedicina: false, convenio: '' }
 
 /**
  * A ficha que a familia preencheu pelo WhatsApp, por consulta.
@@ -723,7 +723,7 @@ async function fichasDasConsultas(clinicId: string, unitId: string) {
   const vazio = new Map<string, typeof FICHA_VAZIA>()
   try {
     const { data, error } = await tabelaCrua('appointments')
-      .select('id,intake_patient_name,intake_birth_date,intake_guardian,intake_cpf,intake_email,modality')
+      .select('id,intake_patient_name,intake_birth_date,intake_guardian,intake_cpf,intake_email,modality,insurance')
       .eq('clinic_id', clinicId)
       .eq('unit_id', unitId)
       .order('id', { ascending: true })
@@ -735,9 +735,10 @@ async function fichasDasConsultas(clinicId: string, unitId: string) {
         responsavel: linha.intake_guardian ?? '',
         cpf: linha.intake_cpf ?? '',
         email: linha.intake_email ?? '',
-        // Vem junto da ficha porque as duas colunas sao mais novas que os
-        // tipos gerados, e uma consulta crua so ja paga as duas.
+        // Vem junto da ficha porque estas colunas sao mais novas que os tipos
+        // gerados, e uma consulta crua so ja paga todas.
         telemedicina: linha.modality === 'telemedicina',
+        convenio: (linha as { insurance?: string | null }).insurance ?? '',
       })
     }
   } catch {
@@ -763,7 +764,7 @@ function inicioDeHoje() {
 export async function listAppointments(clinicId: string, unitId: string): Promise<Appointment[]> {
   const { data, error } = await supabase
     .from('appointments')
-    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at,confirmed_at,reschedule_requested_at,reminder_sent_at,reschedule_count,insurance')
+    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at,confirmed_at,reschedule_requested_at,reminder_sent_at,reschedule_count')
     .eq('clinic_id', clinicId)
     .eq('unit_id', unitId)
     .neq('status', 'cancelled')
@@ -810,7 +811,7 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
     rescheduleRequestedAt: row.reschedule_requested_at,
     reminderSentAt: row.reminder_sent_at,
     rescheduleCount: row.reschedule_count ?? 0,
-    insurance: (row as { insurance?: string | null }).insurance ?? '',
+    insurance: fichas.get(row.id)?.convenio ?? '',
     retornoDe: dataDoRetorno(
       row.patient_id ? ultimaConsultaPorPaciente.get(row.patient_id) ?? null : null,
       row.starts_at,
@@ -837,7 +838,7 @@ export async function listAppointmentHistory(
 
   const { data, error } = await supabase
     .from('appointments')
-    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at,confirmed_at,reschedule_requested_at,reminder_sent_at,reschedule_count,insurance')
+    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at,confirmed_at,reschedule_requested_at,reminder_sent_at,reschedule_count')
     .eq('clinic_id', clinicId)
     .eq('unit_id', unitId)
     .gte('starts_at', desde.toISOString())
@@ -851,6 +852,9 @@ export async function listAppointmentHistory(
     ? await supabase.from('patients').select('id,name').in('id', patientIds)
     : { data: [] }
   const nameById = new Map((patients ?? []).map((p) => [p.id, p.name]))
+  // Só pelo convênio: o histórico não mostra ficha, mas a recepção precisa
+  // saber pelo que aquela consulta foi faturada.
+  const fichas = await fichasDasConsultas(clinicId, unitId)
 
   return rows.map((row) => ({
     id: row.id,
@@ -874,7 +878,7 @@ export async function listAppointmentHistory(
     rescheduleRequestedAt: row.reschedule_requested_at,
     reminderSentAt: row.reminder_sent_at,
     rescheduleCount: row.reschedule_count ?? 0,
-    insurance: (row as { insurance?: string | null }).insurance ?? '',
+    insurance: fichas.get(row.id)?.convenio ?? '',
     retornoDe: null,
   }))
 }
