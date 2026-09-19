@@ -1040,6 +1040,18 @@ export default function Agenda({
                                 padrao merece ser visto antes da consulta e nao
                                 depois da falta. Por isso a partir da segunda a
                                 etiqueta acende, em vez de sempre sussurrar. */}
+                            {/* Convênio à vista, e não escondido no detalhe.
+                                A recepção precisa saber ANTES da pessoa chegar
+                                se fatura pelo plano ou cobra particular - do
+                                contrário descobre com a família na frente,
+                                sem tempo de conferir elegibilidade.
+                                Particular não ganha etiqueta: é a maioria, e
+                                etiquetar o normal só faz barulho. */}
+                            {item.insurance && (
+                              <span className="mt-1 ml-1 inline-flex items-center gap-1 rounded-full bg-[#2f7fc1] px-2 py-0.5 text-[9px] font-extrabold text-white">
+                                💳 {item.insurance}
+                              </span>
+                            )}
                             {item.rescheduleCount > 0 && (
                               <span
                                 className={`mt-1 ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold ${

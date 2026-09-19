@@ -56,6 +56,7 @@ export type Estado =
   | 'ja_tem_consulta'
   | 'aguardando_paciente'
   | 'aguardando_unidade'
+  | 'aguardando_convenio'
   | 'aguardando_dia'
   | 'aguardando_horario'
   | 'dados_nome'
@@ -101,7 +102,14 @@ export type Resultado = {
   lista?: { rotulo: string; linhas: Toque[] }
 } | null
 
-type Unidade = { id: string; name: string; address: string; info_text?: string | null }
+type Unidade = {
+  id: string
+  name: string
+  address: string
+  info_text?: string | null
+  /** Convenio aceito nesta unidade. Vazio = so particular, e o robo nao pergunta. */
+  accepts_insurance?: string | null
+}
 type Paciente = {
   id: string
   name: string
@@ -410,6 +418,7 @@ async function voltarAoMenuAtivo(admin: Admin, conversationId: string) {
     booking_patient_id: null,
     booking_replaces_id: null,
     booking_intake_id: null,
+    booking_insurance: null,
   })
 }
 
@@ -422,6 +431,7 @@ async function limparEstado(admin: Admin, conversationId: string) {
     booking_patient_id: null,
     booking_replaces_id: null,
     booking_intake_id: null,
+    booking_insurance: null,
   })
 }
 
@@ -451,7 +461,7 @@ async function unidadePorId(admin: Admin, id: string): Promise<Unidade | null> {
   if (id === TELE_ID) return UNIDADE_TELE
   const { data } = await admin
     .from('clinic_units')
-    .select('id,name,address,info_text')
+    .select('id,name,address,info_text,accepts_insurance')
     .eq('id', id)
     .maybeSingle()
   return (data as Unidade | null) ?? null
@@ -1011,8 +1021,11 @@ async function perguntarUnidade(
     }
   }
 
-  // Uma unidade so: nao faz sentido perguntar, ja mostra as datas.
+  // Uma unidade so: nao faz sentido perguntar qual, mas o convenio continua
+  // valendo - e ele e justamente o caso de uma clinica com unidade unica.
   if (unidades.length === 1) {
+    const plano = (unidades[0].accepts_insurance ?? '').trim()
+    if (plano) return await perguntarConvenioOuDia(admin, clinicId, conversationId, unidades[0])
     return await perguntarDia(admin, clinicId, conversationId, unidades[0], false)
   }
 
@@ -1071,6 +1084,45 @@ async function perguntarUnidade(
 }
 
 /** Primeira etapa da agenda: em que dia. */
+/**
+ * Pergunta o convenio antes das datas, quando a unidade aceita algum.
+ *
+ * Vem ANTES de escolher dia e horario de proposito. Perguntar depois seria
+ * perguntar a quem ja escolheu, e quem tem o plano pode preferir outro dia
+ * para usar o convenio; e perguntar antes da unidade nao faz sentido, porque
+ * o plano vale numa unidade e nao na outra.
+ *
+ * Unidade sem convenio cadastrado pula direto. E a telemedicina tambem, por
+ * construcao: ela nao tem linha em clinic_units, entao nunca tem o campo.
+ */
+async function perguntarConvenioOuDia(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+  unidade: Unidade,
+): Promise<Resultado> {
+  const plano = (unidade.accepts_insurance ?? '').trim()
+  if (!plano) return await perguntarDia(admin, clinicId, conversationId, unidade)
+
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'aguardando_convenio',
+    booking_unit_id: unidade.id,
+    booking_options: null,
+  })
+
+  return {
+    resposta:
+      `💳 Esta consulta vai ser pelo convênio *${plano}* ou *particular*?\n\n` +
+      `*1* ${plano}\n` +
+      '*2* Particular\n\n' +
+      'Responda com o número, ou toque no botão.',
+    botoes: [
+      { id: '1', titulo: plano.slice(0, 20) },
+      { id: '2', titulo: 'Particular' },
+    ],
+  }
+}
+
 async function perguntarDia(
   admin: Admin,
   clinicId: string,
@@ -1263,6 +1315,8 @@ async function marcar(
   slot: Horario,
   /** Consulta antiga a cancelar assim que a nova entrar (remarcacao). */
   substitui: string | null = null,
+  /** Convenio escolhido na conversa. Vazio = particular. */
+  convenio = '',
 ): Promise<Resultado> {
   // Telemedicina: a consulta e gravada na unidade fisica que cedeu o horario -
   // e o mesmo medico, no mesmo dia, entao o horario nao pode ficar livre la.
@@ -1315,6 +1369,9 @@ async function marcar(
     // O lembrete da vespera continua sendo a checagem de que a pessoa vem.
     confirmed_by_clinic: true,
     hold_expires_at: null,
+    // Vazio quando e particular, que e o caso da maioria. A recepcao le isto na
+    // Agenda e ja sabe se prepara a guia ou a maquininha.
+    insurance: convenio,
     reschedule_count: vezesRemarcada,
     rescheduled_from: substitui,
   }).select('id').maybeSingle()
@@ -1896,6 +1953,8 @@ export async function tratarConversa(opcoes: {
   consultaASubstituir: string | null
   /** Consulta recem-marcada cujos dados estao sendo perguntados. */
   consultaEmCadastro: string | null
+  /** Convenio ja respondido neste agendamento. Vazio ou ausente = particular. */
+  convenioEmAndamento?: string | null
   /** Nome que a pessoa usa no WhatsApp. Vazio quando o evento nao trouxe. */
   nomeDoPerfil: string
   textos: { saudacao: string; saudacaoConhecida: string; informacoes: string }
@@ -2462,6 +2521,54 @@ export async function tratarConversa(opcoes: {
         'Essa unidade não está mais disponível. Vamos recomeçar:',
       )
     }
+    return await perguntarConvenioOuDia(admin, clinicId, conversationId, escolhida)
+  }
+
+  // ---- Convenio: particular ou pelo plano? ----
+  //
+  // So aparece em unidade que aceita convenio. A resposta nao muda o preco nem
+  // o horario: muda o que a recepcao precisa ter em maos quando a pessoa
+  // chegar. Sem ela, a familia aparece com a carteirinha e a recepcao descobre
+  // na hora se fatura pelo plano ou cobra particular.
+  if (estadoAtual === 'aguardando_convenio') {
+    const unidadeId = unidadeEmAndamento
+    const unidades = await opcoesDeAtendimento(admin, clinicId)
+    const escolhida = unidades.find((u) => u.id === unidadeId)
+    if (!escolhida) {
+      return await mostrarMenu(
+        admin,
+        conversationId,
+        saudacao,
+        'Perdi o fio da conversa, desculpe. Vamos recomeçar:',
+      )
+    }
+
+    const plano = (escolhida.accepts_insurance ?? '').trim()
+    const indice = escolha(texto, 2)
+    const escrito = texto.trim().toLowerCase()
+    // Aceita o numero, o nome do plano digitado e a palavra "particular": quem
+    // responde por escrito nao deve ser mandado de volta para a lista.
+    const pelaPalavra =
+      plano && escrito.includes(plano.toLowerCase()) ? 0
+        : /particular|sem convenio|sem convênio|nao tenho|não tenho/.test(escrito) ? 1
+          : null
+    const resposta = indice ?? pelaPalavra
+
+    if (resposta === null) {
+      if (pediuVoltar(texto)) return await mostrarMenu(admin, conversationId, saudacao)
+      return {
+        resposta: await naoEntendi(
+          admin,
+          clinicId,
+          texto,
+          `Responda *1* para ${plano} ou *2* para particular.\n\n` + VOLTA,
+        ),
+      }
+    }
+
+    await salvarEstado(admin, conversationId, {
+      booking_insurance: resposta === 0 ? plano : '',
+    })
     return await perguntarDia(admin, clinicId, conversationId, escolhida)
   }
 
@@ -2542,7 +2649,7 @@ export async function tratarConversa(opcoes: {
         return await marcar(
           admin, clinicId, conversationId, unidadeEmAndamento,
           pacienteDaConsulta, opcoes.telefone, opcoes.nomeDoPerfil, daHora[0],
-          opcoes.consultaASubstituir,
+          opcoes.consultaASubstituir, opcoes.convenioEmAndamento ?? '',
         )
       }
 
@@ -2598,6 +2705,7 @@ export async function tratarConversa(opcoes: {
       opcoes.nomeDoPerfil,
       lista[indice],
       opcoes.consultaASubstituir,
+      opcoes.convenioEmAndamento ?? '',
     )
   }
 

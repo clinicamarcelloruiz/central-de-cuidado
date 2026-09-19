@@ -76,7 +76,7 @@ import type {
   Patient,
 } from '@/types/patient'
 import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
-import { abrirPrescricao, faltaParaPrescrever, guardarReceita, marcarReceitaExcluida, ultimoCadastro, type LocalDeAtendimento } from '@/lib/memed'
+import { abrirPrescricao, faltaParaPrescrever, guardarReceita, marcarReceitaExcluida, prepararPrescricao, ultimoCadastro, type LocalDeAtendimento } from '@/lib/memed'
 
 interface PatientRecordProps {
   patient: Patient | null
@@ -2018,6 +2018,18 @@ export default function PatientRecord({
     { tipo: 'ok' | 'erro'; texto: string } | null
   >(null)
   const unidadesDaClinica = useUnidades()
+
+  // Aquece a Memed assim que o prontuário abre.
+  //
+  // Buscar o token e carregar o script deles leva alguns segundos, e antes isso
+  // tudo acontecia depois do clique em Prescrever, com o médico esperando.
+  // Nada disso depende do paciente, então acontece agora, enquanto ele lê a
+  // ficha. Roda uma vez por sessão e não trava nada se falhar: o erro, se
+  // houver, aparece no clique, como antes.
+  useEffect(() => {
+    if (!open) return
+    void prepararPrescricao().catch(() => {})
+  }, [open])
 
   useEffect(() => {
     if (!open) return
