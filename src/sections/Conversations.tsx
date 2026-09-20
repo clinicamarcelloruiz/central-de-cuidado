@@ -6,6 +6,8 @@ import {
   ArrowLeft,
   Check,
   CheckCheck,
+  ChevronDown,
+  ChevronUp,
   CircleSlash,
   Clock3,
   MessageSquareText,
@@ -313,6 +315,19 @@ export default function Conversations({
   // clinica. Esconder por conta propria seria decidir pela equipe que o dia
   // anterior nao interessa mais.
   const [esconderConcluidas, setEsconderConcluidas] = useState(false)
+  // Cartoes com a previa aberta por inteiro. A previa e uma linha cortada com
+  // reticencias, e mensagens como "Voce ja tem uma consulta marcada: Aline
+  // Lapetina, sexta 25/09 as 10:40 em Liferty Santos" perdiam justamente a
+  // parte que interessava - a data. Abrir a conversa so para ler o fim de uma
+  // frase era caminho longo demais para uma informacao tao curta.
+  const [previasAbertas, setPreviasAbertas] = useState<Set<string>>(() => new Set())
+  const alternarPrevia = (id: string) =>
+    setPreviasAbertas((atual) => {
+      const proximo = new Set(atual)
+      if (proximo.has(id)) proximo.delete(id)
+      else proximo.add(id)
+      return proximo
+    })
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [loading, setLoading] = useState(true)
@@ -1249,9 +1264,52 @@ export default function Conversations({
                   <p className="mt-0.5 text-[10px] font-bold tracking-wide text-slate-400">
                     {conversation.phone}
                   </p>
-                  <p className="mt-1 truncate text-[11px] text-slate-500">
-                    {conversation.lastMessage || 'Sem mensagens'}
-                  </p>
+                  {(() => {
+                    const texto = conversation.lastMessage || 'Sem mensagens'
+                    const aberta = previasAbertas.has(conversation.id)
+                    // So oferece a seta quando ha o que esconder. Uma linha
+                    // curta com botao de expandir e ruido: a pessoa toca e nada
+                    // muda.
+                    const longa = texto.length > 56 || texto.includes('\n')
+                    return (
+                      <div className="mt-1 flex items-start gap-1">
+                        <p
+                          className={`min-w-0 flex-1 text-[11px] text-slate-500 ${
+                            aberta ? 'whitespace-pre-line break-words' : 'truncate'
+                          }`}
+                        >
+                          {texto}
+                        </p>
+                        {longa && (
+                          /* span com role de botao, e nao <button>: este trecho
+                             ja esta dentro do botao que abre a conversa, e
+                             botao dentro de botao e HTML invalido - o clique
+                             subiria e abriria a conversa junto. O stopPropagation
+                             segura o clique aqui. */
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            aria-label={aberta ? 'Encolher a mensagem' : 'Ver a mensagem inteira'}
+                            title={aberta ? 'Encolher' : 'Ver tudo'}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              alternarPrevia(conversation.id)
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                alternarPrevia(conversation.id)
+                              }
+                            }}
+                            className="mt-0.5 inline-flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-[#081b2c]"
+                          >
+                            {aberta ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })()}
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     {semCadastro && (
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-extrabold text-slate-500">
