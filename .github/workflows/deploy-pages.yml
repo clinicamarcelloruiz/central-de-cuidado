@@ -51,11 +51,24 @@ jobs:
             echo "presente=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # VERSAO FIXA, e nao "latest".
+      #
+      # Com "latest" a action pergunta ao GitHub qual e a ultima release da CLI,
+      # e pergunta sem credencial nenhuma - entao entra na cota de visitante,
+      # compartilhada com o mundo. Em 20/09/2026 a publicacao das 14:41 morreu
+      # em 7 segundos com "rate limit exceeded", sem nada de errado no codigo: o
+      # site montou, o artefato ficou pronto, e nao foi ao ar porque o banco
+      # roda antes e falhou.
+      #
+      # A versao fixa nao faz pergunta nenhuma. Sobe quando alguem decidir
+      # subir, e nao no dia em que a Supabase publicar uma versao nova - o que
+      # tambem evita uma CLI diferente aparecer sozinha no meio de uma
+      # publicacao.
       - name: Preparar a CLI do Supabase
         if: steps.token.outputs.presente == 'true'
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.117.0
 
       - name: Aplicar migrations do banco
         if: steps.token.outputs.presente == 'true'
@@ -140,11 +153,12 @@ jobs:
             echo "presente=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Mesma versao fixa do trabalho do banco, pelo mesmo motivo.
       - name: Preparar a CLI do Supabase
         if: steps.token.outputs.presente == 'true'
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.117.0
 
       - name: Publicar as Edge Functions
         if: steps.token.outputs.presente == 'true'
