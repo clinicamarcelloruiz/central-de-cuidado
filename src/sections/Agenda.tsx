@@ -1028,6 +1028,20 @@ export default function Agenda({
                                 Lembrete enviado, sem resposta
                               </span>
                             )}
+                            {/* A tela dizia quando o lembrete saiu e calava
+                                quando a Meta recusou - e recusa é exatamente a
+                                hora em que alguém precisa saber, porque dá
+                                tempo de ligar. O motivo vai no title: é técnico
+                                demais para a etiqueta e necessário demais para
+                                ficar só no banco. */}
+                            {!item.reminderSentAt && item.reminderFailedAt && (
+                              <span
+                                title={item.reminderFailureReason ?? 'A Meta recusou o envio.'}
+                                className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#b42318] px-2 py-0.5 text-[9px] font-extrabold text-white"
+                              >
+                                Lembrete falhou
+                              </span>
+                            )}
                             {/* Marcada pela equipe sem telefone nenhum: o
                                 lembrete da vespera nao tem para onde ir. Dito
                                 agora, da tempo de completar o cadastro. */}
@@ -1422,9 +1436,14 @@ export default function Agenda({
                           : 'dias antes da consulta'}
                     </span>
                   </div>
+                  {/* Dizia "sai todo dia às 10h", que deixou de ser verdade em
+                      31/08/2026, quando a passada única virou uma varredura de
+                      hora em hora. Quem marcava às 11h e lia isto concluía que
+                      o paciente ficaria sem lembrete - e não fica. */}
                   <p className="mt-2 text-[10px] text-slate-500">
-                    Sai todo dia às 10h. O paciente responde CONFIRMAR ou REAGENDAR; quem pede para
-                    remarcar aparece marcado em Respostas.
+                    O sistema confere de hora em hora e envia entre 8h e 20h, uma vez por consulta.
+                    O paciente responde CONFIRMAR ou REAGENDAR; quem pede para remarcar aparece
+                    marcado em Respostas.
                   </p>
                 </div>
 

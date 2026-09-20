@@ -435,6 +435,16 @@ export interface Appointment {
   /** Quando o lembrete da vespera saiu. Nulo enquanto nao foi enviado. */
   reminderSentAt: string | null
   /**
+   * Quando a Meta recusou o lembrete, e por que.
+   *
+   * O banco guarda isso desde sempre; a tela nao mostrava. Em 20/09/2026
+   * descobrimos que os lembretes estavam parados havia tres semanas por um
+   * erro de maiusculas no nome do segredo do cron - e nada na tela dizia. Uma
+   * falha que so existe no banco e uma falha que ninguem ve.
+   */
+  reminderFailedAt: string | null
+  reminderFailureReason: string | null
+  /**
    * O que a familia informou pelo WhatsApp ao marcar. Declarado por mensagem,
    * sem ninguem conferir: a equipe le, confere e transforma em cadastro.
    */
@@ -764,7 +774,7 @@ function inicioDeHoje() {
 export async function listAppointments(clinicId: string, unitId: string): Promise<Appointment[]> {
   const { data, error } = await supabase
     .from('appointments')
-    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at,confirmed_at,reschedule_requested_at,reminder_sent_at,reschedule_count')
+    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at,confirmed_at,reschedule_requested_at,reminder_sent_at,reminder_failed_at,reminder_failure_reason,reschedule_count')
     .eq('clinic_id', clinicId)
     .eq('unit_id', unitId)
     .neq('status', 'cancelled')
@@ -810,6 +820,8 @@ export async function listAppointments(clinicId: string, unitId: string): Promis
     confirmedAt: row.confirmed_at,
     rescheduleRequestedAt: row.reschedule_requested_at,
     reminderSentAt: row.reminder_sent_at,
+    reminderFailedAt: row.reminder_failed_at,
+    reminderFailureReason: row.reminder_failure_reason,
     rescheduleCount: row.reschedule_count ?? 0,
     insurance: fichas.get(row.id)?.convenio ?? '',
     retornoDe: dataDoRetorno(
@@ -838,7 +850,7 @@ export async function listAppointmentHistory(
 
   const { data, error } = await supabase
     .from('appointments')
-    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at,confirmed_at,reschedule_requested_at,reminder_sent_at,reschedule_count')
+    .select('id,unit_id,patient_id,starts_at,ends_at,status,source,staff_note,contact_name,contact_phone,confirmed_by_clinic,hold_expires_at,confirmed_at,reschedule_requested_at,reminder_sent_at,reminder_failed_at,reminder_failure_reason,reschedule_count')
     .eq('clinic_id', clinicId)
     .eq('unit_id', unitId)
     .gte('starts_at', desde.toISOString())
@@ -877,6 +889,8 @@ export async function listAppointmentHistory(
     confirmedAt: row.confirmed_at,
     rescheduleRequestedAt: row.reschedule_requested_at,
     reminderSentAt: row.reminder_sent_at,
+    reminderFailedAt: row.reminder_failed_at,
+    reminderFailureReason: row.reminder_failure_reason,
     rescheduleCount: row.reschedule_count ?? 0,
     insurance: fichas.get(row.id)?.convenio ?? '',
     retornoDe: null,

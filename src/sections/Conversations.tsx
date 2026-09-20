@@ -46,7 +46,7 @@ import {
 
 const STATUS_LABEL: Record<Conversation['status'], string> = {
   open: 'Em aberto',
-  resolved: 'Resolvida',
+  resolved: 'Concluída',
   opted_out: 'Pediu para não receber',
 }
 
@@ -1317,13 +1317,20 @@ export default function Conversations({
                       Reabrir conversa
                     </button>
                   ) : (
+                    // "Concluir", e nao "marcar como resolvida": e a mesma
+                    // palavra da lista, onde a conversa vira uma linha com
+                    // check verde. Duas palavras para o mesmo ato faziam a
+                    // pessoa procurar dois estados onde so ha um. E a
+                    // explicacao no title porque o efeito e visivel mas nao
+                    // obvio: encolhe agora, volta sozinha se escreverem.
                     <button
                       type="button"
                       onClick={() => void resolve(selected.id)}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#eef3f2] px-3 py-1.5 text-[10px] font-extrabold text-[#557f75] transition hover:bg-[#e2ece9]"
+                      title="A conversa vira uma linha na lista. Se o paciente escrever de novo, ela volta sozinha."
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#eaf3ec] px-3 py-1.5 text-[10px] font-extrabold text-[#237128] transition hover:bg-[#dcebe0]"
                     >
                       <Check className="h-3.5 w-3.5" />
-                      Marcar como resolvida
+                      Concluir conversa
                     </button>
                   )}
                 </div>
