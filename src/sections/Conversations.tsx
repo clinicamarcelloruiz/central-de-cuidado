@@ -1080,7 +1080,12 @@ export default function Conversations({
                         encerrada "Resolvida" ja diz mais, e duas etiquetas
                         verdes lado a lado nao diriam nada. */}
                     {respondida && conversation.status === 'open' && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[9px] font-extrabold text-[#557f75]">
+                      /* Cheia, e não em tom claro: no cartão esmaecido a
+                         etiqueta clara sumia junto com o resto, e ela é
+                         justamente o que explica por que aquele cartão está
+                         apagado. O mesmo azul do contador de mensagens novas,
+                         para o olho ler as duas marcas como do mesmo tipo. */
+                      <span className="inline-flex items-center gap-1 rounded-full bg-[#081b2c] px-2 py-0.5 text-[9px] font-extrabold text-white">
                         <Check className="h-2.5 w-2.5" />
                         Respondida
                       </span>
