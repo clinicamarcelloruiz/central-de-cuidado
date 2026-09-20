@@ -418,8 +418,17 @@ export default function Conversations({
    */
   const colunas = useRef<HTMLDivElement>(null)
   const [alturaColunas, setAlturaColunas] = useState<number | null>(null)
+  // O grid das colunas so existe depois que as conversas carregam: antes disso
+  // a tela mostra o aviso de lista vazia. A medicao precisa rodar de novo
+  // quando ele aparece - foi por nao fazer isso que a primeira versao subiu ao
+  // ar medindo um elemento que ainda nao existia e nunca mais voltou a medir.
+  const temColunas = conversations.length > 0
 
   useEffect(() => {
+    if (!temColunas) {
+      setAlturaColunas(null)
+      return
+    }
     const desktop = window.matchMedia('(min-width: 1024px)')
 
     const medir = () => {
@@ -428,12 +437,20 @@ export default function Conversations({
         setAlturaColunas(null)
         return
       }
-      // 16px de folga embaixo, para o cartao nao encostar na borda da janela.
-      const topo = alvo.getBoundingClientRect().top + window.scrollY
-      setAlturaColunas(Math.max(360, window.innerHeight - topo - 16))
+      // A altura e o que sobra da janela entre o topo do grid e o fim da
+      // pagina. O "fim da pagina" e medido, nao chutado: a moldura tem
+      // respiro embaixo (o padding do main e do miolo), e descontar um numero
+      // fixo deixava 68px sobrando - a pagina continuava rolando, so que
+      // pouco, que e o pior dos mundos.
+      const caixa = alvo.getBoundingClientRect()
+      const topo = caixa.top + window.scrollY
+      const abaixo = document.documentElement.scrollHeight - (topo + caixa.height)
+      setAlturaColunas(Math.max(360, window.innerHeight - topo - abaixo))
     }
 
-    medir()
+    // Um quadro depois da montagem: as fontes e o cabecalho da secao terminam
+    // de assentar, e a primeira medida ja sai certa.
+    const quadro = requestAnimationFrame(medir)
     window.addEventListener('resize', medir)
     desktop.addEventListener('change', medir)
     // O cabecalho da secao muda de altura quando os filtros abrem ou o aviso
@@ -443,11 +460,12 @@ export default function Conversations({
     if (colunas.current?.parentElement) observador.observe(colunas.current.parentElement)
 
     return () => {
+      cancelAnimationFrame(quadro)
       window.removeEventListener('resize', medir)
       desktop.removeEventListener('change', medir)
       observador.disconnect()
     }
-  }, [])
+  }, [temColunas])
 
   useEffect(() => {
     const alvo = cabecalho.current
