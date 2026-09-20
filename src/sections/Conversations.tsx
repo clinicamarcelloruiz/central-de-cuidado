@@ -387,6 +387,26 @@ export default function Conversations({
   const fimDasMensagens = useRef<HTMLDivElement>(null)
   // Topo da lista. O botao de subir rola ate ele.
   const inicioDasMensagens = useRef<HTMLDivElement>(null)
+  // O painel da conversa. Ao abrir uma, a tela sobe ate ele, para o cabecalho
+  // (nome, telefone, resumo, janela) encostar no topo e ficar travado ali
+  // enquanto as mensagens rolam por baixo.
+  const painel = useRef<HTMLDivElement>(null)
+  const cabecalho = useRef<HTMLDivElement>(null)
+  // Altura viva do cabecalho travado. Os botoes "Ir para o inicio/fim" tambem
+  // sao grudados, e precisam parar logo ABAIXO dele - nao por tras. Como o
+  // cabecalho muda de altura (aviso de janela fechada aparece e some, o
+  // resumo quebra linha no celular), a medida vem de um ResizeObserver.
+  const [alturaCabecalho, setAlturaCabecalho] = useState(0)
+
+  useEffect(() => {
+    const alvo = cabecalho.current
+    if (!alvo) return
+    const medir = () => setAlturaCabecalho(alvo.getBoundingClientRect().height)
+    medir()
+    const observador = new ResizeObserver(medir)
+    observador.observe(alvo)
+    return () => observador.disconnect()
+  }, [selectedId, loadingMessages])
   // Qual conversa ja foi posicionada no fim. Sem isto, cada mensagem nova
   // rolaria a tela de novo enquanto alguem le algo mais acima.
   const conversaRolada = useRef<string | null>(null)
@@ -483,6 +503,10 @@ export default function Conversations({
     // que ela carrega. Aqui só zeramos a marca, para que a conversa que abre
     // seja tratada como primeira vez e dê o salto seco em vez do suave.
     conversaRolada.current = null
+    // O painel sobe para o topo da tela no clique. Sem isto, em conversa
+    // curta nada rolava e o cabecalho ficava onde estivesse; com isto, ele
+    // encosta no topo e fica travado enquanto as mensagens passam por baixo.
+    painel.current?.scrollIntoView({ behavior: 'auto', block: 'start' })
     try {
       const [historico, janela] = await Promise.all([
         listConversationMessages(conversation.id),
@@ -1055,9 +1079,11 @@ export default function Conversations({
               // a crescer - e a subir, porque a ordem e pela ultima mensagem.
               // Do lado da clinica, responder e concluir encolhe de novo.
               //
-              // O clique faz o mesmo de sempre: abre a conversa inteira ao
-              // lado. A linha nao precisa crescer no lugar para isso.
-              if (estaConcluida(conversation)) {
+              // A que esta aberta ao lado volta a ser cartao inteiro: quem
+              // esta lendo a conversa quer ver de quem e, o telefone e a
+              // ultima mensagem sem precisar procurar. Ao trocar para outra,
+              // ela encolhe de novo.
+              if (estaConcluida(conversation) && !active) {
                 return (
                   <div
                     key={conversation.id}
@@ -1157,13 +1183,13 @@ export default function Conversations({
                         Não quer receber
                       </span>
                     )}
-                    {/* Concluida normalmente encolhe e nem chega aqui. Este
-                        cartao inteiro so aparece "Resolvida" quando o robo
-                        ficou preso numa etapa: ai o botao de destravar precisa
-                        do espaco, e a etiqueta explica por que ele esta num
-                        cartao que parece pendente. Mesmo verde do encolhido,
-                        para ser a mesma coisa em dois tamanhos. */}
-                    {conversation.status === 'resolved' && (
+                    {/* Concluida normalmente encolhe. Chega aqui em cartao
+                        inteiro em dois casos: quando esta aberta ao lado, e
+                        quando o robo ficou preso numa etapa e o botao de
+                        destravar precisa do espaco. Nos dois, a etiqueta e o
+                        mesmo check verde do encolhido - a mesma coisa em dois
+                        tamanhos, e nao dois estados. */}
+                    {(estaConcluida(conversation) || conversation.status === 'resolved') && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-[#237128] px-2 py-0.5 text-[9px] font-extrabold text-white">
                         <Check className="h-2.5 w-2.5" />
                         Concluída
@@ -1215,6 +1241,7 @@ export default function Conversations({
           </div>
 
           <div
+            ref={painel}
             className={`surface-card min-h-[320px] min-w-0 rounded-[22px] p-4 ${
               selected ? '' : 'hidden lg:block'
             }`}
@@ -1225,6 +1252,16 @@ export default function Conversations({
               </p>
             ) : (
               <>
+                {/* Cabecalho travado no topo enquanto a conversa rola.
+                    Numa conversa longa, o nome de quem esta falando e o aviso
+                    de janela fechada sumiam na primeira rolada - e a pessoa
+                    respondia sem saber a quem, ou escrevia um texto que nao ia
+                    poder enviar. As margens negativas estendem o fundo branco
+                    ate a borda do cartao, para nada aparecer por tras. */}
+                <div
+                  ref={cabecalho}
+                  className="sticky top-0 z-20 -mx-4 -mt-4 rounded-t-[22px] bg-white/95 px-4 pt-4 backdrop-blur"
+                >
                 {/* Só no celular: no computador a lista está do lado, e um
                     botão de voltar ali seria um passo inventado. */}
                 <button
@@ -1312,6 +1349,10 @@ export default function Conversations({
                     </button>
                   </div>
                 )}
+                {/* Respiro na base do bloco travado, para a primeira mensagem
+                    nao encostar nele quando a conversa rola por baixo. */}
+                <div className="h-3" />
+                </div>
 
                 {loadingMessages ? (
                   <p className="pt-12 text-center text-xs font-semibold text-slate-400">
@@ -1324,7 +1365,7 @@ export default function Conversations({
                      tela precisa saber na hora o que o paciente esta vendo do
                      outro lado, e o painel escuro do resto do sistema obrigava
                      a traduzir mentalmente a cada mensagem. */
-                  <div className="relative mt-3 rounded-[14px] bg-[#efeae2] px-3 py-4" style={FUNDO_WHATSAPP}>
+                  <div className="relative rounded-[14px] bg-[#efeae2] px-3 py-4" style={FUNDO_WHATSAPP}>
                     {/* Conversas antigas tem dezenas de mensagens, e o que
                         interessa esta sempre no fim. Sem isto a equipe rolava a
                         roda ate cansar toda vez que abria uma conversa.
@@ -1333,8 +1374,15 @@ export default function Conversations({
                         entao subir ate o comeco - para reler como tudo comecou,
                         ou achar o que o paciente pediu na primeira mensagem -
                         era o caminho que dava mais trabalho e nao tinha atalho. */}
+                    {/* Grudados logo abaixo do cabecalho travado, e nao no
+                        topo da tela: ali ficariam por tras dele. A medida vem
+                        do ResizeObserver, entao acompanha o aviso de janela
+                        aparecendo e sumindo. */}
                     {messages.length > 6 && (
-                      <div className="sticky top-1 z-10 mb-1 flex justify-end gap-1.5">
+                      <div
+                        className="sticky z-10 mb-1 flex justify-end gap-1.5"
+                        style={{ top: alturaCabecalho + 4 }}
+                      >
                         <button
                           type="button"
                           onClick={() =>
