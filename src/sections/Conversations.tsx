@@ -1083,9 +1083,13 @@ export default function Conversations({
                       /* Cheia, e não em tom claro: no cartão esmaecido a
                          etiqueta clara sumia junto com o resto, e ela é
                          justamente o que explica por que aquele cartão está
-                         apagado. O mesmo azul do contador de mensagens novas,
-                         para o olho ler as duas marcas como do mesmo tipo. */
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#081b2c] px-2 py-0.5 text-[9px] font-extrabold text-white">
+                         apagado.
+
+                         Verde, e não o azul-escuro da marca: o azul é a cor
+                         neutra desta tela - título, contador de novas, botão
+                         selecionado -, e a etiqueta se confundia com ele. O
+                         verde diz "feito" sozinho, sem depender de ler. */
+                      <span className="inline-flex items-center gap-1 rounded-full bg-[#237128] px-2 py-0.5 text-[9px] font-extrabold text-white">
                         <Check className="h-2.5 w-2.5" />
                         Respondida
                       </span>
