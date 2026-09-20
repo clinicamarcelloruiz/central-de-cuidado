@@ -398,6 +398,57 @@ export default function Conversations({
   // resumo quebra linha no celular), a medida vem de um ResizeObserver.
   const [alturaCabecalho, setAlturaCabecalho] = useState(0)
 
+  /**
+   * As duas colunas rolam por dentro, como no WhatsApp Web.
+   *
+   * Antes quem rolava era a pagina inteira: com 29 conversas a lista empurrava
+   * o rodape para longe, e ler uma conversa comprida significava perder a
+   * lista de vista. Rolar de volta ao topo para trocar de conversa era o
+   * caminho de sempre.
+   *
+   * Agora o bloco das duas colunas tem a altura do que sobra da janela, e cada
+   * coluna tem a propria barra. A pagina nao rola mais nesta tela - e por isso
+   * a altura e medida, e nao chutada num calc(100vh - 300px): o cabecalho da
+   * secao cresce quando os filtros abrem, e um numero fixo deixaria a lista
+   * passando do rodape ou sobrando espaco em branco.
+   *
+   * So no computador. No celular e uma coluna de cada vez e a pagina rolando
+   * inteira, que ali e o certo: prender a lista numa janela curta dentro de
+   * uma tela ja curta so faz a pessoa rolar duas vezes.
+   */
+  const colunas = useRef<HTMLDivElement>(null)
+  const [alturaColunas, setAlturaColunas] = useState<number | null>(null)
+
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 1024px)')
+
+    const medir = () => {
+      const alvo = colunas.current
+      if (!alvo || !desktop.matches) {
+        setAlturaColunas(null)
+        return
+      }
+      // 16px de folga embaixo, para o cartao nao encostar na borda da janela.
+      const topo = alvo.getBoundingClientRect().top + window.scrollY
+      setAlturaColunas(Math.max(360, window.innerHeight - topo - 16))
+    }
+
+    medir()
+    window.addEventListener('resize', medir)
+    desktop.addEventListener('change', medir)
+    // O cabecalho da secao muda de altura quando os filtros abrem ou o aviso
+    // de conversas na espera aparece. Sem observar, a lista ficava com a
+    // altura de antes e passava do rodape.
+    const observador = new ResizeObserver(medir)
+    if (colunas.current?.parentElement) observador.observe(colunas.current.parentElement)
+
+    return () => {
+      window.removeEventListener('resize', medir)
+      desktop.removeEventListener('change', medir)
+      observador.disconnect()
+    }
+  }, [])
+
   useEffect(() => {
     const alvo = cabecalho.current
     if (!alvo) return
@@ -1032,13 +1083,21 @@ export default function Conversations({
            implicita e "auto", e o texto sem quebra das previas (truncate) faz
            a coluna crescer ate a largura do texto inteiro: a lista saia pela
            direita da tela e o botao de cada conversa ficava fora do alcance. */
-        <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
+        <div
+          ref={colunas}
+          style={alturaColunas ? { height: alturaColunas } : undefined}
+          className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:overflow-hidden"
+        >
           {/* No computador, lista e conversa convivem lado a lado. No celular
               nao cabem: a conversa ficava embaixo da lista inteira, e tocar num
               nome parecia nao fazer nada - a tela continuava igual e o
               historico estava a muitas rolagens de distancia. Aqui vale uma
               coisa de cada vez, com o botao de voltar no topo da conversa. */}
-          <div className={`min-w-0 space-y-2 ${selected ? 'hidden lg:block' : ''}`}>
+          <div
+            className={`min-w-0 space-y-2 lg:h-full lg:overflow-y-auto lg:pr-1 ${
+              selected ? 'hidden lg:block' : ''
+            }`}
+          >
             {visiveis.length === 0 && (
               <div className="surface-card rounded-[18px] p-6 text-center text-[11px] font-semibold text-slate-500">
                 {/* Sem esta frase, esconder as concluidas num dia em que tudo
@@ -1242,7 +1301,7 @@ export default function Conversations({
 
           <div
             ref={painel}
-            className={`surface-card min-h-[320px] min-w-0 rounded-[22px] p-4 ${
+            className={`surface-card min-h-[320px] min-w-0 rounded-[22px] p-4 lg:h-full lg:overflow-y-auto ${
               selected ? '' : 'hidden lg:block'
             }`}
           >
