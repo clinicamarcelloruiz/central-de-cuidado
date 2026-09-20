@@ -74,20 +74,46 @@ const ETAPA_DO_ROBO: Record<string, string> = {
  * nao do paciente. Cada motivo tem sua cor para a equipe priorizar de longe.
  */
 /**
- * A conversa esta resolvida do ponto de vista de quem olha a lista.
+ * A equipe ja respondeu, e nada ficou pendente.
  *
  * Duas condicoes, e a segunda importa tanto quanto a primeira: alguem da equipe
  * escreveu depois do paciente E nao ha pedido aberto. Uma conversa pode ter
  * resposta e continuar pendente - quem pediu remarcacao recebeu "ja vejo aqui"
  * e segue esperando a data. Marcar essa como pronta seria perde-la.
  *
- * Vive fora do componente porque a lista pergunta isso duas vezes: para pintar
- * o cartao e para contar quantas pode esconder. As duas respostas precisam ser
- * a mesma, ou o botao esconderia um numero e sumiria com outro.
+ * E uma das duas portas de estaConcluida(), logo abaixo, que e quem a lista
+ * consulta de fato.
  */
 function jaRespondida(conversa: Conversation): boolean {
   if (conversa.needsAttention && conversa.attentionReason) return false
   return conversa.respondidaPelaEquipe
+}
+
+/**
+ * A conversa esta concluida: nada nela espera a clinica.
+ *
+ * Junta os dois jeitos de terminar - alguem clicou em Concluir (ou o robo
+ * fechou sozinho), ou a equipe respondeu e nao ha pedido aberto. Ate
+ * 20/09/2026 esses dois tinham etiquetas diferentes, "Resolvida" cinza e
+ * "Respondida" verde, e quem olhava a lista lia duas coisas onde so havia uma:
+ * "ja tratei". A partir daqui os dois recebem o mesmo tratamento, e ele nao e
+ * uma etiqueta: e o cartao ENCOLHER para uma linha.
+ *
+ * Robo no meio de uma etapa nao conta como concluida, mesmo com o status
+ * dizendo que sim. Uma conversa presa em "escolhendo o horario" precisa do
+ * botao de destravar a vista, e ele so cabe no cartao inteiro. "No menu" nao e
+ * estar preso: e onde toda conversa descansa depois do robo terminar.
+ *
+ * Quem nao quer receber mensagem fica de fora de proposito: essa etiqueta
+ * vermelha e um aviso para a equipe, e encolher a esconderia.
+ */
+function estaConcluida(conversa: Conversation): boolean {
+  if (conversa.status === 'opted_out') return false
+  if (conversa.bookingState && conversa.bookingState !== 'menu' && conversa.bookingState !== 'atendente') {
+    return false
+  }
+  if (conversa.status === 'resolved') return true
+  return jaRespondida(conversa)
 }
 
 const MOTIVO_ATENCAO: Record<
@@ -286,7 +312,7 @@ export default function Conversations({
   // Comeca desligado: quem abre a tela espera ver a conversa inteira da
   // clinica. Esconder por conta propria seria decidir pela equipe que o dia
   // anterior nao interessa mais.
-  const [esconderRespondidas, setEsconderRespondidas] = useState(false)
+  const [esconderConcluidas, setEsconderConcluidas] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [loading, setLoading] = useState(true)
@@ -640,7 +666,7 @@ export default function Conversations({
       // A conversa aberta continua na lista mesmo escondida: some-la debaixo do
       // proprio leitor, no instante em que a resposta sai, seria tirar a
       // conversa da tela de quem ainda esta nela.
-      if (esconderRespondidas && jaRespondida(item) && item.id !== selectedId) return false
+      if (esconderConcluidas && estaConcluida(item) && item.id !== selectedId) return false
       if (inicio !== null || fim !== null) {
         const quando = item.lastMessageAt ? new Date(item.lastMessageAt).getTime() : null
         if (quando === null) return false
@@ -653,9 +679,9 @@ export default function Conversations({
       if (digitosBusca && item.phoneDigits.includes(digitosBusca)) return true
       return item.textoBusca.includes(termo)
     })
-  }, [conversations, busca, de, ate, esconderRespondidas, selectedId])
+  }, [conversations, busca, de, ate, esconderConcluidas, selectedId])
 
-  const respondidas = useMemo(() => conversations.filter(jaRespondida).length, [conversations])
+  const concluidas = useMemo(() => conversations.filter(estaConcluida).length, [conversations])
 
   const filtrando = Boolean(busca.trim() || de || ate)
   /**
@@ -940,22 +966,22 @@ export default function Conversations({
           )}
         </p>
         <div className="flex items-center gap-1.5">
-          {/* Esmaecer ja separa as respondidas, mas em dia cheio elas continuam
+          {/* Encolher ja separa as concluidas, mas em dia cheio elas continuam
               ocupando a lista. Este botao tira as resolvidas da frente e deixa
               so o que falta - sem apagar nada: e um filtro de tela, e volta no
               mesmo clique. */}
-          {respondidas > 0 && (
+          {concluidas > 0 && (
             <button
               type="button"
-              onClick={() => setEsconderRespondidas((atual) => !atual)}
+              onClick={() => setEsconderConcluidas((atual) => !atual)}
               className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[10px] font-extrabold transition ${
-                esconderRespondidas
+                esconderConcluidas
                   ? 'bg-[#557f75] text-white hover:bg-[#4a6f66]'
                   : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'
               }`}
             >
               <Check className="h-3.5 w-3.5" />
-              {esconderRespondidas ? `Mostrar respondidas (${respondidas})` : 'Esconder respondidas'}
+              {esconderConcluidas ? `Mostrar concluídas (${concluidas})` : 'Esconder concluídas'}
             </button>
           )}
           <button
@@ -991,12 +1017,12 @@ export default function Conversations({
           <div className={`min-w-0 space-y-2 ${selected ? 'hidden lg:block' : ''}`}>
             {visiveis.length === 0 && (
               <div className="surface-card rounded-[18px] p-6 text-center text-[11px] font-semibold text-slate-500">
-                {/* Sem esta frase, esconder as respondidas num dia em que tudo
+                {/* Sem esta frase, esconder as concluidas num dia em que tudo
                     foi respondido devolvia "nenhuma conversa com esses filtros"
                     - e parece que a lista quebrou, quando na verdade e a melhor
                     noticia possivel. */}
-                {esconderRespondidas && !filtrando
-                  ? 'Tudo respondido. Nada esperando a equipe.'
+                {esconderConcluidas && !filtrando
+                  ? 'Tudo concluído. Nada esperando a equipe.'
                   : 'Nenhuma conversa encontrada com esses filtros.'}
               </div>
             )}
@@ -1005,24 +1031,13 @@ export default function Conversations({
               const motivo = conversation.needsAttention && conversation.attentionReason
                 ? MOTIVO_ATENCAO[conversation.attentionReason]
                 : null
-              // Alguem da equipe ja escreveu depois da ultima mensagem do
-              // paciente. Enquanto ha motivo de atencao aberto a marca nao
-              // aparece: o pedido continua de pe mesmo com resposta dada.
-              const respondida = jaRespondida(conversation)
               // O contorno do motivo vence o de "selecionada": quem pediu
               // atendente precisa saltar da lista mesmo sem estar aberta.
-              //
-              // E a respondida perde para as duas. Ela recua de proposito - fica
-              // verde-agua apagada, sem o branco das outras -, porque o que a
-              // lista precisa entregar num relance e o que FALTA. Quem ja foi
-              // atendido continua ali, legivel, so que fora do caminho do olho.
               const contorno = motivo
                 ? `${motivo.borda} bg-white`
                 : active
                   ? 'border-[#2f7fc1] bg-white shadow-[0_10px_28px_rgba(8,27,44,.10)]'
-                  : respondida
-                    ? 'border-[#557f75]/20 bg-[#eef3f2]/60 hover:border-[#557f75]/40 hover:bg-[#eef3f2]'
-                    : 'border-[#081b2c]/10 bg-white/70 hover:border-[#081b2c]/20 hover:bg-white'
+                  : 'border-[#081b2c]/10 bg-white/70 hover:border-[#081b2c]/20 hover:bg-white'
               const semCadastro = !conversation.patientId
               // Sem cadastro, o nome do WhatsApp e melhor do que "Contato sem
               // cadastro" - mas vem com etiqueta, porque e o apelido que a
@@ -1030,6 +1045,66 @@ export default function Conversations({
               const titulo = semCadastro
                 ? conversation.profileName || 'Contato sem cadastro'
                 : conversation.patientName
+
+              // Concluida encolhe. A altura do cartao passa a carregar o
+              // significado: pendente e cartao inteiro, concluida e uma linha
+              // fina com um check. A lista respira sozinha, sem etiqueta.
+              //
+              // Nao e definitivo: a proxima mensagem do paciente reabre a
+              // conversa no webhook, o status volta a 'open', e o cartao volta
+              // a crescer - e a subir, porque a ordem e pela ultima mensagem.
+              // Do lado da clinica, responder e concluir encolhe de novo.
+              //
+              // O clique faz o mesmo de sempre: abre a conversa inteira ao
+              // lado. A linha nao precisa crescer no lugar para isso.
+              if (estaConcluida(conversation)) {
+                return (
+                  <div
+                    key={conversation.id}
+                    className={`flex w-full items-center gap-2 rounded-[12px] border px-3 py-2 transition ${
+                      active
+                        ? 'border-[#2f7fc1] bg-white shadow-[0_6px_18px_rgba(8,27,44,.08)]'
+                        : 'border-[#237128]/20 bg-[#f4f9f5] hover:border-[#237128]/40 hover:bg-[#eaf3ec]'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => void openConversation(conversation)}
+                      title="Concluída. Toque para abrir a conversa."
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
+                      <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#237128] text-white">
+                        <Check className="h-2.5 w-2.5" />
+                      </span>
+                      <span className="truncate text-[11px] font-bold text-[#5b6b78]">{titulo}</span>
+                    </button>
+                    {/* Sem cadastro, a acao continua a mao - compacta. Sumir com
+                        ela so porque a conversa terminou deixaria o contato sem
+                        ficha para sempre, que e justamente quando ele mais
+                        precisa de uma. */}
+                    {semCadastro && onCadastrarContato && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onCadastrarContato({
+                            nome: conversation.profileName,
+                            telefone: conversation.phone,
+                          })
+                        }
+                        title="Cadastrar como paciente"
+                        aria-label="Cadastrar como paciente"
+                        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#081b2c]/10 bg-white text-[#2f7fc1] transition hover:border-[#2f7fc1]"
+                      >
+                        <UserPlus className="h-3 w-3" />
+                      </button>
+                    )}
+                    <span className="shrink-0 text-[9px] font-bold text-slate-400">
+                      {formatWhen(conversation.lastMessageAt)}
+                    </span>
+                  </div>
+                )
+              }
+
               return (
                 <div
                   key={conversation.id}
@@ -1076,33 +1151,22 @@ export default function Conversations({
                         {conversation.unreadCount} nova{conversation.unreadCount > 1 ? 's' : ''}
                       </span>
                     )}
-                    {/* So aparece quando a conversa segue aberta: em conversa
-                        encerrada "Resolvida" ja diz mais, e duas etiquetas
-                        verdes lado a lado nao diriam nada. */}
-                    {respondida && conversation.status === 'open' && (
-                      /* Cheia, e não em tom claro: no cartão esmaecido a
-                         etiqueta clara sumia junto com o resto, e ela é
-                         justamente o que explica por que aquele cartão está
-                         apagado.
-
-                         Verde, e não o azul-escuro da marca: o azul é a cor
-                         neutra desta tela - título, contador de novas, botão
-                         selecionado -, e a etiqueta se confundia com ele. O
-                         verde diz "feito" sozinho, sem depender de ler. */
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#237128] px-2 py-0.5 text-[9px] font-extrabold text-white">
-                        <Check className="h-2.5 w-2.5" />
-                        Respondida
-                      </span>
-                    )}
                     {conversation.status === 'opted_out' && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[9px] font-extrabold text-red-600">
                         <CircleSlash className="h-2.5 w-2.5" />
                         Não quer receber
                       </span>
                     )}
+                    {/* Concluida normalmente encolhe e nem chega aqui. Este
+                        cartao inteiro so aparece "Resolvida" quando o robo
+                        ficou preso numa etapa: ai o botao de destravar precisa
+                        do espaco, e a etiqueta explica por que ele esta num
+                        cartao que parece pendente. Mesmo verde do encolhido,
+                        para ser a mesma coisa em dois tamanhos. */}
                     {conversation.status === 'resolved' && (
-                      <span className="rounded-full bg-[#eef3f2] px-2 py-0.5 text-[9px] font-extrabold text-[#557f75]">
-                        Resolvida
+                      <span className="inline-flex items-center gap-1 rounded-full bg-[#237128] px-2 py-0.5 text-[9px] font-extrabold text-white">
+                        <Check className="h-2.5 w-2.5" />
+                        Concluída
                       </span>
                     )}
                   </div>
