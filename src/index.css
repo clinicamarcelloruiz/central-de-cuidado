@@ -90,6 +90,34 @@
       0 14px 34px rgba(8, 27, 44, 0.045);
   }
 
+  /* Barra de rolagem fina e clara, para as areas que rolam por dentro (a
+     lista e a conversa em Respostas). A barra padrao do Windows tem 17px,
+     fundo cinza e setas nas pontas - numa coluna de 320px ela vira um
+     elemento de interface, e nao um indicador. Esta some quando nao ha o
+     que rolar, escurece um pouco ao passar o mouse e nao tem trilho. */
+  .rolagem-fina {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(8, 27, 44, 0.16) transparent;
+  }
+  .rolagem-fina::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .rolagem-fina::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .rolagem-fina::-webkit-scrollbar-thumb {
+    background: rgba(8, 27, 44, 0.16);
+    border-radius: 999px;
+  }
+  .rolagem-fina:hover::-webkit-scrollbar-thumb {
+    background: rgba(8, 27, 44, 0.3);
+  }
+  .rolagem-fina::-webkit-scrollbar-button {
+    display: none;
+    height: 0;
+  }
+
   .soft-grid {
     background-image:
       linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),

@@ -417,7 +417,10 @@ export default function Conversations({
    * uma tela ja curta so faz a pessoa rolar duas vezes.
    */
   const colunas = useRef<HTMLDivElement>(null)
-  const [alturaColunas, setAlturaColunas] = useState<number | null>(null)
+  // Altura do bloco e quanto ele avanca sobre o respiro do rodape da pagina.
+  // Os dois andam juntos: sem o segundo, o bloco parava 84px antes do fim da
+  // janela, no padding que a moldura da pagina reserva para todas as telas.
+  const [medidas, setMedidas] = useState<{ altura: number; avancoNoRodape: number } | null>(null)
   // O grid das colunas so existe depois que as conversas carregam: antes disso
   // a tela mostra o aviso de lista vazia. A medicao precisa rodar de novo
   // quando ele aparece - foi por nao fazer isso que a primeira versao subiu ao
@@ -426,30 +429,43 @@ export default function Conversations({
 
   useEffect(() => {
     if (!temColunas) {
-      setAlturaColunas(null)
+      setMedidas(null)
       return
     }
     const desktop = window.matchMedia('(min-width: 1024px)')
+    // O que fica entre o bloco e a borda de baixo da janela. Pequeno de
+    // proposito: a tela de conversa ganha em usar a altura inteira, e o
+    // cartao arredondado ja separa visualmente do fim.
+    const FOLGA = 12
 
     const medir = () => {
       const alvo = colunas.current
       if (!alvo || !desktop.matches) {
-        setAlturaColunas(null)
+        setMedidas(null)
         return
       }
-      // A altura e o que sobra da janela entre o topo do grid e o fim da
-      // pagina. O "fim da pagina" e medido, nao chutado: a moldura tem
-      // respiro embaixo (o padding do main e do miolo), e descontar um numero
-      // fixo deixava 68px sobrando - a pagina continuava rolando, so que
-      // pouco, que e o pior dos mundos.
       const caixa = alvo.getBoundingClientRect()
       const topo = caixa.top + window.scrollY
-      const abaixo = document.documentElement.scrollHeight - (topo + caixa.height)
-      setAlturaColunas(Math.max(360, window.innerHeight - topo - abaixo))
+      // O respiro NATURAL do rodape: o que a moldura da pagina reserva abaixo
+      // do bloco (padding do main e do miolo, 84px hoje). Medido descontando
+      // o avanco que ja estiver aplicado, senao a segunda medicao leria o
+      // rodape ja encolhido, devolveria outro numero, e a tela oscilaria.
+      const avancoAtual = Number.parseFloat(getComputedStyle(alvo).marginBottom) || 0
+      const respiro = document.documentElement.scrollHeight - (topo + caixa.height) - avancoAtual
+      // O bloco vai ate FOLGA px da borda da janela, e avanca sobre o resto
+      // do respiro com margem negativa - assim a pagina termina exatamente no
+      // fim da janela e nao rola, em vez de sobrar uma faixa vazia embaixo.
+      const avanco = Math.max(0, respiro - FOLGA)
+      setMedidas({
+        altura: Math.max(360, window.innerHeight - topo - FOLGA),
+        avancoNoRodape: avanco,
+      })
     }
 
-    // Um quadro depois da montagem: as fontes e o cabecalho da secao terminam
-    // de assentar, e a primeira medida ja sai certa.
+    // Duas vezes: agora, e um quadro depois. A primeira ja acerta quase
+    // sempre; a segunda apanha o caso em que fonte ou cabecalho da secao
+    // terminam de assentar so no quadro seguinte.
+    medir()
     const quadro = requestAnimationFrame(medir)
     window.addEventListener('resize', medir)
     desktop.addEventListener('change', medir)
@@ -1103,7 +1119,11 @@ export default function Conversations({
            direita da tela e o botao de cada conversa ficava fora do alcance. */
         <div
           ref={colunas}
-          style={alturaColunas ? { height: alturaColunas } : undefined}
+          style={
+            medidas
+              ? { height: medidas.altura, marginBottom: -medidas.avancoNoRodape }
+              : undefined
+          }
           className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:overflow-hidden"
         >
           {/* No computador, lista e conversa convivem lado a lado. No celular
@@ -1112,7 +1132,7 @@ export default function Conversations({
               historico estava a muitas rolagens de distancia. Aqui vale uma
               coisa de cada vez, com o botao de voltar no topo da conversa. */}
           <div
-            className={`min-w-0 space-y-2 lg:h-full lg:overflow-y-auto lg:pr-1 ${
+            className={`rolagem-fina min-w-0 space-y-2 lg:h-full lg:overflow-y-auto lg:pr-1 ${
               selected ? 'hidden lg:block' : ''
             }`}
           >
@@ -1317,14 +1337,20 @@ export default function Conversations({
             })}
           </div>
 
+          {/* SEM padding no proprio painel, de proposito. Ele e a area
+              rolavel, e o navegador ancora um elemento sticky na caixa de
+              conteudo do rolavel - ou seja, DENTRO do padding. Com p-4 aqui, o
+              cabecalho grudava 16px abaixo do topo e as mensagens passavam por
+              essa faixa descoberta, aparecendo em cima dele. O respiro vai para
+              as partes internas, onde nao atrapalha o sticky. */}
           <div
             ref={painel}
-            className={`surface-card min-h-[320px] min-w-0 rounded-[22px] p-4 lg:h-full lg:overflow-y-auto ${
+            className={`surface-card rolagem-fina min-h-[320px] min-w-0 rounded-[22px] lg:h-full lg:overflow-y-auto ${
               selected ? '' : 'hidden lg:block'
             }`}
           >
             {!selected ? (
-              <p className="pt-16 text-center text-xs font-semibold text-slate-400">
+              <p className="p-4 pt-20 text-center text-xs font-semibold text-slate-400">
                 Escolha uma conversa para ver o histórico.
               </p>
             ) : (
@@ -1337,7 +1363,7 @@ export default function Conversations({
                     ate a borda do cartao, para nada aparecer por tras. */}
                 <div
                   ref={cabecalho}
-                  className="sticky top-0 z-20 -mx-4 -mt-4 rounded-t-[22px] bg-white/95 px-4 pt-4 backdrop-blur"
+                  className="sticky top-0 z-20 rounded-t-[22px] bg-white/95 px-4 pt-4 backdrop-blur"
                 >
                 {/* Só no celular: no computador a lista está do lado, e um
                     botão de voltar ali seria um passo inventado. */}
@@ -1438,6 +1464,7 @@ export default function Conversations({
                 <div className="h-3" />
                 </div>
 
+                <div className="px-4 pb-4">
                 {loadingMessages ? (
                   <p className="pt-12 text-center text-xs font-semibold text-slate-400">
                     Carregando mensagens...
@@ -1671,6 +1698,7 @@ export default function Conversations({
                       )}
                     </div>
                   )}
+                </div>
                 </div>
               </>
             )}
