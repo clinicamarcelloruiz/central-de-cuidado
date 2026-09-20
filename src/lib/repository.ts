@@ -1430,6 +1430,10 @@ export interface ConversationMessage {
   templateName: string | null
   createdAt: string
   failureReason: string | null
+  /** Link temporario do anexo, quando a mensagem trouxe arquivo. */
+  anexoUrl: string | null
+  /** Tipo do arquivo, para a tela decidir entre imagem, audio ou link. */
+  anexoMime: string | null
 }
 
 export async function listConversations(clinicId: string): Promise<Conversation[]> {
@@ -1521,7 +1525,10 @@ export async function listConversationMessages(conversationId: string): Promise<
     .order('created_at', { ascending: true })
 
   if (error) fail(error)
-  return (data ?? []).map((row) => ({
+  const linhas = data ?? []
+  const anexos = await anexosDasMensagens(conversationId)
+
+  return linhas.map((row) => ({
     id: row.id,
     direction: row.direction,
     body: row.body,
@@ -1529,7 +1536,50 @@ export async function listConversationMessages(conversationId: string): Promise<
     templateName: row.template_name,
     createdAt: row.created_at,
     failureReason: row.failure_reason,
+    anexoUrl: anexos.get(row.id)?.url ?? null,
+    anexoMime: anexos.get(row.id)?.mime ?? null,
   }))
+}
+
+/**
+ * Os anexos da conversa, cada um com um link temporario.
+ *
+ * Consulta a parte, dentro de try/catch, porque as colunas sao mais novas que
+ * os tipos gerados - e porque a conversa tem de abrir mesmo que o acervo esteja
+ * fora do ar. Foi a licao de 19/09/2026: pedir coluna nova na consulta
+ * principal derrubou a tela inteira quando a migration ainda nao tinha rodado.
+ *
+ * O link dura cinco minutos e nasce na hora. O arquivo e foto de exame, de
+ * lesao, de crianca - link permanente seria prontuario circulando solto.
+ */
+async function anexosDasMensagens(conversationId: string) {
+  const vazio = new Map<string, { url: string; mime: string | null }>()
+  try {
+    // O encadeamento cru termina num order() para virar promessa; a ordem
+    // nao importa aqui, so o fato de a consulta ser executada.
+    const { data, error } = await tabelaCrua('whatsapp_messages')
+      .select('id,media_path,media_mime')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true })
+    if (error) return vazio
+
+    const comArquivo = ((data ?? []) as { id: string; media_path?: string | null; media_mime?: string | null }[])
+      .filter((linha) => linha.media_path)
+    if (comArquivo.length === 0) return vazio
+
+    const { data: links } = await supabase.storage
+      .from('whatsapp-anexos')
+      .createSignedUrls(comArquivo.map((linha) => linha.media_path as string), 300)
+
+    const porCaminho = new Map((links ?? []).map((l) => [l.path ?? '', l.signedUrl]))
+    for (const linha of comArquivo) {
+      const url = porCaminho.get(linha.media_path as string)
+      if (url) vazio.set(linha.id, { url, mime: linha.media_mime ?? null })
+    }
+  } catch {
+    // Antes da migration rodar nao ha coluna nem acervo. A conversa segue.
+  }
+  return vazio
 }
 
 /** Zera o contador de nao lidas e tira o destaque de atencao. */

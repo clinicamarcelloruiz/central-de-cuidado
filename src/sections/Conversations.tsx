@@ -8,6 +8,7 @@ import {
   CircleSlash,
   Clock3,
   MessageSquareText,
+  Paperclip,
   RefreshCw,
   RotateCcw,
   Search,
@@ -148,6 +149,57 @@ const FUNDO_WHATSAPP = {
  * "read") colada na hora. Quem le a tela ja conhece o simbolo de sempre; ler
  * ingles tecnico ali era ruido.
  */
+/**
+ * O arquivo que o paciente mandou, aberto na conversa.
+ *
+ * Antes disto a tela escrevia "[image]" e parava aí: a clínica sabia que algo
+ * tinha chegado e precisava abrir o WhatsApp no celular de alguém para ver o
+ * quê. Quem manda foto de exame quer que olhem - e era justamente essa a
+ * mensagem que o robô encaminhava para a equipe.
+ *
+ * O link é temporário, de cinco minutos, gerado a cada abertura da conversa.
+ * É foto de exame, de lesão, de criança: um endereço permanente seria
+ * prontuário circulando solto.
+ */
+function Anexo({ url, mime }: { url: string; mime: string | null }) {
+  const tipo = mime ?? ''
+
+  if (tipo.startsWith('image/')) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="block">
+        <img
+          src={url}
+          alt="Anexo enviado pelo paciente"
+          className="mb-1 max-h-[320px] w-full rounded-[6px] object-cover"
+          loading="lazy"
+        />
+      </a>
+    )
+  }
+
+  if (tipo.startsWith('audio/')) {
+    // Áudio toca na própria tela: quem descreve sintoma falando não deveria
+    // obrigar a recepção a baixar arquivo para ouvir.
+    return <audio src={url} controls className="mb-1 w-[240px]" />
+  }
+
+  if (tipo.startsWith('video/')) {
+    return <video src={url} controls className="mb-1 max-h-[320px] w-full rounded-[6px]" />
+  }
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="mb-1 flex items-center gap-2 rounded-[6px] bg-black/5 px-2 py-1.5 text-[12px] font-bold text-[#111b21] transition hover:bg-black/10"
+    >
+      <Paperclip className="h-3.5 w-3.5 shrink-0" />
+      Abrir documento
+    </a>
+  )
+}
+
 function Confirmacao({ status }: { status: string }) {
   if (status === 'failed') {
     return <span className="font-bold text-[#b42318]">falhou</span>
@@ -1129,12 +1181,17 @@ export default function Conversations({
                                 outbound ? 'bg-[#d9fdd3]' : 'bg-white'
                               }`}
                             >
-                              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-[19px] text-[#111b21]">
-                                {message.body ||
-                                  (message.templateName
-                                    ? `[modelo: ${message.templateName}]`
-                                    : '[sem conteúdo]')}
-                              </p>
+                              {message.anexoUrl && <Anexo url={message.anexoUrl} mime={message.anexoMime} />}
+                              {/* Sem texto e com arquivo, a linha de "[image]"
+                                  vira ruído embaixo da própria foto. */}
+                              {(!message.anexoUrl || !/^\[/.test(message.body)) && (
+                                <p className="whitespace-pre-wrap break-words text-[13.5px] leading-[19px] text-[#111b21]">
+                                  {message.body ||
+                                    (message.templateName
+                                      ? `[modelo: ${message.templateName}]`
+                                      : '[sem conteúdo]')}
+                                </p>
+                              )}
                               <span className="mt-0.5 flex items-center justify-end gap-1 text-[11px] leading-none text-[#667781]">
                                 {formatWhen(message.createdAt)}
                                 {outbound && <Confirmacao status={message.status} />}

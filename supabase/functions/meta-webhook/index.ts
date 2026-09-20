@@ -15,9 +15,17 @@ function text(body: string, status = 200) {
   return new Response(body, { status, headers: { 'Content-Type': 'text/plain' } })
 }
 
+type Midia = { id?: string; mime_type?: string; caption?: string; filename?: string }
+
 type WebhookMessage = {
   type?: string
   text?: { body?: string }
+  image?: Midia
+  document?: Midia
+  audio?: Midia
+  video?: Midia
+  sticker?: Midia
+  voice?: Midia
   button?: { text?: string; payload?: string }
   interactive?: {
     button_reply?: { id?: string; title?: string }
@@ -59,12 +67,87 @@ function ehAnexo(message: WebhookMessage) {
   return ['image', 'document', 'audio', 'video', 'sticker', 'voice'].includes(String(message.type))
 }
 
+/** O bloco de midia da mensagem, qualquer que seja o tipo dela. */
+function midiaDaMensagem(message: WebhookMessage): Midia | null {
+  return (
+    message.image ?? message.document ?? message.audio ??
+    message.video ?? message.sticker ?? message.voice ?? null
+  )
+}
+
+/**
+ * Traz o arquivo da Meta para o nosso acervo.
+ *
+ * Precisa acontecer AGORA, no recebimento. A Meta nao entrega o arquivo no
+ * webhook: entrega um id, e a URL que esse id resgata vive poucos minutos.
+ * Guardar so o id para baixar depois nao funciona - quando alguem da equipe
+ * abrisse a conversa, o link ja teria morrido.
+ *
+ * Sao duas chamadas: o id devolve uma URL, e a URL devolve os bytes. As duas
+ * exigem o token, inclusive a segunda, que e o detalhe que costuma passar
+ * despercebido.
+ *
+ * Nunca interrompe o recebimento. Se o download falhar, a mensagem entra do
+ * jeito antigo, marcada como anexo e sem arquivo - melhor a equipe saber que
+ * chegou algo do que perder a mensagem inteira por causa do anexo.
+ */
+async function guardarAnexo(
+  admin: ReturnType<typeof adminClient>,
+  clinicId: string,
+  messageId: string,
+  midia: Midia,
+): Promise<{ path: string; mime: string } | null> {
+  const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
+  if (!token || !midia.id) return null
+  const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
+
+  try {
+    const aviso = await fetch(`https://graph.facebook.com/${graphVersion}/${midia.id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!aviso.ok) {
+      console.error('Meta recusou o endereco da midia', aviso.status, await aviso.text())
+      return null
+    }
+    const { url, mime_type } = await aviso.json() as { url?: string; mime_type?: string }
+    if (!url) return null
+
+    // O download tambem vai autenticado: sem o token a Meta devolve 401.
+    const arquivo = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    if (!arquivo.ok) {
+      console.error('Nao consegui baixar a midia', arquivo.status)
+      return null
+    }
+    const bytes = new Uint8Array(await arquivo.arrayBuffer())
+    const mime = midia.mime_type ?? mime_type ?? 'application/octet-stream'
+    const path = `${clinicId}/${messageId}`
+
+    const { error } = await admin.storage
+      .from('whatsapp-anexos')
+      .upload(path, bytes, { contentType: mime, upsert: true })
+    if (error) {
+      console.error('Nao consegui guardar a midia no acervo', error)
+      return null
+    }
+    return { path, mime }
+  } catch (causa) {
+    console.error('Falha ao trazer a midia', causa)
+    return null
+  }
+}
+
 function messageBody(message: WebhookMessage) {
   if (message.type === 'text') return message.text?.body ?? ''
   if (message.type === 'button') return message.button?.text ?? message.button?.payload ?? ''
   if (message.type === 'interactive') {
     return message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? ''
   }
+  // A legenda da foto e a mensagem de verdade: "olha o exame dele" diz mais
+  // do que "[image]", e antes ela era jogada fora.
+  const midia = midiaDaMensagem(message)
+  const legenda = (midia?.caption ?? '').trim()
+  if (legenda) return legenda
+  if (midia?.filename) return midia.filename
   return `[${message.type || 'mensagem'}]`
 }
 
@@ -391,6 +474,13 @@ Deno.serve(async (req) => {
             .update(atualizacaoConversa)
             .eq('id', conversation.id)
 
+          // O arquivo e buscado ANTES de gravar a mensagem: a URL da Meta dura
+          // poucos minutos, e se a gravacao demorasse ela ja teria expirado.
+          const midia = midiaDaMensagem(message)
+          const anexo = midia && externalId
+            ? await guardarAnexo(admin, clinicId, externalId, midia)
+            : null
+
           const { error: messageError } = await admin.from('whatsapp_messages').insert({
             clinic_id: clinicId,
             conversation_id: conversation.id,
@@ -401,6 +491,7 @@ Deno.serve(async (req) => {
             body,
             status: 'delivered',
             delivered_at: receivedAt,
+            ...(anexo ? { media_path: anexo.path, media_mime: anexo.mime } : {}),
           })
           if (messageError?.code !== '23505' && messageError) throw messageError
 
