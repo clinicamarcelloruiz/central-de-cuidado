@@ -607,6 +607,27 @@ Deno.serve(async (req) => {
                 botoes: resultado.botoes,
                 lista: resultado.lista,
               })
+              // Atendimento fechado pelo robô, sem nada pendente para a
+              // equipe. A conversa passa a "Resolvida", como se alguém
+              // tivesse clicado em Concluir.
+              //
+              // Não é definitivo, e é por isso que dá para fazer sozinho: a
+              // próxima mensagem da família devolve status 'open' algumas
+              // linhas acima, no mesmo bloco que trata a mensagem recebida. O
+              // que se ganha é a lista mostrando só o que ainda espera gente.
+              //
+              // A bandeira de atenção vence: se o mesmo resultado pedir a
+              // equipe, quem manda é o pedido, e o `else` abaixo garante isso.
+              if (resultado.concluida && !resultado.atencao) {
+                await admin
+                  .from('whatsapp_conversations')
+                  .update({
+                    status: 'resolved',
+                    needs_attention: false,
+                    attention_reason: null,
+                  })
+                  .eq('id', conversation.id)
+              }
               if (resultado.atencao) {
                 const { error: erroDaBandeira } = await admin
                   .from('whatsapp_conversations')

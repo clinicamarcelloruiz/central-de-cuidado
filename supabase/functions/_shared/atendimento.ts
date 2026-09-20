@@ -114,6 +114,21 @@ export type Resultado = {
   resposta: string
   /** Preenchido quando a conversa precisa de alguem da equipe. */
   atencao?: MotivoAtencao
+  /**
+   * O robo terminou o atendimento e nao sobrou nada para a equipe fazer.
+   *
+   * Vale para o fim da ficha: o cadastro foi completado e, quando havia
+   * agendamento, a consulta ficou marcada. Ate 20/09/2026 uma conversa dessas
+   * nao ganhava marca nenhuma na lista - so o robo tinha falado, entao
+   * "Respondida" (que e sobre gente da equipe) nao valia, e "Resolvida" so vem
+   * de alguem clicar em Concluir. O cartao ficava com cara de pendente sem ter
+   * pendencia, e a recepcao abria um por um para descobrir isso.
+   *
+   * Fechar aqui e seguro porque nao e definitivo: qualquer mensagem nova da
+   * familia reabre a conversa, no mesmo lugar do webhook que ja trata a
+   * mensagem recebida.
+   */
+  concluida?: boolean
   /** Ate tres botoes lado a lado. Acima disso, use lista. */
   botoes?: Toque[]
   /** Lista tocavel: o rotulo abre o menu, as linhas sao as opcoes (max. 10). */
@@ -1934,6 +1949,10 @@ async function terminarDados(
       '.\n\n' +
       (comprovante ? `━━━━━━━━━━━━━━\n${comprovante}` : '') +
       VOLTA,
+    // Fim da ficha: o robo perguntou tudo o que tinha para perguntar e a
+    // familia respondeu. Vale tambem para o questionario que a equipe disparou,
+    // que termina aqui do mesmo jeito - e cuja pendencia era justamente esta.
+    concluida: true,
   }
 }
 
