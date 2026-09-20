@@ -354,13 +354,22 @@ Deno.serve(async (req) => {
           // 24h e a janela da Meta: passou dela, a sessao anterior acabou de
           // verdade e esta mensagem inaugura outra.
           const carimbo = linhaAnterior?.booking_updated_at as string | null | undefined
-          // 48h quando a clinica e que puxou assunto e ficou devendo resposta: o
-          // anexo que alguem precisa abrir e o "Preciso de ajuda" respondido ao
-          // acompanhamento. Nesses dois a equipe costuma precisar de mais de um
-          // dia util, e o robo voltando a falar no meio seria atropelo. Nos
-          // outros casos, 24h.
+          // 48h quando a clinica e que ficou devendo resposta: o anexo que
+          // alguem precisa abrir, o "Preciso de ajuda" respondido ao
+          // acompanhamento, e o pedido de 2a via ou de exame - da familia ou da
+          // farmacia. Nesses a equipe costuma precisar de mais de um dia util, e
+          // o robo voltando a falar no meio seria atropelo. Nos outros, 24h.
+          //
+          // A MESMA LISTA vive em liberar_conversas_travadas(), no banco. As
+          // duas precisam concordar: esta decide se a proxima mensagem da
+          // familia reabre o menu, aquela limpa conversa parada. Em 20/09/2026
+          // os motivos novos entraram so na do banco, e o efeito era este -
+          // pedido feito sexta as 18h, familia escreve domingo, 40h > 24h, e o
+          // robo respondia com a saudacao inteira como se nada estivesse
+          // pendente. Exatamente o que a migration dizia estar evitando.
           const motivoDaEspera = String(linhaAnterior?.attention_reason ?? '')
-          const horasDeEspera = motivoDaEspera === 'anexo' || motivoDaEspera === 'ajuda' ? 48 : 24
+          const ESPERA_LONGA = ['anexo', 'ajuda', 'documento', 'farmacia']
+          const horasDeEspera = ESPERA_LONGA.includes(motivoDaEspera) ? 48 : 24
           const etapaVenceu = Boolean(
             linhaAnterior?.booking_state &&
               (!carimbo || Date.now() - new Date(carimbo).getTime() > horasDeEspera * 60 * 60 * 1000),
@@ -599,10 +608,28 @@ Deno.serve(async (req) => {
                 lista: resultado.lista,
               })
               if (resultado.atencao) {
-                await admin
+                const { error: erroDaBandeira } = await admin
                   .from('whatsapp_conversations')
                   .update({ needs_attention: true, attention_reason: resultado.atencao })
                   .eq('id', conversation.id)
+                // Motivo novo, banco antigo.
+                //
+                // A coluna tem CHECK com a lista de motivos aceitos, e a lista
+                // cresce por migration. A funcao costuma subir antes: entre um
+                // deploy e outro, gravar 'documento' faz o Postgres recusar o
+                // UPDATE inteiro - e a conversa fica sem bandeira nenhuma, que
+                // e o mesmo que o pedido nao ter chegado.
+                //
+                // 'atendente' e o motivo mais antigo que existe e sempre passa.
+                // Perder a etiqueta exata e um arranhao; perder o pedido de
+                // vista e o defeito que tudo isto veio corrigir.
+                if (erroDaBandeira) {
+                  console.warn('Motivo de atencao recusado pelo banco; marcando como atendente', erroDaBandeira)
+                  await admin
+                    .from('whatsapp_conversations')
+                    .update({ needs_attention: true, attention_reason: 'atendente' })
+                    .eq('id', conversation.id)
+                }
               }
             }
           }

@@ -1408,6 +1408,8 @@ export interface Conversation {
     | 'anexo'
     | 'cancelou_sozinho'
     | 'urgencia'
+    | 'documento'
+    | 'farmacia'
     | null
   /** Etapa em que o robo parou nesta conversa. Nulo quando nao ha nada aberto. */
   bookingState: string | null
@@ -1420,6 +1422,20 @@ export interface Conversation {
    * conversa - nao custa consulta nova.
    */
   textoBusca: string
+  /**
+   * Alguem da equipe escreveu DEPOIS da ultima mensagem do paciente.
+   *
+   * Existe porque abrir a conversa ja apaga a marca de atencao: quem le para
+   * saber do que se trata perde o sinal e, meia hora depois, nao distingue mais
+   * o que respondeu do que deixou para responder. Voltar na conversa uma a uma
+   * era a unica forma de conferir.
+   *
+   * A resposta do robo nao conta. Ela sai sozinha em toda conversa e, se
+   * contasse, praticamente tudo apareceria como resolvido - justamente o
+   * contrario do que a marca serve para dizer. Por isso a pergunta e sobre
+   * mensagem humana (automatic = false), que o banco separa desde 30/08/2026.
+   */
+  respondidaPelaEquipe: boolean
 }
 
 export interface ConversationMessage {
@@ -1459,7 +1475,7 @@ export async function listConversations(clinicId: string): Promise<Conversation[
       : Promise.resolve({ data: [], error: null }),
     supabase
       .from('whatsapp_messages')
-      .select('conversation_id,body,created_at')
+      .select('conversation_id,body,created_at,direction,automatic')
       .eq('clinic_id', clinicId)
       .order('created_at', { ascending: false }),
   ])
@@ -1469,9 +1485,19 @@ export async function listConversations(clinicId: string): Promise<Conversation[
   const nameById = new Map((patientsResult.data ?? []).map((p) => [p.id, p.name]))
   const lastBodyByConversation = new Map<string, string>()
   const textoPorConversa = new Map<string, string[]>()
+  // Quem falou por ultimo, ignorando o robo. A lista ja vem da mais nova para a
+  // mais antiga, entao a primeira mensagem que interessa de cada conversa e a
+  // que decide - e o resto daquela conversa nao muda mais o veredito.
+  const respondidaPorConversa = new Map<string, boolean>()
   for (const message of messagesResult.data ?? []) {
     if (!lastBodyByConversation.has(message.conversation_id)) {
       lastBodyByConversation.set(message.conversation_id, message.body)
+    }
+    if (!respondidaPorConversa.has(message.conversation_id)) {
+      const doPaciente = message.direction === 'inbound'
+      const daEquipe = message.direction === 'outbound' && message.automatic === false
+      if (doPaciente) respondidaPorConversa.set(message.conversation_id, false)
+      else if (daEquipe) respondidaPorConversa.set(message.conversation_id, true)
     }
     const acumulado = textoPorConversa.get(message.conversation_id)
     if (acumulado) acumulado.push(message.body)
@@ -1493,6 +1519,9 @@ export async function listConversations(clinicId: string): Promise<Conversation[
     lastMessageAt: row.last_message_at,
     lastMessage: lastBodyByConversation.get(row.id) ?? '',
     textoBusca: (textoPorConversa.get(row.id) ?? []).join(' \n ').toLowerCase(),
+    // Sem nenhuma mensagem humana nem do paciente - so o robo falou - a
+    // conversa nao esta respondida: nao houve resposta nenhuma da equipe.
+    respondidaPelaEquipe: respondidaPorConversa.get(row.id) ?? false,
   }))
 }
 
@@ -1583,10 +1612,40 @@ async function anexosDasMensagens(conversationId: string) {
 }
 
 /** Zera o contador de nao lidas e tira o destaque de atencao. */
+/**
+ * Motivos que sobrevivem a alguem abrir a conversa.
+ *
+ * Abrir e LER. Para quase tudo, ler resolve - a conversa deixa de precisar de
+ * atencao porque a pessoa ja sabe do que se trata. Mas um pedido de 2a via ou
+ * de exame so termina quando o documento sai, e o robo prometeu um dia util em
+ * nome da clinica. Se a bandeira caisse na leitura, a recepcao abriria para
+ * saber o que era e, com isso, tiraria o pedido da lista de pendencias antes
+ * de ele ter sido atendido - um pedido esquecido ficaria indistinguivel de um
+ * resolvido.
+ *
+ * O que baixa a bandeira desses e responder: a etiqueta "Respondida" aparece
+ * quando alguem da equipe escreve depois do paciente, e concluir a conversa
+ * limpa tudo.
+ */
+const ATENCAO_QUE_NAO_CAI_NA_LEITURA = ['documento', 'farmacia']
+
 export async function markConversationSeen(conversationId: string) {
+  const { data: atual } = await supabase
+    .from('whatsapp_conversations')
+    .select('attention_reason')
+    .eq('id', conversationId)
+    .maybeSingle()
+
+  const motivo = String(atual?.attention_reason ?? '')
+  const pendente = ATENCAO_QUE_NAO_CAI_NA_LEITURA.includes(motivo)
+
   const { error } = await supabase
     .from('whatsapp_conversations')
-    .update({ unread_count: 0, needs_attention: false, attention_reason: null })
+    .update(
+      pendente
+        ? { unread_count: 0 }
+        : { unread_count: 0, needs_attention: false, attention_reason: null },
+    )
     .eq('id', conversationId)
   if (error) fail(error)
 }

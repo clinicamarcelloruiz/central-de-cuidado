@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   ArrowDown,
+  ArrowUp,
   ArrowLeft,
   Check,
   CheckCheck,
@@ -72,6 +73,23 @@ const ETAPA_DO_ROBO: Record<string, string> = {
  * menu esta esperando uma pessoa agora; uma falha do sistema e assunto nosso,
  * nao do paciente. Cada motivo tem sua cor para a equipe priorizar de longe.
  */
+/**
+ * A conversa esta resolvida do ponto de vista de quem olha a lista.
+ *
+ * Duas condicoes, e a segunda importa tanto quanto a primeira: alguem da equipe
+ * escreveu depois do paciente E nao ha pedido aberto. Uma conversa pode ter
+ * resposta e continuar pendente - quem pediu remarcacao recebeu "ja vejo aqui"
+ * e segue esperando a data. Marcar essa como pronta seria perde-la.
+ *
+ * Vive fora do componente porque a lista pergunta isso duas vezes: para pintar
+ * o cartao e para contar quantas pode esconder. As duas respostas precisam ser
+ * a mesma, ou o botao esconderia um numero e sumiria com outro.
+ */
+function jaRespondida(conversa: Conversation): boolean {
+  if (conversa.needsAttention && conversa.attentionReason) return false
+  return conversa.respondidaPelaEquipe
+}
+
 const MOTIVO_ATENCAO: Record<
   NonNullable<Conversation['attentionReason']>,
   { rotulo: string; classe: string; borda: string }
@@ -119,6 +137,23 @@ const MOTIVO_ATENCAO: Record<
     rotulo: '📎 Enviou um arquivo',
     classe: 'bg-[#eef5fd] text-[#16456b]',
     borda: 'border-[#2f7fc1]',
+  },
+  // Pediu 2a via de receita ou de exame pelo menu. Nao e vermelho: ninguem
+  // esta parado esperando resposta agora, e o robo ja prometeu 1 dia util. Mas
+  // e ambar, e nao azul, porque tem prazo correndo - diferente de um aviso de
+  // cancelamento, que so precisa ser lido.
+  documento: {
+    rotulo: '📄 Pediu 2ª via / exame',
+    classe: 'bg-[#fef3c7] text-[#92400e]',
+    borda: 'border-[#f59e0b]',
+  },
+  // Farmacia ou laboratorio pedindo correcao. Bandeira separada da de cima
+  // porque quem responde precisa saber ANTES de escrever que do outro lado nao
+  // esta a familia: nao se confirma cadastro nem se manda documento por ali.
+  farmacia: {
+    rotulo: '🏥 Farmácia/laboratório',
+    classe: 'bg-[#fef3c7] text-[#92400e]',
+    borda: 'border-[#f59e0b]',
   },
   // Pediu urgencia na telemedicina: uma crianca passando mal e alguem
   // esperando ligacao. E a unica bandeira que precisa gritar mais que a falha.
@@ -248,6 +283,10 @@ export default function Conversations({
   const [busca, setBusca] = useState('')
   const [de, setDe] = useState('')
   const [ate, setAte] = useState('')
+  // Comeca desligado: quem abre a tela espera ver a conversa inteira da
+  // clinica. Esconder por conta propria seria decidir pela equipe que o dia
+  // anterior nao interessa mais.
+  const [esconderRespondidas, setEsconderRespondidas] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [loading, setLoading] = useState(true)
@@ -320,6 +359,8 @@ export default function Conversations({
   const selectedIdRef = useRef<string | null>(null)
   // Fim da lista de mensagens. O botao de descer rola ate ele.
   const fimDasMensagens = useRef<HTMLDivElement>(null)
+  // Topo da lista. O botao de subir rola ate ele.
+  const inicioDasMensagens = useRef<HTMLDivElement>(null)
   // Qual conversa ja foi posicionada no fim. Sem isto, cada mensagem nova
   // rolaria a tela de novo enquanto alguem le algo mais acima.
   const conversaRolada = useRef<string | null>(null)
@@ -425,10 +466,19 @@ export default function Conversations({
       setJanelaAte(janela)
       if (conversation.unreadCount > 0 || conversation.needsAttention) {
         await markConversationSeen(conversation.id)
+        // Pedido de 2ª via e de farmácia continuam marcados depois de lidos:
+        // eles só terminam quando o documento sai. O servidor decide isso; a
+        // tela repete a mesma regra para não piscar a etiqueta e trazê-la de
+        // volta no recarregamento seguinte.
+        const pendente =
+          conversation.attentionReason === 'documento' ||
+          conversation.attentionReason === 'farmacia'
         setConversations((current) =>
           current.map((item) =>
             item.id === conversation.id
-              ? { ...item, unreadCount: 0, needsAttention: false, attentionReason: null }
+              ? pendente
+                ? { ...item, unreadCount: 0 }
+                : { ...item, unreadCount: 0, needsAttention: false, attentionReason: null }
               : item,
           ),
         )
@@ -587,6 +637,10 @@ export default function Conversations({
     const fim = ate ? new Date(`${ate}T23:59:59.999`).getTime() : null
 
     return conversations.filter((item) => {
+      // A conversa aberta continua na lista mesmo escondida: some-la debaixo do
+      // proprio leitor, no instante em que a resposta sai, seria tirar a
+      // conversa da tela de quem ainda esta nela.
+      if (esconderRespondidas && jaRespondida(item) && item.id !== selectedId) return false
       if (inicio !== null || fim !== null) {
         const quando = item.lastMessageAt ? new Date(item.lastMessageAt).getTime() : null
         if (quando === null) return false
@@ -599,7 +653,9 @@ export default function Conversations({
       if (digitosBusca && item.phoneDigits.includes(digitosBusca)) return true
       return item.textoBusca.includes(termo)
     })
-  }, [conversations, busca, de, ate])
+  }, [conversations, busca, de, ate, esconderRespondidas, selectedId])
+
+  const respondidas = useMemo(() => conversations.filter(jaRespondida).length, [conversations])
 
   const filtrando = Boolean(busca.trim() || de || ate)
   /**
@@ -883,14 +939,34 @@ export default function Conversations({
             </span>
           )}
         </p>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="inline-flex items-center gap-1.5 rounded-xl bg-[#eef3f2] px-3 py-1.5 text-[10px] font-extrabold text-[#557f75] transition hover:bg-[#e2ece9]"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Atualizar
-        </button>
+        <div className="flex items-center gap-1.5">
+          {/* Esmaecer ja separa as respondidas, mas em dia cheio elas continuam
+              ocupando a lista. Este botao tira as resolvidas da frente e deixa
+              so o que falta - sem apagar nada: e um filtro de tela, e volta no
+              mesmo clique. */}
+          {respondidas > 0 && (
+            <button
+              type="button"
+              onClick={() => setEsconderRespondidas((atual) => !atual)}
+              className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[10px] font-extrabold transition ${
+                esconderRespondidas
+                  ? 'bg-[#557f75] text-white hover:bg-[#4a6f66]'
+                  : 'bg-[#eef3f2] text-[#557f75] hover:bg-[#e2ece9]'
+              }`}
+            >
+              <Check className="h-3.5 w-3.5" />
+              {esconderRespondidas ? `Mostrar respondidas (${respondidas})` : 'Esconder respondidas'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#eef3f2] px-3 py-1.5 text-[10px] font-extrabold text-[#557f75] transition hover:bg-[#e2ece9]"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Atualizar
+          </button>
+        </div>
       </div>
 
       {conversations.length === 0 ? (
@@ -915,7 +991,13 @@ export default function Conversations({
           <div className={`min-w-0 space-y-2 ${selected ? 'hidden lg:block' : ''}`}>
             {visiveis.length === 0 && (
               <div className="surface-card rounded-[18px] p-6 text-center text-[11px] font-semibold text-slate-500">
-                Nenhuma conversa encontrada com esses filtros.
+                {/* Sem esta frase, esconder as respondidas num dia em que tudo
+                    foi respondido devolvia "nenhuma conversa com esses filtros"
+                    - e parece que a lista quebrou, quando na verdade e a melhor
+                    noticia possivel. */}
+                {esconderRespondidas && !filtrando
+                  ? 'Tudo respondido. Nada esperando a equipe.'
+                  : 'Nenhuma conversa encontrada com esses filtros.'}
               </div>
             )}
             {visiveis.map((conversation) => {
@@ -923,13 +1005,24 @@ export default function Conversations({
               const motivo = conversation.needsAttention && conversation.attentionReason
                 ? MOTIVO_ATENCAO[conversation.attentionReason]
                 : null
+              // Alguem da equipe ja escreveu depois da ultima mensagem do
+              // paciente. Enquanto ha motivo de atencao aberto a marca nao
+              // aparece: o pedido continua de pe mesmo com resposta dada.
+              const respondida = jaRespondida(conversation)
               // O contorno do motivo vence o de "selecionada": quem pediu
               // atendente precisa saltar da lista mesmo sem estar aberta.
+              //
+              // E a respondida perde para as duas. Ela recua de proposito - fica
+              // verde-agua apagada, sem o branco das outras -, porque o que a
+              // lista precisa entregar num relance e o que FALTA. Quem ja foi
+              // atendido continua ali, legivel, so que fora do caminho do olho.
               const contorno = motivo
                 ? `${motivo.borda} bg-white`
                 : active
                   ? 'border-[#2f7fc1] bg-white shadow-[0_10px_28px_rgba(8,27,44,.10)]'
-                  : 'border-[#081b2c]/10 bg-white/70 hover:border-[#081b2c]/20 hover:bg-white'
+                  : respondida
+                    ? 'border-[#557f75]/20 bg-[#eef3f2]/60 hover:border-[#557f75]/40 hover:bg-[#eef3f2]'
+                    : 'border-[#081b2c]/10 bg-white/70 hover:border-[#081b2c]/20 hover:bg-white'
               const semCadastro = !conversation.patientId
               // Sem cadastro, o nome do WhatsApp e melhor do que "Contato sem
               // cadastro" - mas vem com etiqueta, porque e o apelido que a
@@ -981,6 +1074,15 @@ export default function Conversations({
                     {conversation.unreadCount > 0 && (
                       <span className="rounded-full bg-[#081b2c] px-2 py-0.5 text-[9px] font-extrabold text-white">
                         {conversation.unreadCount} nova{conversation.unreadCount > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {/* So aparece quando a conversa segue aberta: em conversa
+                        encerrada "Resolvida" ja diz mais, e duas etiquetas
+                        verdes lado a lado nao diriam nada. */}
+                    {respondida && conversation.status === 'open' && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[9px] font-extrabold text-[#557f75]">
+                        <Check className="h-2.5 w-2.5" />
+                        Respondida
                       </span>
                     )}
                     {conversation.status === 'opted_out' && (
@@ -1152,23 +1254,44 @@ export default function Conversations({
                   <div className="relative mt-3 rounded-[14px] bg-[#efeae2] px-3 py-4" style={FUNDO_WHATSAPP}>
                     {/* Conversas antigas tem dezenas de mensagens, e o que
                         interessa esta sempre no fim. Sem isto a equipe rolava a
-                        roda ate cansar toda vez que abria uma conversa. */}
+                        roda ate cansar toda vez que abria uma conversa.
+
+                        Os dois sentidos, e nao so um: a conversa abre no fim,
+                        entao subir ate o comeco - para reler como tudo comecou,
+                        ou achar o que o paciente pediu na primeira mensagem -
+                        era o caminho que dava mais trabalho e nao tinha atalho. */}
                     {messages.length > 6 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          fimDasMensagens.current?.scrollIntoView({
-                            behavior: 'smooth',
-                            block: 'end',
-                          })
-                        }
-                        className="sticky top-1 z-10 ml-auto flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-[10px] font-extrabold text-[#557f75] shadow-[0_2px_6px_rgba(11,20,26,.18)] backdrop-blur transition hover:bg-white"
-                      >
-                        <ArrowDown className="h-3 w-3" />
-                        Ir para o fim
-                      </button>
+                      <div className="sticky top-1 z-10 mb-1 flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            inicioDasMensagens.current?.scrollIntoView({
+                              behavior: 'smooth',
+                              block: 'start',
+                            })
+                          }
+                          className="flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-[10px] font-extrabold text-[#557f75] shadow-[0_2px_6px_rgba(11,20,26,.18)] backdrop-blur transition hover:bg-white"
+                        >
+                          <ArrowUp className="h-3 w-3" />
+                          Ir para o início
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            fimDasMensagens.current?.scrollIntoView({
+                              behavior: 'smooth',
+                              block: 'end',
+                            })
+                          }
+                          className="flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-[10px] font-extrabold text-[#557f75] shadow-[0_2px_6px_rgba(11,20,26,.18)] backdrop-blur transition hover:bg-white"
+                        >
+                          <ArrowDown className="h-3 w-3" />
+                          Ir para o fim
+                        </button>
+                      </div>
                     )}
                     <div className="space-y-2">
+                      <div ref={inicioDasMensagens} />
                       {messages.map((message) => {
                         const outbound = message.direction === 'outbound'
                         return (

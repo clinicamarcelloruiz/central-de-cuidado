@@ -20,7 +20,12 @@
 
 import type { adminClient } from './whatsapp.ts'
 import { cadastrarDaFicha, type ConsultaParaCadastro } from './cadastro.ts'
-import { acharResposta, assuntoClinico, carregarRespostas } from './respostas.ts'
+import {
+  acharResposta,
+  assuntoClinico,
+  carregarRespostas,
+  medicamentoControlado,
+} from './respostas.ts'
 
 /** Dias oferecidos de uma vez. Cabe a quinzena inteira numa mensagem so. */
 /**
@@ -66,7 +71,20 @@ export type Estado =
   | 'dados_email'
   | 'informacoes_unidade'
   | 'atendente'
-export type MotivoAtencao = 'atendente' | 'falha' | 'cancelou_sozinho' | 'urgencia' | 'anexo'
+  | 'documento_quem'
+  | 'documento_paciente'
+  | 'documento_tipo'
+  | 'documento_item'
+  | 'documento_exigencia'
+  | 'documento_farmacia'
+export type MotivoAtencao =
+  | 'atendente'
+  | 'falha'
+  | 'cancelou_sozinho'
+  | 'urgencia'
+  | 'anexo'
+  | 'documento'
+  | 'farmacia'
 
 /**
  * A telemedicina como "unidade" do fluxo.
@@ -244,10 +262,34 @@ function dataEscrita(texto: string): { dia: number; mes: number } | null {
   return { dia, mes }
 }
 
-/** Le "2" ou "2." e devolve o indice na lista mostrada. */
+/**
+ * Le "2", "2.", "*2*" ou "opcao 2" e devolve o indice na lista mostrada.
+ *
+ * O NUMERO PRECISA SER A MENSAGEM, e nao um numero dentro dela. Antes daqui a
+ * funcao raspava tudo que nao fosse digito e lia o que sobrava, entao qualquer
+ * frase com um algarismo virava escolha de menu - e isso acontecia ANTES de o
+ * robo tentar responder a pergunta ou reconhecer assunto clinico:
+ *
+ *   "meu filho de 2 anos esta com sangue nas fezes"  ->  abria o agendamento
+ *   "ele tem 5 anos, o que devo levar?"              ->  abria a 2a via
+ *   "prefiro Santos, fica a 2 quadras"               ->  escolhia a unidade 2
+ *
+ * A pergunta nunca era respondida, e no primeiro caso um sintoma de alarme
+ * entrava como "quero marcar". Numero de idade e o mais comum numa clinica
+ * pediatrica: quase toda mae diz a idade do filho na primeira frase.
+ *
+ * O que continua valendo e o jeito real de responder: o numero sozinho, com
+ * pontuacao, com os asteriscos que o proprio robo usa no menu, ou precedido
+ * de "opcao"/"numero". Tudo o mais e frase, e frase vai para quem sabe ler
+ * frase.
+ */
 function escolha(texto: string, total: number): number | null {
-  const limpo = normalizar(texto).replace(/[^0-9]/g, '')
-  if (!limpo) return null
+  const limpo = normalizar(texto)
+    .replace(/\*/g, '')
+    .replace(/^(a\s+)?(op(c|ç)(a|ã)o|numero|n(u|ú)mero|item|alternativa)\s+/, '')
+    .replace(/[.)\]º°,;:!]+$/, '')
+    .trim()
+  if (!/^\d{1,2}$/.test(limpo)) return null
   const numero = Number.parseInt(limpo, 10)
   if (!Number.isFinite(numero) || numero < 1 || numero > total) return null
   return numero - 1
@@ -334,6 +376,10 @@ const OPCOES = [
   '*3* 🗣️ Falar com alguém da equipe',
   // 🔄 e nao 🔎: a opcao faz tres coisas, e a lupa sugere apenas olhar.
   '*4* 🔄 Ver, remarcar ou cancelar',
+  // "2a via" vem na frente do nome tecnico porque e assim que a familia chega:
+  // "perdi a receita", "a farmacia nao aceitou". Ninguem escreve "solicitacao
+  // de documento medico". O 📄 repete a ideia de papel na mao.
+  '*5* 📄 2ª via de receita ou pedido de exame',
 ].join('\n')
 
 // O "0" sempre funcionou - pediuMenu o aceita desde o inicio, e ele nunca
@@ -650,6 +696,9 @@ export async function mostrarMenu(
         { id: '2', titulo: 'Marcar uma consulta', descricao: 'Consulta nova ou retorno · unidade, dia e horário' },
         { id: '3', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
         { id: '4', titulo: 'Minha consulta', descricao: 'Ver, remarcar ou cancelar' },
+        // 24 caracteres e o teto do titulo; "2ª via ou exame" cabe e diz o
+        // essencial, com o resto na descricao.
+        { id: '5', titulo: '2ª via ou exame', descricao: 'Receita ou pedido de exame já feito' },
       ],
     },
   }
@@ -732,9 +781,18 @@ async function responderPergunta(
  * A etapa nao muda em nenhum dos dois casos: responder uma duvida no meio do
  * caminho nao pode tirar a pessoa do lugar onde ela estava.
  *
- * Assunto clinico nao entra aqui: acharResposta ja se recusa a responder
- * sintoma e remedio, entao isso segue caindo no "Nao entendi" e, dai, na
- * equipe.
+ * SINTOMA TEM TRATAMENTO PROPRIO, e vem antes de tudo.
+ *
+ * A frase que explica por que o robo nao orienta sobre sintoma existia so no
+ * caminho de quem escrevia sem etapa aberta. Depois de ver o menu, ou no meio
+ * do agendamento, "meu filho esta vomitando sangue desde ontem" recebia
+ * "Nao entendi. Responda com o numero da opcao" - a mae corrigida sobre a
+ * forma de responder, e ninguem avisado. E gastropediatria: hematemese chega
+ * escrita assim, e pediuUrgencia (/urgen/) nao pega nada disso.
+ *
+ * Estando aqui, vale para TODAS as etapas de uma vez, que e onde o defeito
+ * estava. A etapa continua de pe: a pergunta e repetida logo abaixo, e quem
+ * quiser gente digita 3 ou 9, como o robo diz.
  */
 async function naoEntendi(
   admin: Admin,
@@ -742,6 +800,13 @@ async function naoEntendi(
   texto: string,
   pergunta: string,
 ): Promise<string> {
+  if (assuntoClinico(texto)) {
+    return (
+      'Sobre sintomas, remédios e o que fazer, quem responde é o Dr. Marcello ou alguém ' +
+      'da equipe - por aqui eu não posso orientar. Digite *9* para falar com a equipe.\n\n' +
+      pergunta
+    )
+  }
   const achada = acharResposta(texto, await carregarRespostas(admin, clinicId))
   // O texto curto da propria resposta, e nao a pergunta "Santos, SP ou
   // telemedicina?" dos assuntos marcados: fazer outra pergunta a quem ja esta
@@ -833,11 +898,20 @@ async function responderInformacoes(
   // Quem le sobre telemedicina pode estar com pressa: a saida de urgencia
   // aparece aqui mesmo, e nao so depois de entrar no agendamento.
   const tele = lugarId === TELE_ID
+  // Sem outro lugar, nao se oferece "outra unidade".
+  //
+  // Com um atendimento so, o *1* levava de volta a mesmissima mensagem, que
+  // convidava de novo a ver "outra unidade" - digita 1, le o mesmo texto,
+  // digita 1, le o mesmo texto. E o laco que custou o atendimento de
+  // 19/09/2026, na versao de quem tem uma unidade cadastrada.
+  const temOutros = outros.length > 0
   return {
     resposta:
       `${corpo}\n\n` +
       // Curta de proposito: o fecho ja explica o 2 e o 3 com contexto.
-      'Digite *1* para ver outra unidade ou *0* para ver todas as opções.' +
+      (temOutros
+        ? 'Digite *1* para ver outra unidade ou *0* para ver todas as opções.'
+        : 'Digite *0* para voltar ao início.') +
       (tele ? '\n\n🚨 Se for *urgência*, digite URGÊNCIA: a equipe entra em contato o mais rápido possível.' : ''),
     // Quem acabou de ler o preco e exatamente quem esta pronto para marcar.
     lista: {
@@ -845,7 +919,7 @@ async function responderInformacoes(
       linhas: [
         { id: '2', titulo: 'Marcar uma consulta', descricao: 'Consulta nova ou retorno · unidade, dia e horário' },
         ...(tele ? [{ id: 'URGENCIA', titulo: '🚨 É urgência', descricao: 'Falar com a equipe agora' }] : []),
-        { id: '1', titulo: 'Outra unidade', descricao: descricaoOutros },
+        ...(temOutros ? [{ id: '1', titulo: 'Outra unidade', descricao: descricaoOutros }] : []),
         { id: '9', titulo: 'Falar com a equipe', descricao: 'Alguém do consultório responde' },
         { id: '0', titulo: 'Voltar ao menu' },
       ],
@@ -1127,17 +1201,37 @@ async function perguntarUnidade(
     }
   }
 
+  // "Sem horários" e "não consegui ver a agenda" são coisas diferentes, e
+  // dizer a primeira quando foi a segunda é mentira com consequência: a agenda
+  // de Santos pode estar cheia de vagas, o RPC ter falhado, e a família ler que
+  // Santos não tem nada - escolhe São Paulo, ou desiste. horariosLivres separa
+  // os dois casos justamente para isso; era aqui que a distinção se perdia.
+  const rotuloDaAgenda = (u: { horarios: Horario[]; falhou?: boolean }) =>
+    u.horarios.length > 0
+      ? `${u.horarios.length} horário${u.horarios.length === 1 ? '' : 's'} livre${u.horarios.length === 1 ? '' : 's'}`
+      : u.falhou
+        ? 'não consegui ver a agenda agora'
+        : 'sem horários no momento'
+
   const linhas = comAgenda
-    .map((u, i) => {
-      const marca = u.horarios.length > 0 ? '' : ' (sem horários no momento)'
-      return `*${i + 1}* ${u.unidade.name}${marca}`
-    })
+    .map((u, i) => `*${i + 1}* ${u.unidade.name} (${rotuloDaAgenda(u)})`)
     .join('\n')
 
   await salvarEstado(admin, conversationId, {
     booking_state: 'aguardando_unidade',
     booking_options: unidades.map((u) => u.id),
     booking_unit_id: null,
+    // A modalidade cai junto com a unidade.
+    //
+    // A unidade em andamento e DERIVADA da modalidade: com 'telemedicina'
+    // gravada, o resto do fluxo ignora booking_unit_id e trata tudo como
+    // video. Quem escolheu telemedicina, voltou ao menu e escolheu Santos
+    // saia com uma consulta por video marcada numa unidade fisica - a familia
+    // indo ao endereco e o Dr. Marcello esperando na tela.
+    //
+    // Reaparecer a pergunta "em qual unidade?" e o momento certo de esquecer:
+    // ninguem escolheu nada ainda.
+    booking_modality: null,
   })
 
   return {
@@ -1149,10 +1243,7 @@ async function perguntarUnidade(
       linhas: comVoltar(comAgenda.map((u, i) => ({
         id: String(i + 1),
         titulo: u.unidade.name,
-        descricao:
-          u.horarios.length > 0
-            ? `${u.horarios.length} horário${u.horarios.length === 1 ? '' : 's'} livre${u.horarios.length === 1 ? '' : 's'}`
-            : 'sem horários no momento',
+        descricao: rotuloDaAgenda(u),
       }))),
     },
   }
@@ -1183,6 +1274,11 @@ async function perguntarConvenioOuDia(
     booking_state: 'aguardando_convenio',
     booking_unit_id: unidade.id,
     booking_options: null,
+    // Unidade com convenio e unidade fisica - a telemedicina nem tem linha em
+    // clinic_units. Gravar a modalidade aqui fecha o caminho de volta: quem
+    // passou pela telemedicina antes nao carrega o 'telemedicina' para dentro
+    // de uma consulta presencial.
+    booking_modality: 'presencial',
   })
 
   return {
@@ -1422,7 +1518,7 @@ async function marcar(
     vezesRemarcada = (anterior?.reschedule_count ?? 0) + 1
   }
 
-  const { data: criada, error } = await admin.from('appointments').insert({
+  const linhaDaConsulta: Record<string, unknown> = {
     clinic_id: clinicId,
     unit_id: unidadeDoHorario,
     modality: tele ? 'telemedicina' : 'presencial',
@@ -1449,7 +1545,34 @@ async function marcar(
     insurance: convenio,
     reschedule_count: vezesRemarcada,
     rescheduled_from: substitui,
-  }).select('id').maybeSingle()
+  }
+
+  /**
+   * Colunas de appointments que nasceram depois de alguma versao desta funcao.
+   *
+   * Mesmo problema de COLUNAS_RECENTES, e mesma solucao - so que aqui o preco
+   * de nao ter a defesa e maior. A funcao sobe antes das migrations; se o
+   * banco ainda nao tem 'insurance', o Postgres recusa o INSERT INTEIRO e
+   * TODO agendamento pelo WhatsApp passa a responder "nao consegui concluir o
+   * agendamento agora", ate a migration chegar.
+   *
+   * Perder o convenio de uma consulta e um arranhao que a recepcao conserta na
+   * chegada. Perder o agendamento e a familia sem horario.
+   */
+  const COLUNAS_RECENTES_DA_CONSULTA = ['insurance', 'rescheduled_from', 'reschedule_count']
+
+  let { data: criada, error } = await admin
+    .from('appointments').insert(linhaDaConsulta).select('id').maybeSingle()
+
+  if (error && (error as { code?: string }).code === '42703') {
+    const semAsNovas = { ...linhaDaConsulta }
+    for (const coluna of COLUNAS_RECENTES_DA_CONSULTA) delete semAsNovas[coluna]
+    console.warn('appointments sem alguma coluna recente; gravando sem ela', error)
+    const segunda = await admin
+      .from('appointments').insert(semAsNovas).select('id').maybeSingle()
+    criada = segunda.data
+    error = segunda.error
+  }
 
   // Tambem termina oferecendo numero quando da errado, entao o menu fica ativo.
   if (error) await voltarAoMenuAtivo(admin, conversationId)
@@ -1967,6 +2090,237 @@ async function guardarDado(
 }
 
 // ---------------------------------------------------------------
+// Opcao 5: 2a via de receita e pedido de exame
+// ---------------------------------------------------------------
+
+/**
+ * O pedido sendo montado, guardado em booking_options entre uma pergunta e a
+ * seguinte. O nome do paciente vai junto do id porque o comprovante precisa
+ * escrever o nome, e reler o cadastro a cada passo seria consulta a toa.
+ */
+type PedidoDeDocumento = {
+  pacienteId?: string | null
+  paciente?: string
+  tipo?: 'receita' | 'exame'
+  item?: string
+}
+
+function pedidoEmAndamento(opcoes: unknown): PedidoDeDocumento {
+  const bruto = opcoes as { pedido?: PedidoDeDocumento } | null
+  return bruto?.pedido ?? {}
+}
+
+/** O nome do tipo como a pessoa leu no botao, para repetir igual no comprovante. */
+const NOME_DO_TIPO = {
+  receita: '💊 2ª via de receita',
+  exame: '🔬 Pedido de exame',
+} as const
+
+/**
+ * A pergunta de abertura, depois da portaria.
+ *
+ * Com mais de um paciente no telefone, perguntar de quem e o pedido vem antes
+ * de tudo: a mae que cadastrou dois filhos nao pode receber "qual medicamento?"
+ * sem que ninguem tenha dito de qual crianca se trata - e adivinhar a crianca
+ * errada numa receita e pior do que uma pergunta a mais.
+ */
+async function perguntarDeQuemEOPedido(
+  admin: Admin,
+  conversationId: string,
+  pacientes: Paciente[],
+): Promise<Resultado> {
+  if (pacientes.length === 1) {
+    return await perguntarTipoDoDocumento(admin, conversationId, {
+      pacienteId: pacientes[0].id,
+      paciente: pacientes[0].name,
+    })
+  }
+
+  const cabem = pacientes.slice(0, MAX_TOQUES - 2)
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'documento_paciente',
+    booking_options: { pedido: {}, pacientes: cabem.map((p) => p.id) },
+  })
+  return {
+    resposta:
+      'Para qual paciente é o pedido?\n\n' +
+      cabem.map((p, i) => `*${i + 1}* ${p.name}`).join('\n') +
+      `\n\n${SAIDAS}`,
+    lista: {
+      rotulo: 'Escolher paciente',
+      linhas: comVoltar(cabem.map((p, i) => ({ id: String(i + 1), titulo: p.name }))),
+    },
+  }
+}
+
+async function perguntarTipoDoDocumento(
+  admin: Admin,
+  conversationId: string,
+  pedido: PedidoDeDocumento,
+): Promise<Resultado> {
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'documento_tipo',
+    booking_options: { pedido },
+  })
+  const dePara = pedido.paciente ? ` para *${pedido.paciente}*` : ''
+  return {
+    resposta:
+      `O que você precisa${dePara}?\n\n` +
+      '*1* 💊 2ª via de receita\n' +
+      '*2* 🔬 Pedido de exame\n\n' +
+      SAIDAS,
+    botoes: [
+      { id: '1', titulo: '2ª via de receita' },
+      { id: '2', titulo: 'Pedido de exame' },
+    ],
+  }
+}
+
+/**
+ * O passo da exigencia, e por que ele nao e burocracia.
+ *
+ * Foi o caso que o Dr. Marcello descreveu: o laboratorio devolve o pedido
+ * porque o CID nao confere, a farmacia recusa a receita porque a validade
+ * venceu. Sem essa linha ele recebe "preciso da receita da domperidona", refaz
+ * exatamente igual, e a farmacia recusa de novo - ninguem falou o que estava
+ * errado. A pergunta existe para o documento voltar certo na primeira vez.
+ *
+ * A foto vale mais que a explicacao: quem esta no balcao da farmacia costuma
+ * repetir errado o que o atendente disse, e a imagem do que foi recusado mostra
+ * sozinha. Por isso a mensagem convida, mas nao exige nenhum dos dois.
+ */
+async function perguntarExigencia(
+  admin: Admin,
+  conversationId: string,
+  pedido: PedidoDeDocumento,
+): Promise<Resultado> {
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'documento_exigencia',
+    booking_options: { pedido },
+  })
+  // Quem devolveu o documento muda com o tipo, e a pergunta precisa nomear a
+  // pessoa certa: "a farmácia pediu correção no seu ultrassom?" faz a mae parar
+  // para entender uma pergunta que nao era para ela.
+  const quemRecusou =
+    pedido.tipo === 'exame' ? 'O laboratório ou a clínica de exames' : 'A farmácia'
+  return {
+    resposta:
+      `${quemRecusou} pediu alguma correção?\n\n` +
+      'Se pediram, escreva o que foi. Se não, responda *não*.\n\n' +
+      '📎 Se tiver foto do documento que não foi aceito, pode mandar aqui.',
+    botoes: [{ id: 'não', titulo: 'Não pediram nada' }],
+  }
+}
+
+/**
+ * O comprovante, e o fim do caminho automatico.
+ *
+ * Ele repete o pedido inteiro de proposito. Para a familia, e a prova de que
+ * foi entendido - sem isso a duvida "sera que registrou o medicamento certo?"
+ * so se resolve esperando. Para a clinica, esta mensagem E o pedido: ela fica
+ * como ultima mensagem da conversa, aparece na previa da lista, e poupa quem
+ * abrir de subir a conversa inteira para descobrir o que foi pedido.
+ *
+ * Prazo com nome: "em breve" e o que a clinica sente, "1 dia util" e o que a
+ * familia consegue esperar sem cobrar. Quem nao ganha prazo cobra em duas
+ * horas, e a cobranca cai na mesma equipe que ainda nao teve tempo.
+ */
+async function registrarPedido(
+  admin: Admin,
+  conversationId: string,
+  pedido: PedidoDeDocumento,
+  exigencia: string,
+): Promise<Resultado> {
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'atendente',
+    booking_options: null,
+    auto_replies_while_waiting: 0,
+  })
+  const titulo = pedido.tipo ? NOME_DO_TIPO[pedido.tipo] : '📄 Documento'
+  const linhas = [`${titulo}${pedido.paciente ? ` · ${pedido.paciente}` : ''}`]
+  if (pedido.item) linhas.push(pedido.item)
+  if (exigencia) linhas.push(`_Pediram correção:_ ${exigencia}`)
+
+  return {
+    resposta:
+      '✅ Pedido registrado.\n\n' +
+      linhas.join('\n') +
+      // "revisar e responder", e nao "revisar e enviar".
+      //
+      // A portaria reconhece quem tem CADASTRO, e o cadastro nasce quando a
+      // familia termina a ficha do agendamento - antes da consulta acontecer.
+      // Quem marcou ontem passa por aqui e pediria 2a via de uma receita que
+      // nunca existiu. Prometer o envio seria mandar essa pessoa esperar um
+      // documento que nao ha; prometer a resposta e verdade nos dois casos, e
+      // no caso comum - o que motivou tudo isto - a resposta E o documento.
+      '\n\nO Dr. Marcello vai revisar e responder por aqui, em até *1 dia útil*.\n\n' +
+      VOLTA,
+    atencao: 'documento',
+  }
+}
+
+/**
+ * A portaria: quem nunca consultou aqui.
+ *
+ * Nao e um beco. O numero desconhecido pode ser o pai usando o celular do
+ * trabalho - e pode ser a farmacia ligando por causa da receita, que foi
+ * justamente o caso que motivou tudo isto. As duas coisas precisam de caminho,
+ * e caminhos diferentes.
+ *
+ * O que o robo NAO faz aqui, em nenhum dos dois: confirmar que fulano se trata
+ * nesta clinica, mostrar cadastro, ou mandar documento. Isso e dado de saude, e
+ * quem escreve de um numero que a clinica nunca viu nao provou ser ninguem.
+ * Confirmar a pedido seria entregar prontuario para quem souber um nome.
+ */
+async function perguntarQuemPede(admin: Admin, conversationId: string): Promise<Resultado> {
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'documento_quem',
+    booking_options: null,
+  })
+  return {
+    resposta:
+      'A 2ª via é de documento emitido em consulta, e não localizei atendimento neste número.\n\n' +
+      '*1* 👨‍👩‍👦 Sou o paciente ou responsável\n' +
+      '*2* 🏥 Sou de farmácia ou laboratório\n\n' +
+      SAIDAS,
+    botoes: [
+      { id: '1', titulo: 'Paciente/responsável' },
+      { id: '2', titulo: 'Farmácia/laboratório' },
+    ],
+  }
+}
+
+async function perguntarPedidoDaFarmacia(
+  admin: Admin,
+  conversationId: string,
+): Promise<Resultado> {
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'documento_farmacia',
+    booking_options: null,
+  })
+  return {
+    resposta:
+      'Certo. Me diga o *nome do paciente* e o que precisa ser corrigido no documento.\n\n' +
+      '📎 Se puder, mande a foto do que foi recusado.',
+  }
+}
+
+/**
+ * Entrada da opcao 5.
+ *
+ * A portaria vem antes de qualquer pergunta: sem atendimento neste numero, o
+ * fluxo do paciente nem comeca.
+ */
+async function iniciarDocumento(
+  admin: Admin,
+  conversationId: string,
+  pacientes: Paciente[],
+): Promise<Resultado> {
+  if (pacientes.length === 0) return await perguntarQuemPede(admin, conversationId)
+  return await perguntarDeQuemEOPedido(admin, conversationId, pacientes)
+}
+
+// ---------------------------------------------------------------
 // Entrada
 // ---------------------------------------------------------------
 
@@ -2077,7 +2431,16 @@ export async function tratarConversa(opcoes: {
   // Vem antes do bloco da equipe para que o anexo de quem NAO estava na fila
   // entre nela, e depois do MENU para nao tirar a saida de emergencia de
   // ninguem.
-  if (opcoes.anexo) {
+  // Dentro do pedido de documento, a foto nunca cai na regra geral.
+  //
+  // A regra geral entrega o anexo a equipe e zera booking_options - o pedido
+  // montado ate ali evapora. Em "o que foi recusado?" a foto E a resposta; nas
+  // etapas anteriores ela e natural do mesmo jeito (a mae fotografa a receita
+  // quando o robo pergunta o nome do remedio) e precisa ser recebida sem
+  // derrubar o que ja foi respondido. Cada etapa trata a sua, mais abaixo.
+  const noPedidoDeDocumento = Boolean(estadoAtual?.startsWith('documento_'))
+
+  if (opcoes.anexo && !noPedidoDeDocumento) {
     if (estadoAtual === 'atendente') return null
     await salvarEstado(admin, conversationId, {
       booking_state: 'atendente',
@@ -2187,7 +2550,15 @@ export async function tratarConversa(opcoes: {
   // Urgencia tambem vale de qualquer etapa. Nasceu na telemedicina, mas uma
   // mae com a crianca passando mal nao vai procurar a etapa certa para dizer
   // isso - e o custo de tratar como urgente o que nao era e uma ligacao a mais.
-  if (pediuUrgencia(texto)) {
+  // Urgencia transfere de qualquer etapa - menos dentro do pedido de
+  // documento, onde "urgente" quase sempre quer dizer pressa.
+  //
+  // "e urgente, ela precisa do omeprazol" e uma mae correndo atras de receita,
+  // nao uma emergencia: mandar essa pessoa ao pronto-socorro e ainda jogar
+  // fora o pedido dela erra duas vezes. Com sintoma junto - "e urgente, ela
+  // esta vomitando sangue" - a transferencia vale, e o pedido perder-se ali e
+  // o menor dos problemas.
+  if (pediuUrgencia(texto) && (!noPedidoDeDocumento || assuntoClinico(texto))) {
     return await transferirUrgencia(admin, conversationId)
   }
 
@@ -2282,10 +2653,30 @@ export async function tratarConversa(opcoes: {
     const { tentativas, faltam, manual } = filaDaFicha(opcoes.opcoesAtuais)
     const restantes = faltam.slice(1)
 
+    // "Voltar" nao e "pular", e tratar como se fosse apagava o campo.
+    //
+    // Quem digita VOLTAR na ficha quer corrigir o que respondeu antes - errou
+    // a data de nascimento, trocou uma letra do nome. Cair no mesmo caminho do
+    // PULAR fazia o robo dizer "Sem problema." e seguir adiante, perdendo o
+    // campo atual sem a pessoa ter pedido nada disso.
+    //
+    // Voltar de verdade exigiria guardar o que ja foi respondido nesta fila, e
+    // a ficha e curta: dizer a verdade e repetir a pergunta resolve, e quem
+    // precisa corrigir fala com a equipe na consulta, como sempre pode.
+    if (pediuVoltar(texto)) {
+      return {
+        resposta:
+          'Aqui não dá para voltar uma pergunta - mas o que já foi respondido está guardado, ' +
+          'e o Dr. Marcello confere tudo na consulta.\n\n' +
+          perguntaAtual.texto,
+        botoes: manual ? undefined : [{ id: 'MENU', titulo: 'Voltar ao menu' }],
+      }
+    }
+
     // Pular vale nos campos opcionais, sem justificativa e sem insistir. Nos
     // obrigatorios o robo pede de novo, uma vez - e depois segue, porque
     // insistir eternamente prenderia quem nao pode responder agora.
-    if (pulou(texto) || pediuVoltar(texto)) {
+    if (pulou(texto)) {
       if (perguntaAtual.obrigatoria && tentativas < 1) {
         await salvarEstado(admin, conversationId, {
           booking_options: { tentativas: tentativas + 1, faltam, manual },
@@ -2344,7 +2735,7 @@ export async function tratarConversa(opcoes: {
 
   // ---- Menu ----
   if (estadoAtual === 'menu') {
-    const escolhido = escolha(texto, 4)
+    const escolhido = escolha(texto, 5)
 
     if (escolhido === 0) {
       return await perguntarLocalDasInformacoes(admin, clinicId, conversationId, opcoes.textos.informacoes)
@@ -2362,6 +2753,10 @@ export async function tratarConversa(opcoes: {
 
     if (escolhido === 3) {
       return await mostrarMinhaConsulta(admin, clinicId, conversationId, opcoes.consultas)
+    }
+
+    if (escolhido === 4) {
+      return await iniciarDocumento(admin, conversationId, opcoes.pacientes)
     }
 
     // Sintoma junto do pedido nao abre a agenda direto. "Meu filho tem refluxo,
@@ -2392,11 +2787,249 @@ export async function tratarConversa(opcoes: {
     const pronta = await responderPergunta(admin, clinicId, conversationId, texto, opcoes.textos.informacoes)
     if (pronta) return pronta
 
+    // Sintoma escrito COM o menu na tela recebia "Não entendi. Responda com o
+    // número da opção" - a mãe corrigida sobre a forma de responder, e ninguém
+    // avisado. A frase existia, mas só valia para quem escrevia antes de o
+    // menu aparecer, o que na prática é só a primeira mensagem da vida dela.
+    if (assuntoClinico(texto)) {
+      return await mostrarMenu(
+        admin,
+        conversationId,
+        saudacao,
+        'Sobre sintomas, remédios e o que fazer, quem responde é o Dr. Marcello ou alguém da equipe - ' +
+          'por aqui eu não posso orientar. Digite *3* para falar com a equipe, ou escolha:',
+      )
+    }
+
     return await mostrarMenu(
       admin,
       conversationId,
       saudacao,
       'Não entendi. Responda com o número da opção:',
+    )
+  }
+
+  // ---- 2a via de receita e pedido de exame ----
+
+  // Numero sem atendimento: paciente/responsavel ou farmacia?
+  if (estadoAtual === 'documento_quem') {
+    const escolhido = escolha(texto, 2)
+    if (escolhido === 0) {
+      // Pode ser o pai no celular do trabalho, e pode ser alguem que nunca
+      // veio. Quem confere e gente: o robo nao tem como saber, e chutar aqui
+      // seria abrir cadastro para quem souber um nome.
+      return await chamarEquipe(admin, conversationId)
+    }
+    if (escolhido === 1) {
+      return await perguntarPedidoDaFarmacia(admin, conversationId)
+    }
+    return {
+      resposta: 'Não entendi. Responda *1* se você é o paciente ou responsável, ou *2* se está falando de uma farmácia ou laboratório.',
+      botoes: [
+        { id: '1', titulo: 'Paciente/responsável' },
+        { id: '2', titulo: 'Farmácia/laboratório' },
+      ],
+    }
+  }
+
+  // O pedido da farmacia, que sai daqui direto para a equipe.
+  //
+  // Sem confirmar nada sobre o paciente e sem prometer resposta por este canal:
+  // quem recebe o documento corrigido e a familia, pelo numero dela. Dizer isso
+  // agora evita a farmacia esperando um PDF que nunca vai chegar aqui.
+  if (estadoAtual === 'documento_farmacia') {
+    if (!texto.trim() && !opcoes.anexo) {
+      return {
+        resposta: 'Pode escrever o nome do paciente e o que precisa ser corrigido.',
+      }
+    }
+    await salvarEstado(admin, conversationId, {
+      booking_state: 'atendente',
+      booking_options: null,
+      auto_replies_while_waiting: 0,
+    })
+    return {
+      resposta:
+        '✅ Registrado. Vou passar para o Dr. Marcello.\n\n' +
+        'O documento corrigido é enviado ao paciente, não por este canal.\n\n' +
+        'Atendemos de segunda a sexta, das 8h às 18h.',
+      atencao: 'farmacia',
+    }
+  }
+
+  // Para qual filho.
+  if (estadoAtual === 'documento_paciente') {
+    const ids = Array.isArray((opcoes.opcoesAtuais as { pacientes?: unknown } | null)?.pacientes)
+      ? ((opcoes.opcoesAtuais as { pacientes: string[] }).pacientes)
+      : []
+    const candidatos = ids
+      .map((id) => opcoes.pacientes.find((p) => p.id === id))
+      .filter((p): p is Paciente => Boolean(p))
+
+    if (opcoes.anexo && !texto.trim()) {
+      return {
+        resposta: '📎 Recebi. Só me diga antes para qual paciente é o pedido.',
+      }
+    }
+
+    // O nome escrito vale tanto quanto o numero.
+    //
+    // A pessoa acabou de LER os nomes na tela; responder "Pedro" e o reflexo,
+    // e so o numero era aceito. Primeiro nome basta, e por prefixo, porque
+    // ninguem digita "Pedro Souza" inteiro quando o filho se chama Pedro.
+    const escrito = normalizar(texto)
+    const porNome = escrito
+      ? candidatos.find((p) => {
+          const nome = normalizar(p.name)
+          return nome === escrito || nome.startsWith(`${escrito} `) || escrito === nome.split(' ')[0]
+        })
+      : undefined
+
+    const indice = escolha(texto, candidatos.length)
+    const escolhido = porNome ?? (indice === null ? undefined : candidatos[indice])
+    if (!escolhido) {
+      return {
+        resposta: await naoEntendi(
+          admin,
+          clinicId,
+          texto,
+          'Responda com o número do paciente da lista acima.',
+        ),
+      }
+    }
+    return await perguntarTipoDoDocumento(admin, conversationId, {
+      pacienteId: escolhido.id,
+      paciente: escolhido.name,
+    })
+  }
+
+  // Receita ou exame.
+  if (estadoAtual === 'documento_tipo') {
+    const pedido = pedidoEmAndamento(opcoes.opcoesAtuais)
+
+    if (opcoes.anexo && !texto.trim()) {
+      return {
+        resposta:
+          '📎 Recebi. Antes de guardar, me diga o que você precisa:\n\n' +
+          '*1* 💊 2ª via de receita\n' +
+          '*2* 🔬 Pedido de exame',
+        botoes: [
+          { id: '1', titulo: '2ª via de receita' },
+          { id: '2', titulo: 'Pedido de exame' },
+        ],
+      }
+    }
+
+    // A palavra vem antes do numero, e nao o contrario.
+    //
+    // "2ª via de receita" e o rotulo do proprio botao, e escolha() raspa os
+    // digitos da frase: o "2" do "2ª" virava a opcao 2, e quem pediu receita
+    // recebia "qual exame?". Ler a palavra primeiro resolve sem mexer na
+    // leitura de numeros do resto do robo.
+    const escrito = normalizar(texto)
+    const porPalavra = /receita|remedio|medicamento/.test(escrito)
+      ? 'receita'
+      : /exame|laborat|ultrassom|endoscopia|sangue/.test(escrito)
+        ? 'exame'
+        : null
+
+    const escolhido = escolha(texto, 2)
+    if (!porPalavra && escolhido === null) {
+      return {
+        resposta: await naoEntendi(
+          admin,
+          clinicId,
+          texto,
+          'Responda *1* para 2ª via de receita, ou *2* para pedido de exame.',
+        ),
+        botoes: [
+          { id: '1', titulo: '2ª via de receita' },
+          { id: '2', titulo: 'Pedido de exame' },
+        ],
+      }
+    }
+    const tipo = porPalavra ?? (escolhido === 0 ? 'receita' : 'exame')
+    await salvarEstado(admin, conversationId, {
+      booking_state: 'documento_item',
+      booking_options: { pedido: { ...pedido, tipo } },
+    })
+    return {
+      resposta:
+        tipo === 'receita'
+          ? 'Qual medicamento? Pode escrever como está na receita.'
+          : 'Qual exame? Pode escrever como está no pedido.',
+    }
+  }
+
+  // Qual medicamento ou exame. Texto livre - e de proposito: ninguem tem a
+  // lista de remedios da clinica na cabeca, e uma lista tocavel aqui daria
+  // trabalho para acertar o que a pessoa ja sabe dizer numa linha.
+  if (estadoAtual === 'documento_item') {
+    const pedido = pedidoEmAndamento(opcoes.opcoesAtuais)
+    const item = texto.trim()
+    if (!item) {
+      // A foto da receita quando o robo pede o nome do remedio e o reflexo
+      // mais natural que existe - e era o que apagava o pedido inteiro. Aqui
+      // ela e recebida, o estado fica de pe, e o robo explica por que ainda
+      // precisa do nome: ele nao le imagem, e quem vai ler e o medico.
+      const pediu = pedido.tipo === 'exame' ? 'o nome do exame' : 'o nome do medicamento'
+      return {
+        resposta: opcoes.anexo
+          ? `📎 Recebi. Me diga também ${pediu}, escrito - assim o pedido chega completo.`
+          : `Pode escrever ${pediu}.`,
+      }
+    }
+
+    // Controlado sai do automatico aqui, e nao no fim.
+    //
+    // Continuar perguntando a exigencia e devolver "em ate 1 dia util" seria
+    // prometer o que a lei nao deixa cumprir: a receita de controlado sai em
+    // receituario proprio, a farmacia retem a via original, e PDF nenhum
+    // substitui o papel que ficou no balcao. A familia iria a farmacia com um
+    // arquivo no celular para ouvir nao - e a culpa seria nossa, por ter
+    // prometido.
+    //
+    // O pedido nao se perde: vira conversa com a equipe, com o que ela ja
+    // escreveu registrado acima.
+    if (pedido.tipo === 'receita' && medicamentoControlado(item)) {
+      await salvarEstado(admin, conversationId, {
+        booking_state: 'atendente',
+        booking_options: null,
+        auto_replies_while_waiting: 0,
+      })
+      return {
+        resposta:
+          `Anotei: *${item}*.\n\n` +
+          'Esse tipo de receita sai em receituário especial e a farmácia fica com a via ' +
+          'original, então a 2ª via não pode ser resolvida por aqui automaticamente.\n\n' +
+          'Já avisei a equipe: alguém do consultório responde por aqui para combinar como ' +
+          'retirar.\n\n' +
+          'Atendemos de segunda a sexta, das 8h às 18h.',
+        atencao: 'documento',
+      }
+    }
+
+    return await perguntarExigencia(admin, conversationId, { ...pedido, item })
+  }
+
+  // O que a farmacia ou o laboratorio exigiu. Aceita foto: a imagem do
+  // documento recusado costuma dizer mais que a explicacao repassada de
+  // cabeca por quem esta no balcao.
+  if (estadoAtual === 'documento_exigencia') {
+    const pedido = pedidoEmAndamento(opcoes.opcoesAtuais)
+    const resposta = texto.trim()
+    if (!resposta && !opcoes.anexo) {
+      return await perguntarExigencia(admin, conversationId, pedido)
+    }
+    // "Nao" aqui e resposta completa, nao recusa: quer dizer que nada foi
+    // exigido, e o pedido segue do mesmo jeito.
+    const nada = /^(n|nao|não|nada|nenhuma|negativo)$/i.test(normalizar(resposta))
+    const exigencia = nada ? '' : resposta
+    return await registrarPedido(
+      admin,
+      conversationId,
+      pedido,
+      exigencia || (opcoes.anexo ? 'enviou foto do documento' : ''),
     )
   }
 
@@ -2425,10 +3058,21 @@ export async function tratarConversa(opcoes: {
     const querRemarcar = t === 'remarcar' || t === 'trocar' || t === 'mudar'
     const querCancelar = t === 'cancelar' || t === 'desmarcar'
 
-    // Com uma consulta so, CANCELAR e REMARCAR ja apontam para ela.
-    if (opcoes.consultas.length === 1 && (querCancelar || querRemarcar)) {
+    // A consulta em foco, e nao "a unica que a pessoa tem".
+    //
+    // booking_options comeca com todas e passa a ter uma so depois que ela
+    // escolhe pelo numero. Enquanto a condicao olhava para opcoes.consultas,
+    // quem tinha duas consultas escolhia a segunda, digitava CANCELAR e ouvia
+    // "nao entendi, digite CANCELAR" - e os tres botoes daquela tela levavam
+    // de volta ao mesmo lugar. Laco fechado, e justamente para a mae com dois
+    // filhos em acompanhamento, que e o caso comum aqui.
+    const emFoco = ids.length === 1
+      ? opcoes.consultas.find((c) => c.id === ids[0]) ?? null
+      : null
+
+    if (emFoco && (querCancelar || querRemarcar)) {
       return await pedirConfirmacaoCancelamento(
-        admin, clinicId, conversationId, opcoes.consultas[0], querRemarcar,
+        admin, clinicId, conversationId, emFoco, querRemarcar,
       )
     }
 
@@ -2468,7 +3112,23 @@ export async function tratarConversa(opcoes: {
   // ---- Confirmacao do cancelamento ----
   if (estadoAtual === 'confirmar_cancelamento') {
     const t = normalizar(texto)
-    if (t !== 'sim' && t !== 'confirmar' && t !== 'confirmo' && t !== 'pode cancelar') {
+    // O sim escrito como gente escreve.
+    //
+    // A comparacao exata exigia a palavra sozinha: "sim, pode cancelar por
+    // favor" virava "sua consulta continua marcada", e no caminho da
+    // remarcacao jogava no menu quem tinha acabado de confirmar. Ninguem
+    // responde uma pergunta de confirmacao em uma palavra seca.
+    //
+    // O "nao" e testado ANTES: sem isso, "nao, pode cancelar nao" casaria com
+    // "pode cancelar" e desmarcaria a consulta de quem estava recusando. Errar
+    // aqui apaga uma vaga que ninguem pediu para apagar.
+    const negou = /^(n|nao|nada|negativo|deixa|espera|melhor nao)\b/.test(t)
+    const confirmou =
+      !negou &&
+      (/^(sim|s|isso|claro|confirmo|confirmar|quero|ok|pode)\b/.test(t) ||
+        t.includes('pode cancelar') ||
+        t.includes('pode desmarcar'))
+    if (!confirmou) {
       return await mostrarMenu(
         admin, conversationId, saudacao,
         'Tudo bem, sua consulta continua marcada. Posso ajudar em mais alguma coisa?',

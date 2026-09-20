@@ -76,6 +76,52 @@ export function assuntoClinico(texto: string): boolean {
 }
 
 /**
+ * Medicamento que a 2ª via automática não alcança.
+ *
+ * Controlado da Portaria 344 não se resolve por WhatsApp. A receita sai em
+ * receituário próprio - notificação amarela, azul ou branca em duas vias -, a
+ * farmácia RETÉM a via original e o número dela é escriturado. Reenviar um PDF
+ * não substitui papel que ficou no balcão, e prometer isso ao pai faria a
+ * família voltar na farmácia para ouvir não.
+ *
+ * A lista é curta e grosseira, como a de assunto clínico, e pelo mesmo motivo:
+ * errar para o lado de chamar a equipe não custa nada. Quem cai aqui por engano
+ * fala com gente; quem passaria batido receberia uma promessa que a lei não
+ * deixa cumprir.
+ *
+ * O que está aqui: o que uma criança em acompanhamento gastro pode estar
+ * usando por outro médico - neuro, psiquiatria, dor - e chegar pedindo 2ª via
+ * por ser o WhatsApp que ela tem na mão.
+ */
+const CONTROLADO = [
+  // Como a família costuma dizer, sem saber o nome da regra.
+  'controlado', 'controlada', 'controlados', 'tarja', 'preta', 'azul', 'amarela',
+  'notificacao', 'especial', 'retencao', 'reteve', 'retido',
+  // Psicotrópicos e afins.
+  'ritalina', 'metilfenidato', 'concerta', 'venvanse', 'lisdexanfetamina',
+  'rivotril', 'clonazepam', 'diazepam', 'valium', 'bromazepam', 'lexotan',
+  'alprazolam', 'frontal', 'fenobarbital', 'gardenal', 'fenitoina',
+  'carbamazepina', 'tegretol', 'depakene', 'valproato', 'topiramato',
+  'risperidona', 'risperdal', 'quetiapina', 'aripiprazol', 'haloperidol',
+  'fluoxetina', 'sertralina', 'escitalopram', 'amitriptilina', 'imipramina',
+  // Opioides e derivados.
+  'codeina', 'tramadol', 'morfina', 'metadona', 'petidina', 'tylex',
+  'clonidina', 'melatonina',
+]
+
+/**
+ * A pessoa está pedindo 2ª via de algo que exige receituário especial?
+ *
+ * Só olha para o nome que ela escreveu. Não tenta ler prontuário: a 2ª via é
+ * pedida por quem pode não ser paciente do Dr. Marcello para aquele remédio, e
+ * a pergunta aqui é sobre a receita, não sobre o tratamento.
+ */
+export function medicamentoControlado(texto: string): boolean {
+  const palavras = new Set(palavrasDe(texto))
+  return CONTROLADO.some((termo) => palavras.has(termo))
+}
+
+/**
  * Quantas palavras do assunto aparecem na mensagem.
  *
  * Palavra com cinco letras ou mais também vale por começo ("convenio" acha
