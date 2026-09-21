@@ -32,6 +32,7 @@ import Agenda from '@/sections/Agenda'
 import Settings from '@/sections/Settings'
 import AccessAdmin from '@/sections/AccessAdmin'
 import logo from '@/assets/logo.webp'
+import gastroWatermark from '@/assets/sidebar-gastro-full.jpg'
 import { useAuth } from '@/auth/AuthProvider'
 import { parametrosDoEndereco } from '@/lib/endereco'
 
@@ -84,32 +85,6 @@ const PAGE_META: Record<Tab, { eyebrow: string; title: string; subtitle: string 
     title: 'Acessos da equipe',
     subtitle: 'Aprove novos cadastros antes de liberar os dados da clínica.',
   },
-}
-
-/**
- * A ilustracao de fundo da barra lateral. Mexa aqui, nao no JSX.
- *
- * GEOMETRIA, antes de escolher os numeros: a coluna tem 286px de largura e a
- * altura da janela. A figura e mais "quadrada" que isso, entao NAO existe
- * numero que a mostre inteira E cubra a altura toda - para cobrir 1265px de
- * altura ela precisaria de ~595px de largura, e mais da metade ficaria fora da
- * coluna. A escolha e sempre entre ver a figura inteira e cobrir mais altura:
- *
- *   larguraPx 286  -> figura inteira, ocupa o terco de baixo
- *   larguraPx 380  -> crianca inteira, mae cortada na borda, metade de baixo
- *   larguraPx 500  -> cobre quase tudo, mas vira um recorte do braco
- *
- * opacidade: 0.10 e textura; acima de 0.16 comeca a competir com o menu.
- * desvanecerAte: onde o degrade termina de apagar a figura, de baixo para
- * cima. 0.45 = some na altura dos primeiros itens do menu.
- * sangraDireita: quantos px a figura passa da borda direita da coluna.
- */
-const FUNDO_DA_BARRA = {
-  larguraPx: 380,
-  larguraPxTelaBaixa: 320,
-  opacidade: 0.1,
-  desvanecerAte: 0.45,
-  sangraDireita: 42,
 }
 
 function formatToday() {
@@ -201,18 +176,6 @@ export default function Home() {
     const timer = window.setInterval(() => void carregarSolicitacoes(), 60_000)
     return () => window.clearInterval(timer)
   }, [carregarSolicitacoes])
-  // Tela curta (notebook): a figura encolhe junto, senao ela come a altura
-  // que os itens do menu precisam.
-  const [telaBaixa, setTelaBaixa] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(max-height: 820px)').matches,
-  )
-  useEffect(() => {
-    const mq = window.matchMedia('(max-height: 820px)')
-    const ouvir = () => setTelaBaixa(mq.matches)
-    mq.addEventListener('change', ouvir)
-    return () => mq.removeEventListener('change', ouvir)
-  }, [])
-
   const meta = PAGE_META[tab]
   const tabs = role === 'owner' ? TABS : TABS.filter((item) => item.key !== 'admin')
 
@@ -297,45 +260,16 @@ export default function Home() {
   return (
     <div className="min-h-dvh bg-[#f7f5f1] text-[#081b2c]">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[286px] flex-col overflow-hidden bg-[#081b2c] text-white lg:flex">
-        <div className="soft-grid absolute inset-0 opacity-40" />
-        <div className="absolute -right-24 top-24 h-64 w-64 rounded-full bg-[#2f7fc1]/10 blur-3xl" />
-        {/* Traco de um responsavel com a crianca no colo, atras do menu.
-            Mesma linguagem do outro sistema da casa: figura GRANDE, atravessando
-            a coluna inteira, e nao um desenho pequeno num canto. E fundo, nao
-            ilustracao - por isso ocupa tudo e quase nao se ve. Um desenho
-            pequeno e contido vira enfeite e disputa atencao com o menu; um
-            desenho que cobre a coluna toda vira textura e some atras do texto.
-
-            LARGURA FIXA, e nao "preencher a altura". A primeira versao usava
-            object-cover, que escala pela altura da janela: em tela alta a
-            figura virava um close gigante, com traco grosso brigando com o
-            menu. A largura da coluna nao muda, entao amarrar o tamanho a ela e
-            o que mantem o desenho igual em qualquer tela.
-
-            Ancorada embaixo e sangrando pela direita, como no outro sistema da
-            casa: figura grande cortada pela borda, nao um desenho contido.
-
-            O arquivo vive em public/ e e opcional: se faltar, nada quebra. */}
         <img
-          src={`${import.meta.env.BASE_URL}sidebar-familia.svg`}
+          src={gastroWatermark}
           alt=""
           aria-hidden="true"
           draggable={false}
-          style={{
-            width: telaBaixa ? FUNDO_DA_BARRA.larguraPxTelaBaixa : FUNDO_DA_BARRA.larguraPx,
-            right: -FUNDO_DA_BARRA.sangraDireita,
-            opacity: FUNDO_DA_BARRA.opacidade,
-            // Degrade que apaga a figura de baixo para cima: forte na base,
-            // onde nao ha item de menu, e ausente na altura dos primeiros.
-            maskImage: `linear-gradient(to top, #000 ${Math.round(
-              FUNDO_DA_BARRA.desvanecerAte * 100,
-            )}%, transparent 100%)`,
-            WebkitMaskImage: `linear-gradient(to top, #000 ${Math.round(
-              FUNDO_DA_BARRA.desvanecerAte * 100,
-            )}%, transparent 100%)`,
-          }}
-          className="pointer-events-none absolute bottom-0 max-w-none select-none"
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover object-center opacity-[0.17] mix-blend-screen select-none"
         />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#081b2c]/80 via-[#081b2c]/25 to-[#081b2c]/80" />
+        <div className="soft-grid absolute inset-0 opacity-40" />
+        <div className="absolute -right-24 top-24 h-64 w-64 rounded-full bg-[#2f7fc1]/10 blur-3xl" />
         <div className="relative flex h-full flex-col">
           <div className="px-7 pb-7 pt-8 [@media(max-height:820px)]:pb-4 [@media(max-height:820px)]:pt-5">
             <img src={logo} alt="Dr. Marcello Ruiz" className="h-12 w-auto max-w-[190px] brightness-0 invert [@media(max-height:820px)]:h-9" />
@@ -589,4 +523,3 @@ export default function Home() {
     </div>
   )
 }
-
