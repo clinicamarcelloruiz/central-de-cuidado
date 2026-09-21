@@ -86,6 +86,32 @@ const PAGE_META: Record<Tab, { eyebrow: string; title: string; subtitle: string 
   },
 }
 
+/**
+ * A ilustracao de fundo da barra lateral. Mexa aqui, nao no JSX.
+ *
+ * GEOMETRIA, antes de escolher os numeros: a coluna tem 286px de largura e a
+ * altura da janela. A figura e mais "quadrada" que isso, entao NAO existe
+ * numero que a mostre inteira E cubra a altura toda - para cobrir 1265px de
+ * altura ela precisaria de ~595px de largura, e mais da metade ficaria fora da
+ * coluna. A escolha e sempre entre ver a figura inteira e cobrir mais altura:
+ *
+ *   larguraPx 286  -> figura inteira, ocupa o terco de baixo
+ *   larguraPx 380  -> crianca inteira, mae cortada na borda, metade de baixo
+ *   larguraPx 500  -> cobre quase tudo, mas vira um recorte do braco
+ *
+ * opacidade: 0.10 e textura; acima de 0.16 comeca a competir com o menu.
+ * desvanecerAte: onde o degrade termina de apagar a figura, de baixo para
+ * cima. 0.45 = some na altura dos primeiros itens do menu.
+ * sangraDireita: quantos px a figura passa da borda direita da coluna.
+ */
+const FUNDO_DA_BARRA = {
+  larguraPx: 380,
+  larguraPxTelaBaixa: 320,
+  opacidade: 0.1,
+  desvanecerAte: 0.45,
+  sangraDireita: 42,
+}
+
 function formatToday() {
   const value = new Intl.DateTimeFormat('pt-BR', {
     weekday: 'long',
@@ -175,6 +201,18 @@ export default function Home() {
     const timer = window.setInterval(() => void carregarSolicitacoes(), 60_000)
     return () => window.clearInterval(timer)
   }, [carregarSolicitacoes])
+  // Tela curta (notebook): a figura encolhe junto, senao ela come a altura
+  // que os itens do menu precisam.
+  const [telaBaixa, setTelaBaixa] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-height: 820px)').matches,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(max-height: 820px)')
+    const ouvir = () => setTelaBaixa(mq.matches)
+    mq.addEventListener('change', ouvir)
+    return () => mq.removeEventListener('change', ouvir)
+  }, [])
+
   const meta = PAGE_META[tab]
   const tabs = role === 'owner' ? TABS : TABS.filter((item) => item.key !== 'admin')
 
@@ -284,14 +322,19 @@ export default function Home() {
           aria-hidden="true"
           draggable={false}
           style={{
-            // Degrade que apaga a figura de baixo para cima. Sem ele, o traco
-            // cruzava o menu no meio da coluna e competia com o texto; com ele,
-            // a figura e forte na base (onde nao ha item nenhum) e desaparece na
-            // altura dos primeiros itens.
-            maskImage: 'linear-gradient(to top, #000 55%, transparent 100%)',
-            WebkitMaskImage: 'linear-gradient(to top, #000 55%, transparent 100%)',
+            width: telaBaixa ? FUNDO_DA_BARRA.larguraPxTelaBaixa : FUNDO_DA_BARRA.larguraPx,
+            right: -FUNDO_DA_BARRA.sangraDireita,
+            opacity: FUNDO_DA_BARRA.opacidade,
+            // Degrade que apaga a figura de baixo para cima: forte na base,
+            // onde nao ha item de menu, e ausente na altura dos primeiros.
+            maskImage: `linear-gradient(to top, #000 ${Math.round(
+              FUNDO_DA_BARRA.desvanecerAte * 100,
+            )}%, transparent 100%)`,
+            WebkitMaskImage: `linear-gradient(to top, #000 ${Math.round(
+              FUNDO_DA_BARRA.desvanecerAte * 100,
+            )}%, transparent 100%)`,
           }}
-          className="pointer-events-none absolute bottom-0 right-[-90px] w-[500px] max-w-none select-none opacity-[0.10] [@media(max-height:820px)]:w-[420px] [@media(max-height:820px)]:right-[-70px]"
+          className="pointer-events-none absolute bottom-0 max-w-none select-none"
         />
         <div className="relative flex h-full flex-col">
           <div className="px-7 pb-7 pt-8 [@media(max-height:820px)]:pb-4 [@media(max-height:820px)]:pt-5">
