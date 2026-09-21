@@ -262,20 +262,27 @@ export default function Home() {
         <div className="soft-grid absolute inset-0 opacity-40" />
         <div className="absolute -right-24 top-24 h-64 w-64 rounded-full bg-[#2f7fc1]/10 blur-3xl" />
         {/* Traco de um responsavel com a crianca no colo, atras do menu.
-            Mesma linguagem do outro sistema da casa (figura em linha fina,
-            baixo contraste), mas o assunto aqui e quem esta do outro lado do
-            WhatsApp, e nao a anatomia. Opacidade baixa de proposito: e textura,
-            nao ilustracao - o texto do menu passa por cima sem perder leitura.
-            O arquivo vive em public/ e e opcional: se faltar, nada quebra, so
-            nao aparece. Fica ancorado embaixo, acima do cartao "Dados
-            protegidos"; em tela baixa ele sobe por tras dos ultimos itens do
-            menu, que e o comportamento esperado de um fundo. */}
+            Mesma linguagem do outro sistema da casa: figura GRANDE, atravessando
+            a coluna inteira, e nao um desenho pequeno num canto. E fundo, nao
+            ilustracao - por isso ocupa tudo e quase nao se ve. Um desenho
+            pequeno e contido vira enfeite e disputa atencao com o menu; um
+            desenho que cobre a coluna toda vira textura e some atras do texto.
+
+            object-cover + inset-0: a figura preenche a altura disponivel e o
+            que sobrar de largura e cortado, como uma foto de capa. E o unico
+            jeito de a mesma arte servir de tela alta de desktop a tela baixa de
+            notebook sem espremer ou deixar faixa vazia.
+
+            object-bottom para a ancora ser os pes: quando a tela encurta, o
+            corte come o topo (espaco vazio acima da cabeca) e nao as pernas.
+
+            O arquivo vive em public/ e e opcional: se faltar, nada quebra. */}
         <img
           src={`${import.meta.env.BASE_URL}sidebar-familia.svg`}
           alt=""
           aria-hidden="true"
           draggable={false}
-          className="pointer-events-none absolute bottom-[168px] right-[-6px] w-[236px] select-none opacity-[0.16] [@media(max-height:820px)]:w-[190px] [@media(max-height:820px)]:opacity-[0.12]"
+          className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover object-bottom opacity-[0.13] [@media(max-height:820px)]:opacity-[0.1]"
         />
         <div className="relative flex h-full flex-col">
           <div className="px-7 pb-7 pt-8 [@media(max-height:820px)]:pb-4 [@media(max-height:820px)]:pt-5">
