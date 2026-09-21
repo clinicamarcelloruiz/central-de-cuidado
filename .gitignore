@@ -36,3 +36,4 @@ ABRIR SISTEMA.html
 *.sw?
 tests/atendimento.build.mjs
 tests/lembrete.build.mjs
+tests/prontuario.build.mjs
