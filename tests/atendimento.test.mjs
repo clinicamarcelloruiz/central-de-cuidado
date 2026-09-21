@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario } from './atendimento.build.mjs'
+import { tratarConversa, iniciarQuestionario, colherEventos } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 
 // ---------------------------------------------------------------
@@ -2323,6 +2323,142 @@ await caso('Menu da tela de configuração bate com o que o robô envia', [
     }
   },
 })
+
+
+// ---------------------------------------------------------------
+// Registro dos eventos (numeros do WhatsApp)
+// ---------------------------------------------------------------
+//
+// O painel da Visao geral conta em cima destes eventos. Se o robo deixar de
+// registrar, a tela nao quebra: ela passa a mentir, mostrando zero onde houve
+// movimento. Mentira silenciosa e o defeito que este projeto mais paga caro,
+// entao ela precisa falhar aqui.
+//
+// PARA PROVAR QUE ESTE TESTE PEGA O DEFEITO: comente a linha `registrar(...)`
+// correspondente em atendimento.ts e rode de novo. Cada caso abaixo aponta
+// qual linha derruba ele.
+
+// Esvazia o que sobrou dos casos anteriores: os eventos se acumulam por
+// conversa ate alguem colher, e todos os casos usam 'conv1'.
+colherEventos('conv1')
+
+async function eventosDe(titulo, passos, opcoes = {}) {
+  colherEventos('conv1')
+  await caso(titulo, passos, opcoes)
+  return colherEventos('conv1')
+}
+
+function exigirEvento(lista, evento, titulo, detalhe = undefined) {
+  const achado = lista.find(
+    (e) => e.evento === evento && (detalhe === undefined || e.detalhe === detalhe),
+  )
+  if (achado) passou++
+  else {
+    const vistos = lista.map((e) => e.evento + (e.detalhe ? `:${e.detalhe}` : '')).join(', ') || '(nenhum)'
+    falhas.push(
+      `${titulo} | faltou o evento "${evento}"${detalhe !== undefined ? ` com detalhe "${detalhe}"` : ''}\n     registrados: ${vistos}`,
+    )
+  }
+}
+
+// mostrarMenu -> registrar('menu_enviado')
+{
+  const eventos = await eventosDe('Evento: o menu aparecendo fica registrado', [
+    ['Oi', 'Como podemos ajudar'],
+  ])
+  exigirEvento(eventos, 'menu_enviado', 'Evento do menu')
+}
+
+// tratarConversa, bloco do menu -> registrar('opcao_escolhida', ...)
+// Este e o que responde "o que as pessoas mais pedem".
+{
+  const eventos = await eventosDe('Evento: a opção escolhida no menu fica registrada', [
+    ['Oi', 'Como podemos ajudar'],
+    ['3', 'direcionando você para um atendente'],
+  ])
+  exigirEvento(eventos, 'opcao_escolhida', 'Evento da opção', '3')
+}
+
+// A opcao escrita por extenso tambem conta, porque escolha() ja aceita.
+{
+  const eventos = await eventosDe('Evento: "opção 2" por extenso também é registrada', [
+    ['Oi', 'Como podemos ajudar'],
+    ['opção 2', 'Em qual unidade'],
+  ])
+  exigirEvento(eventos, 'opcao_escolhida', 'Evento da opção por extenso', '2')
+}
+
+// Frase solta NAO pode virar opcao escolhida: era o defeito que fazia
+// "meu filho de 2 anos" abrir o agendamento. Se voltar, o painel passa a
+// contar escolhas que ninguem fez.
+{
+  const eventos = await eventosDe('Evento: frase com número não vira opção escolhida', [
+    ['Oi', 'Como podemos ajudar'],
+    ['meu filho de 2 anos está com dor de barriga', 'Dr. Marcello'],
+  ])
+  const inventado = eventos.find((e) => e.evento === 'opcao_escolhida')
+  if (inventado) {
+    falhas.push(
+      `Evento inventado | uma frase virou "opção ${inventado.detalhe}" no painel`,
+    )
+  } else passou++
+  // Sintoma tem nome proprio: o robo entendeu e escolheu nao opinar. Contar
+  // como "nao entendi" misturaria limite nosso com menu confuso.
+  exigirEvento(eventos, 'assunto_clinico', 'Evento do assunto clínico')
+}
+
+// mostrarMenu com aviso de "Nao entendi" -> registrar('nao_entendi').
+// Este e o alarme de menu incompleto, e e o caminho por onde mais gente passa.
+{
+  const eventos = await eventosDe('Evento: o "não entendi" do menu fica registrado', [
+    ['Oi', 'Como podemos ajudar'],
+    ['blablabla', 'Não entendi'],
+  ])
+  exigirEvento(eventos, 'nao_entendi', 'Evento do não entendi no menu')
+}
+
+// A funcao naoEntendi(), que e OUTRO ponto: vale para quem ja esta dentro de
+// um fluxo - escolhendo unidade, dia ou horario - e escreve qualquer coisa.
+//
+// Este caso nasceu da propria prova: desliguei o registrar() de dentro de
+// naoEntendi() e nenhum teste caiu, porque so o caminho do menu estava coberto.
+// Linha de instrumentacao sem teste e linha que morre calada na proxima
+// refatoracao, e o painel nunca conta que parou.
+{
+  const eventos = await eventosDe('Evento: o "não entendi" dentro do fluxo fica registrado', [
+    ['Oi', 'Como podemos ajudar'],
+    ['2', 'Em qual unidade'],
+    ['xyz nada a ver', 'Não entendi'],
+  ])
+  exigirEvento(eventos, 'nao_entendi', 'Evento do não entendi no fluxo')
+}
+
+// marcar() -> registrar('agendou'), so depois do INSERT dar certo.
+{
+  const eventos = await eventosDe('Evento: consulta marcada fica registrada', [
+    ['Oi', 'Olá, Ana!'],
+    ['2', 'Em qual unidade'],
+    ['1', 'Datas disponíveis'],
+    ['1', 'Horários de'],
+    ['1', 'Consulta marcada!'],
+  ], { pacientes: [ANA] })
+  exigirEvento(eventos, 'agendou', 'Evento do agendamento')
+}
+
+// ... e NAO pode registrar quando o banco recusa: o painel diria que o robo
+// marcou mais consultas do que existem na agenda.
+{
+  const eventos = await eventosDe('Evento: agendamento que falhou não conta como marcado', [
+    ['Oi', 'Olá, Ana!'],
+    ['2', 'Em qual unidade'],
+    ['1', 'Datas disponíveis'],
+    ['1', 'Horários de'],
+    ['1', 'Não consegui concluir'],
+  ], { pacientes: [ANA], erroInsert: { code: '23503', message: 'falhou' } })
+  if (eventos.some((e) => e.evento === 'agendou')) {
+    falhas.push('Evento do agendamento que falhou | contou como consulta marcada')
+  } else passou++
+}
 
 console.log('\n============================================')
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)

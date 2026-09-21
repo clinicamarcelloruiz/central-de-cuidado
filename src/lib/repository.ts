@@ -2763,3 +2763,103 @@ export async function saveTelemedicina(clinicId: string, dados: Telemedicina) {
     .eq('clinic_id', clinicId)
   if (error) fail(error)
 }
+
+/**
+ * Numeros do atendimento por WhatsApp num periodo.
+ *
+ * A conta e feita no banco, pela funcao numeros_do_whatsapp. Ver a migration
+ * 20260921120000 para o porque: buscar as linhas e contar aqui bateria no teto
+ * de 1000 linhas do PostgREST e o painel mostraria menos do que aconteceu, sem
+ * erro nenhum na tela.
+ */
+export type NumerosDoWhatsApp = {
+  contatos: number
+  contatosForaDoHorario: number
+  pediramParaNaoReceber: number
+  mensagensRecebidas: number
+  enviadasRobo: number
+  enviadasEquipe: number
+  enviadasLembrete: number
+  enviadasAcompanhamento: number
+  contidas: number
+  atendidasPorGente: number
+  consultasPeloWhatsApp: number
+  consultasPelaRecepcao: number
+  faltasWhatsApp: number
+  faltasRecepcao: number
+  compareceuWhatsApp: number
+  compareceuRecepcao: number
+  /** Quantas vezes cada numero do menu (1 a 5) foi escolhido. */
+  opcoesEscolhidas: Record<string, number>
+  /** Contagem crua por tipo de evento. Serve tambem para ver evento inesperado. */
+  eventos: Record<string, number>
+  chamouEquipePorMotivo: Record<string, number>
+  desistiram: number
+}
+
+const NUMEROS_ZERADOS: NumerosDoWhatsApp = {
+  contatos: 0, contatosForaDoHorario: 0, pediramParaNaoReceber: 0,
+  mensagensRecebidas: 0, enviadasRobo: 0, enviadasEquipe: 0,
+  enviadasLembrete: 0, enviadasAcompanhamento: 0,
+  contidas: 0, atendidasPorGente: 0,
+  consultasPeloWhatsApp: 0, consultasPelaRecepcao: 0,
+  faltasWhatsApp: 0, faltasRecepcao: 0,
+  compareceuWhatsApp: 0, compareceuRecepcao: 0,
+  opcoesEscolhidas: {}, eventos: {}, chamouEquipePorMotivo: {}, desistiram: 0,
+}
+
+function inteiro(valor: unknown): number {
+  const n = Number(valor)
+  return Number.isFinite(n) ? n : 0
+}
+
+function contagens(valor: unknown): Record<string, number> {
+  if (!valor || typeof valor !== 'object') return {}
+  const saida: Record<string, number> = {}
+  for (const [chave, quantas] of Object.entries(valor as Record<string, unknown>)) {
+    saida[chave] = inteiro(quantas)
+  }
+  return saida
+}
+
+export async function numerosDoWhatsApp(
+  clinicId: string,
+  de: Date,
+  ate: Date,
+): Promise<NumerosDoWhatsApp> {
+  const { data, error } = await supabase.rpc('numeros_do_whatsapp', {
+    p_clinic: clinicId,
+    p_de: de.toISOString(),
+    p_ate: ate.toISOString(),
+  })
+  // A funcao nasce com esta migration, e a tela sobe antes dela. Sem este
+  // desvio o painel quebraria inteiro no intervalo entre um deploy e outro;
+  // com ele, aparece zerado e o aviso da tela explica.
+  if (error) {
+    console.warn('numeros_do_whatsapp indisponivel', error)
+    return NUMEROS_ZERADOS
+  }
+  const bruto = (data ?? {}) as Record<string, unknown>
+  return {
+    contatos: inteiro(bruto.contatos),
+    contatosForaDoHorario: inteiro(bruto.contatos_fora_do_horario),
+    pediramParaNaoReceber: inteiro(bruto.pediram_para_nao_receber),
+    mensagensRecebidas: inteiro(bruto.mensagens_recebidas),
+    enviadasRobo: inteiro(bruto.enviadas_robo),
+    enviadasEquipe: inteiro(bruto.enviadas_equipe),
+    enviadasLembrete: inteiro(bruto.enviadas_lembrete),
+    enviadasAcompanhamento: inteiro(bruto.enviadas_acompanhamento),
+    contidas: inteiro(bruto.contidas),
+    atendidasPorGente: inteiro(bruto.atendidas_por_gente),
+    consultasPeloWhatsApp: inteiro(bruto.consultas_pelo_whatsapp),
+    consultasPelaRecepcao: inteiro(bruto.consultas_pela_recepcao),
+    faltasWhatsApp: inteiro(bruto.faltas_whatsapp),
+    faltasRecepcao: inteiro(bruto.faltas_recepcao),
+    compareceuWhatsApp: inteiro(bruto.compareceu_whatsapp),
+    compareceuRecepcao: inteiro(bruto.compareceu_recepcao),
+    opcoesEscolhidas: contagens(bruto.opcoes_escolhidas),
+    eventos: contagens(bruto.eventos),
+    chamouEquipePorMotivo: contagens(bruto.chamou_equipe_por_motivo),
+    desistiram: inteiro(bruto.desistiram),
+  }
+}

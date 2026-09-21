@@ -1,6 +1,6 @@
 import '../_shared/whatsapp.ts'
 import { adminClient, digits, sha256HmacHex, safeEqual } from '../_shared/whatsapp.ts'
-import { type Estado, type Toque, tratarConversa } from '../_shared/atendimento.ts'
+import { colherEventos, type Estado, type Toque, tratarConversa } from '../_shared/atendimento.ts'
 import { montarConteudo } from '../_shared/conteudo.ts'
 import {
   avisoDaResposta,
@@ -652,6 +652,42 @@ Deno.serve(async (req) => {
                     .eq('id', conversation.id)
                 }
               }
+            }
+
+            /**
+             * Registro do que o robo fez, para o painel de numeros
+             * (21/09/2026). Ver a migration 20260921120000.
+             *
+             * DEPOIS de responder, e dentro de try/catch, porque contagem nao
+             * pode atrapalhar atendimento. Se a tabela ainda nao existe - a
+             * funcao sobe antes das migrations - isto falha, escreve um aviso
+             * e a conversa segue inteira.
+             */
+            try {
+              const eventos = colherEventos(conversation.id)
+              // O pedido de gente vem do resultado, e nao de um registrar()
+              // espalhado: os quatro pontos que levantam a bandeira ficam em
+              // funcoes diferentes, e aqui existe um so.
+              if (resultado?.atencao) {
+                eventos.push({ evento: 'chamou_equipe', detalhe: resultado.atencao })
+              }
+              if (resultado?.concluida) eventos.push({ evento: 'concluiu_sozinho' })
+
+              if (eventos.length > 0) {
+                const { error: erroDoRegistro } = await admin
+                  .from('whatsapp_bot_events')
+                  .insert(eventos.map((e) => ({
+                    clinic_id: clinicId,
+                    conversation_id: conversation.id,
+                    evento: e.evento,
+                    detalhe: (e.detalhe ?? '').slice(0, 120),
+                  })))
+                if (erroDoRegistro) {
+                  console.warn('Nao consegui registrar os eventos do robo', erroDoRegistro)
+                }
+              }
+            } catch (erro) {
+              console.warn('Nao consegui registrar os eventos do robo', erro)
             }
           }
 

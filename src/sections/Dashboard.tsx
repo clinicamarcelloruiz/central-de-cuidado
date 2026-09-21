@@ -15,6 +15,7 @@ import type { Patient } from '@/types/patient'
 import type { PendingRequest } from '@/lib/repository'
 import { dueCount, idadeAnos, pendingFollowups } from '@/lib/followup'
 import { nomeDoCid } from '@/lib/cid'
+import NumerosDoWhatsApp from '@/sections/NumerosDoWhatsApp'
 
 const NAVY = '#081b2c'
 // Azul de destaque do sistema (proposta 3, aprovada em 08/09/2026). O nome
@@ -387,6 +388,12 @@ export default function Dashboard({
         <Kpi label="Pendentes" value={due} detail="hoje e atrasados" icon={Clock3} color="#d45b58" />
         <Kpi label="Concluídos" value={completed} detail="15, 30 e 90 dias" icon={CheckCircle2} color={SAGE} />
       </div>
+
+      {/* Os números do atendimento por WhatsApp (21/09/2026). Vem antes dos
+          gráficos da base clínica de propósito: aqueles descrevem quem já é
+          paciente, este descreve quem está chegando. E busca os próprios dados
+          - não depende de `patients`, que é a base cadastrada. */}
+      <NumerosDoWhatsApp />
 
       {patients.length === 0 ? (
         <Panel title="Sua visão clínica começa aqui" subtitle="Cadastre o primeiro atendimento para alimentar os indicadores." icon={Stethoscope}>

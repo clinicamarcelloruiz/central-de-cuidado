@@ -135,6 +135,55 @@ export type Resultado = {
   lista?: { rotulo: string; linhas: Toque[] }
 } | null
 
+/**
+ * O que o robo fez, para virar numero depois.
+ *
+ * Existe desde 21/09/2026, quando a clinica perguntou o que as pessoas mais
+ * pedem e nao havia como responder: o booking_state guarda so o estado de
+ * agora e zera no fim da conversa. Ver a migration
+ * 20260921120000_numeros_do_whatsapp.sql.
+ *
+ * NAO fica num campo do Resultado, e a razao e pratica: os eventos nascem
+ * espalhados - o menu sai de mostrarMenu, o agendamento de marcar(), o "nao
+ * entendi" de uma funcao chamada em dez lugares. Costurar isso em cada um dos
+ * retornos de tratarConversa seria dezenas de pontos para esquecer um.
+ *
+ * Em vez disso a conversa em foco e anotada no comeco do atendimento, e quem
+ * registra so diz o que aconteceu. O webhook esvazia com colherEventos()
+ * depois de responder.
+ *
+ * ISSO SUPOE UMA CONVERSA DE CADA VEZ, que e como o webhook trata hoje: o laco
+ * das mensagens e sequencial, com await em cada uma. Se um dia alguem paralelizar
+ * aquele laco, os eventos passam a cair na conversa errada - e ai isto precisa
+ * virar parametro. O pior caso e numero trocado, nunca atendimento quebrado.
+ */
+export type EventoDoRobo = { evento: string; detalhe?: string }
+
+const TETO_DE_CONVERSAS_EM_CURSO = 200
+const eventosEmCurso = new Map<string, EventoDoRobo[]>()
+let conversaEmFoco: string | null = null
+
+function focar(conversationId: string) {
+  conversaEmFoco = conversationId
+}
+
+function registrar(evento: string, detalhe?: string) {
+  if (!conversaEmFoco) return
+  // Sem esvaziar, um caminho novo que esqueca de colher deixaria a memoria da
+  // funcao crescendo a cada mensagem. Perder contagem e aceitavel; vazar nao.
+  if (eventosEmCurso.size > TETO_DE_CONVERSAS_EM_CURSO) eventosEmCurso.clear()
+  const lista = eventosEmCurso.get(conversaEmFoco)
+  if (lista) lista.push({ evento, detalhe })
+  else eventosEmCurso.set(conversaEmFoco, [{ evento, detalhe }])
+}
+
+/** Tira da memoria o que o robo registrou nesta conversa. */
+export function colherEventos(conversationId: string): EventoDoRobo[] {
+  const lista = eventosEmCurso.get(conversationId) ?? []
+  eventosEmCurso.delete(conversationId)
+  return lista
+}
+
 type Unidade = {
   id: string
   name: string
@@ -688,6 +737,10 @@ export async function mostrarMenu(
   saudacao: string,
   aviso = '',
 ): Promise<Resultado> {
+  // Foca aqui tambem, e nao so em tratarConversa, porque o webhook chama o
+  // menu por fora em alguns caminhos (primeira mensagem, destravar).
+  focar(conversationId)
+  registrar('menu_enviado')
   await salvarEstado(admin, conversationId, {
     booking_state: 'menu',
     booking_options: null,
@@ -815,6 +868,9 @@ async function naoEntendi(
   texto: string,
   pergunta: string,
 ): Promise<string> {
+  // Este numero e o alarme mais util do painel: quando sobe, gente esta
+  // perguntando coisa que o menu nao cobre, e falta uma opcao.
+  registrar('nao_entendi')
   if (assuntoClinico(texto)) {
     return (
       'Sobre sintomas, remédios e o que fazer, quem responde é o Dr. Marcello ou alguém ' +
@@ -1560,6 +1616,10 @@ async function marcar(
     insurance: convenio,
     reschedule_count: vezesRemarcada,
     rescheduled_from: substitui,
+    // De qual conversa saiu esta consulta (21/09/2026). E o que permite medir
+    // o tempo entre o primeiro "oi" e o horario escolhido - contar quantas o
+    // robo marcou ja dava pelo source, mas quanto demorou, nao.
+    conversation_id: conversationId,
   }
 
   /**
@@ -1574,7 +1634,12 @@ async function marcar(
    * Perder o convenio de uma consulta e um arranhao que a recepcao conserta na
    * chegada. Perder o agendamento e a familia sem horario.
    */
-  const COLUNAS_RECENTES_DA_CONSULTA = ['insurance', 'rescheduled_from', 'reschedule_count']
+  const COLUNAS_RECENTES_DA_CONSULTA = [
+    'insurance',
+    'rescheduled_from',
+    'reschedule_count',
+    'conversation_id',
+  ]
 
   let { data: criada, error } = await admin
     .from('appointments').insert(linhaDaConsulta).select('id').maybeSingle()
@@ -1592,6 +1657,11 @@ async function marcar(
   // Tambem termina oferecendo numero quando da errado, entao o menu fica ativo.
   if (error) await voltarAoMenuAtivo(admin, conversationId)
   else await limparEstado(admin, conversationId)
+
+  // So depois do INSERT dar certo. Registrar antes contaria como agendamento
+  // um horario que outra pessoa pegou primeiro, e o painel diria que o robo
+  // marcou mais consultas do que existem na agenda.
+  if (!error) registrar(substitui ? 'remarcou' : 'agendou')
 
   if (error) {
     // 23505 = alguem pegou o mesmo horario entre a listagem e a escolha.
@@ -2409,6 +2479,9 @@ export async function tratarConversa(opcoes: {
 }): Promise<Resultado> {
   const { admin, clinicId, conversationId, estadoAtual, texto } = opcoes
 
+  // De quem sao os eventos daqui para baixo. Ver EventoDoRobo, la em cima.
+  focar(conversationId)
+
   // A telemedicina nao tem id de unidade no banco; a modalidade e que diz que
   // a pessoa esta nesse caminho. Daqui para baixo as etapas so olham para
   // esta variavel, e nunca para a coluna crua.
@@ -2756,6 +2829,11 @@ export async function tratarConversa(opcoes: {
   if (estadoAtual === 'menu') {
     const escolhido = escolha(texto, 5)
 
+    // A resposta da pergunta "o que as pessoas mais pedem?". Guardado como o
+    // numero que a pessoa escolheu (1 a 5), nao como o texto dela - contagem,
+    // nao prontuario.
+    if (escolhido !== null) registrar('opcao_escolhida', String(escolhido + 1))
+
     if (escolhido === 0) {
       return await perguntarLocalDasInformacoes(admin, clinicId, conversationId, opcoes.textos.informacoes)
     }
@@ -2811,6 +2889,11 @@ export async function tratarConversa(opcoes: {
     // avisado. A frase existia, mas só valia para quem escrevia antes de o
     // menu aparecer, o que na prática é só a primeira mensagem da vida dela.
     if (assuntoClinico(texto)) {
+      // Nao e "nao entendi": o robo entendeu muito bem, e a resposta certa e
+      // nao opinar. Contar isto como falha do menu esconderia o que interessa -
+      // quanta gente chega com sintoma, que e outra pergunta e merece nome
+      // proprio no painel.
+      registrar('assunto_clinico')
       return await mostrarMenu(
         admin,
         conversationId,
@@ -2820,6 +2903,12 @@ export async function tratarConversa(opcoes: {
       )
     }
 
+    // Aqui sim. Este e o ponto onde mais gente se perde - o menu na tela e a
+    // pessoa escrevendo outra coisa - e ele nao passa pela funcao naoEntendi,
+    // entao precisa do proprio registro. Sem esta linha o painel contaria so
+    // os "nao entendi" de dentro dos fluxos, que sao a minoria, e diria que o
+    // menu esta claro quando nao esta.
+    registrar('nao_entendi')
     return await mostrarMenu(
       admin,
       conversationId,
@@ -3011,6 +3100,9 @@ export async function tratarConversa(opcoes: {
     // O pedido nao se perde: vira conversa com a equipe, com o que ela ja
     // escreveu registrado acima.
     if (pedido.tipo === 'receita' && medicamentoControlado(item)) {
+      // Sem o nome do remedio: a contagem precisa saber que aconteceu, nao o
+      // que a crianca toma.
+      registrar('controlado_bloqueado')
       await salvarEstado(admin, conversationId, {
         booking_state: 'atendente',
         booking_options: null,
@@ -3169,6 +3261,7 @@ export async function tratarConversa(opcoes: {
     }
 
     const ok = await cancelarConsulta(admin, alvo.id)
+    if (ok) registrar('cancelou')
     // Menu ativo, e nao estado zerado: a resposta abaixo oferece "digite 2".
     await voltarAoMenuAtivo(admin, conversationId)
     if (!ok) {
