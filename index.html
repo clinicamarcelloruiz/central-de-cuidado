@@ -10,10 +10,10 @@
          site a partir do proprio logo. Ate aqui a aba do sistema mostrava o
          globo em branco do navegador, e quem deixava a Central aberta ao lado
          do site nao distinguia uma da outra. -->
-    <link rel="icon" href="./favicon.ico" sizes="any" />
-    <link rel="icon" type="image/png" sizes="32x32" href="./icone-32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="./icone-16.png" />
-    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="icon" href="./favicon.ico?v=3" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./icone-32.png?v=3" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./icone-16.png?v=3" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=3" />
     <meta name="apple-mobile-web-app-title" content="Central" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -56,7 +56,7 @@
         if (!celular) return;
         var l = document.createElement('link');
         l.rel = 'manifest';
-        l.href = './manifest.json';
+        l.href = './manifest.json?v=3';
         document.head.appendChild(l);
       })();
     </script>
