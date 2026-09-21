@@ -314,10 +314,22 @@ export type PreCadastro = { nome: string; telefone: string }
 export default function Conversations({
   focoPatientId,
   onCadastrarContato,
+  compacto = false,
+  onAlternarCompacto,
 }: {
   focoPatientId?: string | null
   /** Abre a tela de pacientes com nome e telefone do contato ja preenchidos. */
   onCadastrarContato?: (dados: PreCadastro) => void
+  /**
+   * Cabecalho da pagina recolhido, para sobrar altura para a conversa.
+   *
+   * Quem manda e o Home, porque metade do que recolhe (titulo, data, "Novo
+   * paciente") mora la. Aqui dentro recolhem o cartao do menu automatico e a
+   * faixa de filtros - e a busca desce para a barra de contagem, que sempre
+   * fica visivel.
+   */
+  compacto?: boolean
+  onAlternarCompacto?: () => void
 }) {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [busca, setBusca] = useState('')
@@ -508,7 +520,10 @@ export default function Conversations({
       desktop.removeEventListener('change', medir)
       observador.disconnect()
     }
-  }, [temColunas])
+    // `compacto` entra aqui porque recolher o cabecalho muda onde este bloco
+    // comeca na tela. O ResizeObserver acima nao pega isso sozinho: ele olha o
+    // tamanho do vizinho, e o que mudou foi o topo, la no Home.
+  }, [temColunas, compacto])
 
   useEffect(() => {
     const alvo = cabecalho.current
@@ -925,8 +940,11 @@ export default function Conversations({
 
       {/* Resposta automatica de primeiro contato. Fica aqui, e nao numa tela de
           configuracao escondida, porque quem cuida das conversas e quem sabe se
-          o texto esta certo. */}
-      <div className="surface-card rounded-[18px] p-3">
+          o texto esta certo.
+
+          Some quando o cabecalho esta recolhido: e ajuste que se faz uma vez
+          por mes, e estava custando ~90px de altura todo dia. */}
+      <div className={`surface-card rounded-[18px] p-3 ${compacto ? 'hidden' : ''}`}>
         <button
           type="button"
           onClick={() => setAutoReplyAberto((v) => !v)}
@@ -1043,7 +1061,7 @@ export default function Conversations({
         )}
       </div>
 
-      {conversations.length > 0 && (
+      {conversations.length > 0 && !compacto && (
         <div className="surface-card flex flex-wrap items-center gap-2 rounded-[18px] p-3">
           <div className="relative min-w-[200px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -1089,7 +1107,11 @@ export default function Conversations({
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      {/* Esta barra e a unica que nunca recolhe, e por isso ela carrega a
+          busca quando o cabecalho esta fechado. Buscar e tarefa de todo dia:
+          se sumisse junto, a equipe passaria o dia abrindo e fechando o
+          cabecalho, e o espaco ganho voltaria pela porta dos fundos. */}
+      <div className="flex flex-wrap items-center gap-2">
         <p className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
           {conversations.length === 0
             ? 'Nenhuma conversa ainda'
@@ -1103,7 +1125,56 @@ export default function Conversations({
             </span>
           )}
         </p>
-        <div className="flex items-center gap-1.5">
+
+        {compacto && conversations.length > 0 && (
+          <div className="relative min-w-[160px] max-w-[420px] flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Buscar por nome, telefone ou algo que foi dito"
+              className="w-full rounded-[12px] border border-[#081b2c]/10 bg-white py-1.5 pl-9 pr-8 text-[11px] outline-none focus:border-[#2f7fc1]"
+            />
+            {/* Limpa tambem as datas. Elas ficam no cabecalho recolhido: sem
+                isto um filtro de data ligado antes de recolher continuaria
+                cortando a lista sem nada na tela dizendo por que. */}
+            {filtrando && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBusca('')
+                  setDe('')
+                  setAte('')
+                }}
+                title="Limpar busca e datas"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="ml-auto flex items-center gap-1.5">
+          {onAlternarCompacto && (
+            <button
+              type="button"
+              onClick={onAlternarCompacto}
+              title={
+                compacto
+                  ? 'Mostrar o título, os filtros e o menu automático'
+                  : 'Recolher o topo e dar mais altura para a conversa'
+              }
+              className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-1.5 text-[10px] font-extrabold text-slate-600 transition hover:bg-slate-200"
+            >
+              {compacto ? (
+                <ChevronDown className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronUp className="h-3.5 w-3.5" />
+              )}
+              {compacto ? 'Mostrar topo' : 'Mais espaço'}
+            </button>
+          )}
           {/* Encolher ja separa as concluidas, mas em dia cheio elas continuam
               ocupando a lista. Este botao tira as resolvidas da frente e deixa
               so o que falta - sem apagar nada: e um filtro de tela, e volta no

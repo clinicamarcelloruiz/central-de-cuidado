@@ -96,6 +96,36 @@ function formatToday() {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
+/**
+ * Cabecalho da pagina recolhido na tela de Respostas.
+ *
+ * Pedido em 21/09/2026: num notebook de 768px de altura, o titulo, a data, o
+ * botao "Novo paciente", o cartao do menu automatico e a faixa de filtros
+ * comiam quase um terco da janela, e a conversa - que e o trabalho - ficava
+ * espremida numa tira. Nada disso e de uso continuo; a conversa e.
+ *
+ * A regra: abaixo de 900px de altura ja abre recolhido. Se a pessoa abrir ou
+ * fechar na mao, a escolha dela passa a valer em qualquer tamanho de tela, e
+ * fica guardada neste navegador. Automatico so decide enquanto ninguem
+ * decidiu.
+ *
+ * So no computador. No celular a pagina rola inteira e o cabecalho nao
+ * disputa altura com nada.
+ */
+const CHAVE_TOPO_RESPOSTAS = 'central:respostas:topo'
+
+function preferenciaDeTopo(): boolean | null {
+  try {
+    const guardado = localStorage.getItem(CHAVE_TOPO_RESPOSTAS)
+    if (guardado === 'recolhido') return true
+    if (guardado === 'aberto') return false
+  } catch {
+    // Navegador com armazenamento bloqueado (aba anonima, politica da rede).
+    // Sem preferencia guardada o automatico decide, que e o suficiente.
+  }
+  return null
+}
+
 export default function Home() {
   const { user, signOut } = useAuth()
   const {
@@ -178,6 +208,38 @@ export default function Home() {
   }, [carregarSolicitacoes])
   const meta = PAGE_META[tab]
   const tabs = role === 'owner' ? TABS : TABS.filter((item) => item.key !== 'admin')
+
+  // Ver o bloco CHAVE_TOPO_RESPOSTAS, mais acima, para o porque.
+  const [topoEscolhido, setTopoEscolhido] = useState<boolean | null>(preferenciaDeTopo)
+  const [tela, setTela] = useState(() => ({
+    computador: window.matchMedia('(min-width: 1024px)').matches,
+    baixa: window.matchMedia('(max-height: 900px)').matches,
+  }))
+  useEffect(() => {
+    const largura = window.matchMedia('(min-width: 1024px)')
+    const altura = window.matchMedia('(max-height: 900px)')
+    const ver = () => setTela({ computador: largura.matches, baixa: altura.matches })
+    ver()
+    largura.addEventListener('change', ver)
+    altura.addEventListener('change', ver)
+    return () => {
+      largura.removeEventListener('change', ver)
+      altura.removeEventListener('change', ver)
+    }
+  }, [])
+
+  const topoRecolhido =
+    tab === 'conversas' && tela.computador && (topoEscolhido ?? tela.baixa)
+
+  const alternarTopo = () => {
+    const proximo = !(topoEscolhido ?? tela.baixa)
+    setTopoEscolhido(proximo)
+    try {
+      localStorage.setItem(CHAVE_TOPO_RESPOSTAS, proximo ? 'recolhido' : 'aberto')
+    } catch {
+      // Sem guardar: vale para esta sessao e pronto. Nao e motivo para quebrar.
+    }
+  }
 
   function createPatient() {
     setPreCadastro(null)
@@ -404,8 +466,16 @@ export default function Home() {
           <div className="absolute left-1/3 -top-48 h-80 w-80 rounded-full bg-[#9fc2b8]/10 blur-3xl" />
         </div>
 
-        <div className="relative mx-auto max-w-[1460px] px-4 py-6 sm:px-7 lg:px-10 lg:py-9 xl:px-12">
-          <div className="mb-7 flex flex-col gap-5 xl:mb-8 xl:flex-row xl:items-end xl:justify-between">
+        <div
+          className={`relative mx-auto max-w-[1460px] px-4 sm:px-7 lg:px-10 xl:px-12 ${
+            topoRecolhido ? 'py-4 lg:py-4' : 'py-6 lg:py-9'
+          }`}
+        >
+          <div
+            className={`mb-7 flex-col gap-5 xl:mb-8 xl:flex-row xl:items-end xl:justify-between ${
+              topoRecolhido ? 'hidden' : 'flex'
+            }`}
+          >
             <div>
               <div className="mb-2 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.2em] text-[#1f4f78]">
                 <Sparkles className="h-3.5 w-3.5" />
@@ -460,7 +530,12 @@ export default function Home() {
               />
             )}
             {tab === 'conversas' && (
-              <Conversations focoPatientId={conversaFoco} onCadastrarContato={cadastrarContato} />
+              <Conversations
+                focoPatientId={conversaFoco}
+                onCadastrarContato={cadastrarContato}
+                compacto={topoRecolhido}
+                onAlternarCompacto={tela.computador ? alternarTopo : undefined}
+              />
             )}
             {tab === 'pacientes' && (
               <Patients
