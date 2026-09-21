@@ -268,13 +268,14 @@ export default function Home() {
             pequeno e contido vira enfeite e disputa atencao com o menu; um
             desenho que cobre a coluna toda vira textura e some atras do texto.
 
-            object-cover + inset-0: a figura preenche a altura disponivel e o
-            que sobrar de largura e cortado, como uma foto de capa. E o unico
-            jeito de a mesma arte servir de tela alta de desktop a tela baixa de
-            notebook sem espremer ou deixar faixa vazia.
+            LARGURA FIXA, e nao "preencher a altura". A primeira versao usava
+            object-cover, que escala pela altura da janela: em tela alta a
+            figura virava um close gigante, com traco grosso brigando com o
+            menu. A largura da coluna nao muda, entao amarrar o tamanho a ela e
+            o que mantem o desenho igual em qualquer tela.
 
-            object-bottom para a ancora ser os pes: quando a tela encurta, o
-            corte come o topo (espaco vazio acima da cabeca) e nao as pernas.
+            Ancorada embaixo e sangrando pela direita, como no outro sistema da
+            casa: figura grande cortada pela borda, nao um desenho contido.
 
             O arquivo vive em public/ e e opcional: se faltar, nada quebra. */}
         <img
@@ -282,7 +283,15 @@ export default function Home() {
           alt=""
           aria-hidden="true"
           draggable={false}
-          className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover object-bottom opacity-[0.13] [@media(max-height:820px)]:opacity-[0.1]"
+          style={{
+            // Degrade que apaga a figura de baixo para cima. Sem ele, o traco
+            // cruzava o menu no meio da coluna e competia com o texto; com ele,
+            // a figura e forte na base (onde nao ha item nenhum) e desaparece na
+            // altura dos primeiros itens.
+            maskImage: 'linear-gradient(to top, #000 55%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(to top, #000 55%, transparent 100%)',
+          }}
+          className="pointer-events-none absolute bottom-0 right-[-90px] w-[500px] max-w-none select-none opacity-[0.10] [@media(max-height:820px)]:w-[420px] [@media(max-height:820px)]:right-[-70px]"
         />
         <div className="relative flex h-full flex-col">
           <div className="px-7 pb-7 pt-8 [@media(max-height:820px)]:pb-4 [@media(max-height:820px)]:pt-5">
