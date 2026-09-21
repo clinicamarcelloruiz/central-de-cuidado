@@ -118,6 +118,18 @@ function estaConcluida(conversa: Conversation): boolean {
   return jaRespondida(conversa)
 }
 
+/**
+ * O menu como a familia recebe. Copia do OPCOES de atendimento.ts, so para a
+ * previa desta tela - quem envia de verdade e a Edge Function.
+ */
+const MENU_DO_ROBO = [
+  '*1* 💬 Dúvidas sobre a consulta',
+  '*2* 🗓️ Marcar uma consulta ou retorno',
+  '*3* 🗣️ Falar com alguém da equipe',
+  '*4* 🔄 Ver, remarcar ou cancelar',
+  '*5* 📄 2ª via de receita ou pedido de exame',
+]
+
 const MOTIVO_ATENCAO: Record<
   NonNullable<Conversation['attentionReason']>,
   { rotulo: string; classe: string; borda: string }
@@ -949,24 +961,24 @@ export default function Conversations({
               </span>
             </label>
 
-            {/* As opcoes 1, 2 e 3 nao sao editaveis: elas correspondem ao que o
-                sistema sabe fazer. Mostrar o menu montado evita a duvida de
-                "onde eu escrevo as opcoes?". */}
+            {/* As opcoes nao sao editaveis: elas correspondem ao que o sistema
+                sabe fazer. Mostrar o menu montado evita a duvida de "onde eu
+                escrevo as opcoes?".
+
+                ESTA LISTA E COPIA. A original vive em OPCOES, no arquivo
+                supabase/functions/_shared/atendimento.ts, que e o que a familia
+                de fato recebe. Mexeu la, mexa aqui: em 20/09/2026 esta previa
+                ainda mostrava tres opcoes enquanto o robo ja mandava cinco, e a
+                tela de configuracao passou semanas ensinando o menu errado a
+                quem ia conferir justamente isso. */}
             <p className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
               Como a mensagem chega
             </p>
-            <div className="mt-1 rounded-[14px] border border-[#081b2c]/10 bg-[#fbfaf8] p-3 text-[11px] leading-relaxed text-[#081b2c]">
+            <div className="mt-1 whitespace-pre-line rounded-[14px] border border-[#081b2c]/10 bg-[#fbfaf8] p-3 text-[11px] leading-relaxed text-[#081b2c]">
               <span className="text-slate-500">{autoReply.text || 'Saudação'}</span>
-              <br />
-              <br />
-              Como podemos ajudar? Responda com o número:
-              <br />
-              <br />
-              1 - Informações sobre a consulta
-              <br />
-              2 - Agendar consulta
-              <br />
-              3 - Falar com a nossa equipe
+              {'\n\nEstamos aqui para cuidar do seu filho. Como podemos ajudar hoje?\n\n' +
+                MENU_DO_ROBO.map((linha) => linha).join('\n') +
+                '\n\nResponda com o número ou toque em "Ver opções".'}
             </div>
 
             <p className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
@@ -1008,9 +1020,11 @@ export default function Conversations({
               Preferências, em "Informações por unidade".
             </p>
             <p className="mt-1 text-[10px] text-slate-500">
-              A opção 2 usa a agenda das unidades. A opção 3 marca a conversa aqui em
-              destaque e o robô para de responder, para não falar por cima da equipe.
-              Quem está respondendo acompanhamento ou lembrete de consulta não recebe o menu.
+              A opção 2 usa a agenda das unidades e a 4 mexe na consulta já marcada. A opção 3
+              marca a conversa aqui em destaque e o robô para de responder, para não falar por
+              cima da equipe. A 5 registra o pedido de 2ª via ou de exame e também chama a
+              equipe. Quem está respondendo acompanhamento ou lembrete de consulta não recebe o
+              menu.
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <button
