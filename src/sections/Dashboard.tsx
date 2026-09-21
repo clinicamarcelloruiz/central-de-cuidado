@@ -9,6 +9,7 @@ import {
   MapPinned,
   Stethoscope,
   Building2,
+  MessageCircle,
   UsersRound,
 } from 'lucide-react'
 import type { Patient } from '@/types/patient'
@@ -24,6 +25,20 @@ const AZUL = '#2f7fc1'
 const SAGE = '#6f9d91'
 
 const cardClass = 'surface-card rounded-[24px]'
+
+/**
+ * As duas leituras da Visão geral.
+ *
+ * "Base clínica" descreve quem já é paciente: perfil, CID, convênio, ritmo de
+ * consultas. "WhatsApp" descreve quem está chegando e o que o robô fez com
+ * isso. São perguntas diferentes, feitas por gente em momentos diferentes -
+ * misturar as duas numa rolagem só foi o erro da primeira versão.
+ */
+const ABAS = [
+  { chave: 'clinica' as const, rotulo: 'Base clínica', icone: Stethoscope },
+  { chave: 'whatsapp' as const, rotulo: 'WhatsApp', icone: MessageCircle },
+]
+type Aba = (typeof ABAS)[number]['chave']
 
 function Kpi({
   label,
@@ -292,6 +307,10 @@ export default function Dashboard({
   solicitacoes?: PendingRequest[]
   onAbrirAgenda?: () => void
 }) {
+  // Abre na base clínica: é o que a Visão geral sempre foi, e quem entra aqui
+  // de manhã está olhando os pacientes do dia, não a fatura da Meta.
+  const [aba, setAba] = useState<Aba>('clinica')
+
   const currentMonth = new Date().toISOString().slice(0, 7)
   const appointmentsThisMonth = patients.filter((patient) => patient.dataConsulta.startsWith(currentMonth)).length
   const due = dueCount(patients)
@@ -348,6 +367,35 @@ export default function Dashboard({
     <div className="space-y-5">
       <AvisoSolicitacoes solicitacoes={solicitacoes} onAbrirAgenda={onAbrirAgenda} />
 
+      {/* Duas leituras que não se misturam (21/09/2026).
+          Na primeira versão os números do WhatsApp entraram empilhados no meio
+          dos gráficos da base clínica, e virou uma rolagem só: "23 pacientes"
+          logo acima de "24 contatos", dois 'vinte e poucos' que não têm relação
+          nenhuma - um é quem já é paciente, o outro é quem está chegando.
+          Separar em abas resolve sem esconder nada: cada aba responde uma
+          pergunta, e quem está olhando sabe qual. */}
+      <div className="flex items-center gap-1 rounded-2xl bg-slate-100 p-1">
+        {ABAS.map((item) => (
+          <button
+            key={item.chave}
+            type="button"
+            onClick={() => setAba(item.chave)}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[11px] font-extrabold transition ${
+              aba === item.chave
+                ? 'bg-white text-[#081b2c] shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <item.icone className="h-4 w-4" />
+            {item.rotulo}
+          </button>
+        ))}
+      </div>
+
+      {aba === 'whatsapp' ? (
+        <NumerosDoWhatsApp />
+      ) : (
+        <>
       <section className="soft-grid relative overflow-hidden rounded-[28px] bg-[#081b2c] p-5 text-white shadow-[0_20px_45px_rgba(8,27,44,.16)] sm:p-7">
         <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full bg-[#2f7fc1]/20 blur-3xl" />
         <div className="absolute bottom-0 right-[28%] h-28 w-28 rounded-full bg-[#6f9d91]/15 blur-2xl" />
@@ -388,12 +436,6 @@ export default function Dashboard({
         <Kpi label="Pendentes" value={due} detail="hoje e atrasados" icon={Clock3} color="#d45b58" />
         <Kpi label="Concluídos" value={completed} detail="15, 30 e 90 dias" icon={CheckCircle2} color={SAGE} />
       </div>
-
-      {/* Os números do atendimento por WhatsApp (21/09/2026). Vem antes dos
-          gráficos da base clínica de propósito: aqueles descrevem quem já é
-          paciente, este descreve quem está chegando. E busca os próprios dados
-          - não depende de `patients`, que é a base cadastrada. */}
-      <NumerosDoWhatsApp />
 
       {patients.length === 0 ? (
         <Panel title="Sua visão clínica começa aqui" subtitle="Cadastre o primeiro atendimento para alimentar os indicadores." icon={Stethoscope}>
@@ -480,6 +522,8 @@ export default function Dashboard({
               Os indicadores refletem os campos preenchidos no cadastro de cada atendimento.
             </div>
           </Panel>
+        </>
+      )}
         </>
       )}
     </div>
