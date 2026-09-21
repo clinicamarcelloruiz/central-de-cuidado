@@ -261,6 +261,22 @@ export default function Home() {
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[286px] flex-col overflow-hidden bg-[#081b2c] text-white lg:flex">
         <div className="soft-grid absolute inset-0 opacity-40" />
         <div className="absolute -right-24 top-24 h-64 w-64 rounded-full bg-[#2f7fc1]/10 blur-3xl" />
+        {/* Traco de um responsavel com a crianca no colo, atras do menu.
+            Mesma linguagem do outro sistema da casa (figura em linha fina,
+            baixo contraste), mas o assunto aqui e quem esta do outro lado do
+            WhatsApp, e nao a anatomia. Opacidade baixa de proposito: e textura,
+            nao ilustracao - o texto do menu passa por cima sem perder leitura.
+            O arquivo vive em public/ e e opcional: se faltar, nada quebra, so
+            nao aparece. Fica ancorado embaixo, acima do cartao "Dados
+            protegidos"; em tela baixa ele sobe por tras dos ultimos itens do
+            menu, que e o comportamento esperado de um fundo. */}
+        <img
+          src={`${import.meta.env.BASE_URL}sidebar-familia.svg`}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          className="pointer-events-none absolute bottom-[168px] right-[-6px] w-[236px] select-none opacity-[0.16] [@media(max-height:820px)]:w-[190px] [@media(max-height:820px)]:opacity-[0.12]"
+        />
         <div className="relative flex h-full flex-col">
           <div className="px-7 pb-7 pt-8 [@media(max-height:820px)]:pb-4 [@media(max-height:820px)]:pt-5">
             <img src={logo} alt="Dr. Marcello Ruiz" className="h-12 w-auto max-w-[190px] brightness-0 invert [@media(max-height:820px)]:h-9" />
