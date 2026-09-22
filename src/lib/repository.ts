@@ -2426,9 +2426,10 @@ type ConsultaCrua = {
   is: (coluna: string, valor: null) => ConsultaCrua
   /** Maior ou igual, para recortes de data. */
   gte: (coluna: string, valor: string) => ConsultaCrua
+  /** `order('x')` sozinho ja ordena crescente, como no supabase-js. */
   order: (
     coluna: string,
-    opcoes: { ascending: boolean },
+    opcoes?: { ascending: boolean },
   ) => PromiseLike<{ data: unknown; error: unknown }>
 }
 
@@ -2862,4 +2863,74 @@ export async function numerosDoWhatsApp(
     chamouEquipePorMotivo: contagens(bruto.chamou_equipe_por_motivo),
     desistiram: inteiro(bruto.desistiram),
   }
+}
+
+/**
+ * Horarios que vagaram porque alguem cancelou.
+ *
+ * Pedido em 22/09/2026, e a ideia e boa: quando o paciente cancela pelo
+ * WhatsApp, a consulta some da agenda e o horario volta para a lista de livres
+ * igual a qualquer outro. A recepcao ve "16:40 livre" sem saber que as 16:40
+ * tinha alguem marcado ate ontem - e que existe uma vaga de ultima hora para
+ * oferecer a quem esta esperando.
+ *
+ * Ate aqui o unico aviso era a conversa acender em Respostas. Quem nao abrisse
+ * aquela tela naquele dia nao ficava sabendo.
+ *
+ * SO CANCELAMENTO DO PACIENTE (cancelled_by nulo). Quando a clinica cancela,
+ * ela ja sabe - marcar o proprio horario que ela acabou de liberar seria
+ * avisar alguem de algo que essa pessoa fez.
+ *
+ * Sete dias de janela: depois disso a vaga ja e so um horario livre como
+ * outro qualquer, e continuar pintando vira enfeite que ninguem le.
+ */
+export interface VagaDeCancelamento {
+  /** Inicio da consulta que foi cancelada, no mesmo formato dos slots livres. */
+  quando: string
+  paciente: string
+  canceladoEm: string
+}
+
+export async function listVagasDeCancelamento(
+  clinicId: string,
+  unitId: string,
+): Promise<VagaDeCancelamento[]> {
+  const desde = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+  const { data, error } = await tabelaCrua('appointments')
+    .select('starts_at,contact_name,patient_id,cancelled_at,cancelled_by')
+    .eq('clinic_id', clinicId)
+    .eq('unit_id', unitId)
+    .eq('status', 'cancelled')
+    .is('cancelled_by', null)
+    .gte('cancelled_at', desde)
+    .gte('starts_at', inicioDeHoje())
+    .order('starts_at')
+
+  // Lista de apoio: se falhar, a agenda continua inteira e os horarios livres
+  // aparecem sem a marca. Nunca derrubar a agenda por causa de um enfeite.
+  if (error) return []
+
+  type Linha = {
+    starts_at: string
+    contact_name: string | null
+    patient_id: string | null
+    cancelled_at: string | null
+  }
+  const linhas = (data ?? []) as Linha[]
+  if (linhas.length === 0) return []
+
+  const ids = [...new Set(linhas.map((l) => l.patient_id).filter(Boolean))] as string[]
+  const { data: pacientes } = ids.length
+    ? await supabase.from('patients').select('id,name').in('id', ids)
+    : { data: [] }
+  const nomePorId = new Map((pacientes ?? []).map((p) => [p.id, p.name]))
+
+  return linhas.map((linha) => ({
+    quando: linha.starts_at,
+    paciente:
+      (linha.patient_id && nomePorId.get(linha.patient_id)) ||
+      linha.contact_name ||
+      'Contato sem cadastro',
+    canceladoEm: linha.cancelled_at ?? '',
+  }))
 }

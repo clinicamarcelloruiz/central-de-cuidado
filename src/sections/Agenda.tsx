@@ -34,6 +34,8 @@ import {
   notifyAppointmentConfirmed,
   listAppointments,
   listAppointmentHistory,
+  listVagasDeCancelamento,
+  type VagaDeCancelamento,
   marcarPresenca,
   listAvailabilityRules,
   listAvailableSlots,
@@ -80,6 +82,13 @@ function hora(iso: string) {
   return new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(
     new Date(iso),
   )
+}
+
+/** "22/09 às 14:30". Usado para dizer quando o paciente desistiu do horario. */
+function diaEHora(iso: string) {
+  const data = new Date(iso)
+  const dia = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(data)
+  return `${dia} às ${hora(iso)}`
 }
 
 /**
@@ -509,6 +518,7 @@ export default function Agenda({
   // Os dias que já passaram. Carregados junto com a agenda, e não só quando a
   // aba abre: são poucas linhas, e assim trocar de aba é instantâneo.
   const [historico, setHistorico] = useState<Appointment[]>([])
+  const [vagas, setVagas] = useState<VagaDeCancelamento[]>([])
   const [marcando, setMarcando] = useState<string | null>(null)
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [units, setUnits] = useState<Unit[]>([])
@@ -576,19 +586,22 @@ export default function Agenda({
       setSlots([])
       setAppointments([])
       setHistorico([])
+      setVagas([])
       return
     }
     try {
-      const [regras, livres, marcados, passadas] = await Promise.all([
+      const [regras, livres, marcados, passadas, vagasCanceladas] = await Promise.all([
         listAvailabilityRules(unitId),
         listAvailableSlots(unitId),
         listAppointments(clinicId, unitId),
         listAppointmentHistory(clinicId, unitId),
+        listVagasDeCancelamento(clinicId, unitId),
       ])
       setRules(regras)
       setSlots(livres)
       setAppointments(marcados)
       setHistorico(passadas)
+      setVagas(vagasCanceladas)
     } catch (causa) {
       setError(causa instanceof Error ? causa.message : 'Não foi possível carregar os horários.')
     }
@@ -609,6 +622,23 @@ export default function Agenda({
     )
     return agruparPorDia(slots, appointments, bloqueios)
   }, [slots, appointments, exceptions, unitId, prefs.horizonDays])
+
+  /**
+   * De quais horarios livres alguem desistiu.
+   *
+   * Chaveado pelo INSTANTE, e nao pelo texto da data: o horario livre vem da
+   * funcao available_slots e a consulta cancelada vem da tabela, e os dois
+   * podem escrever o mesmo momento de formas diferentes ("+00:00" e "Z", com
+   * e sem milissegundos). Comparar texto perderia a marca sem ninguem notar.
+   */
+  const vagaPorInstante = useMemo(() => {
+    const mapa = new Map<number, VagaDeCancelamento>()
+    for (const vaga of vagas) {
+      const instante = new Date(vaga.quando).getTime()
+      if (!Number.isNaN(instante)) mapa.set(instante, vaga)
+    }
+    return mapa
+  }, [vagas])
   const unidadeAtual = units.find((u) => u.id === unitId) ?? null
 
   // ---- Painel de edicao de uma consulta ----
@@ -1168,17 +1198,41 @@ export default function Agenda({
                   )}
 
                   {livres.length > 0 && (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5">
-                      {livres.map((slot) => (
-                        <button
-                          key={slot}
-                          type="button"
-                          onClick={() => setSlotEscolhido(slot)}
-                          className="rounded-lg border border-[#081b2c]/10 bg-[#fafaf8] px-2.5 py-1.5 text-[10px] font-bold text-[#081b2c] transition hover:border-[#2f7fc1] hover:bg-white"
-                        >
-                          {hora(slot)}
-                        </button>
-                      ))}
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                      {livres.map((slot) => {
+                        /* Horario que vagou porque o paciente cancelou sozinho.
+                           Ambar, e nao verde nem vermelho: nao e problema nem
+                           conquista, e uma vaga de ultima hora que alguem pode
+                           querer. Quem esta na fila de espera cabe aqui. */
+                        const vaga = vagaPorInstante.get(new Date(slot).getTime())
+                        return (
+                          <button
+                            key={slot}
+                            type="button"
+                            onClick={() => setSlotEscolhido(slot)}
+                            title={
+                              vaga
+                                ? `${vaga.paciente} cancelou${
+                                    vaga.canceladoEm ? ` em ${diaEHora(vaga.canceladoEm)}` : ''
+                                  }. O horário está livre.`
+                                : undefined
+                            }
+                            className={`rounded-lg border px-2.5 py-1.5 text-[10px] font-bold transition ${
+                              vaga
+                                ? 'border-[#c98a2b]/45 bg-[#fdf4e3] text-[#8a5a12] hover:border-[#c98a2b] hover:bg-[#fbecd2]'
+                                : 'border-[#081b2c]/10 bg-[#fafaf8] text-[#081b2c] hover:border-[#2f7fc1] hover:bg-white'
+                            }`}
+                          >
+                            {vaga && <span aria-hidden="true">↩ </span>}
+                            {hora(slot)}
+                          </button>
+                        )
+                      })}
+                      {livres.some((slot) => vagaPorInstante.has(new Date(slot).getTime())) && (
+                        <span className="ml-1 text-[10px] font-semibold text-[#8a5a12]">
+                          ↩ vagou por cancelamento
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
