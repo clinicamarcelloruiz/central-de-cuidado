@@ -61,6 +61,61 @@ let carregando: Promise<void> | null = null
 const ouvintes: Ouvintes = {}
 
 /**
+ * Devolve a rolagem da pagina depois que a Memed fecha.
+ *
+ * Relatado em 21/09/2026: prescrever e voltar para a lista de pacientes
+ * deixava a tela travada - a roda do mouse nao descia mais, e so recarregando
+ * voltava ao normal. Conferido no navegador do consultorio: o <body> ficava
+ * com style="overflow: hidden" inline, e todos os iframes da Memed ja estavam
+ * display:none. Ou seja, nada estava aberto; so a trava tinha ficado.
+ *
+ * E a trava que qualquer modal poe para a pagina de tras nao rolar junto. A
+ * Memed poe ao abrir e nao tira em todos os caminhos de saida.
+ *
+ * Limpar aqui e seguro porque ESTE sistema nunca mexe em body.style.overflow -
+ * conferido no codigo inteiro. Qualquer valor inline ali e da Memed.
+ */
+function destravarRolagem() {
+  document.body.style.removeProperty('overflow')
+  document.body.style.removeProperty('overflow-y')
+  document.body.style.removeProperty('position')
+  document.documentElement.style.removeProperty('overflow')
+  document.documentElement.style.removeProperty('overflow-y')
+}
+
+/** Algum modulo da Memed esta aberto na tela neste momento? */
+function memedNaTela(): boolean {
+  return [...document.querySelectorAll('iframe[id^="mdhub-module-"]')].some(
+    (quadro) => getComputedStyle(quadro).display !== 'none',
+  )
+}
+
+/**
+ * Rede de seguranca para a trava de rolagem.
+ *
+ * Os dois ganchos de evento cobrem os caminhos de saida que a Memed anuncia.
+ * Este observador cobre os que ela nao anuncia: se o <body> ganhar overflow
+ * escondido SEM nenhum modulo visivel, a trava e resto de algo que ja fechou, e
+ * cai fora na hora.
+ *
+ * So dispara quando o atributo style do body muda, entao nao custa nada
+ * enquanto ninguem prescreve. E a checagem de modulo visivel e o que impede
+ * este codigo de brigar com uma trava legitima: com a Memed aberta na frente,
+ * a pagina de tras DEVE ficar presa.
+ */
+let vigia: MutationObserver | null = null
+
+function vigiarTravaDeRolagem() {
+  if (vigia) return
+  vigia = new MutationObserver(() => {
+    if (!document.body.style.overflow) return
+    if (memedNaTela()) return
+    destravarRolagem()
+  })
+  vigia.observe(document.body, { attributes: true, attributeFilter: ['style'] })
+}
+
+/**
  * Carrega o script uma unica vez.
  *
  * A promessa fica guardada para que dois cliques seguidos no botao nao
@@ -119,6 +174,15 @@ async function carregarScript(token: string, producao: boolean) {
       memed.MdSinapsePrescricao.event.add('core:moduleHide', (modulo) => {
         const dados = modulo as { moduleName?: string; name?: string }
         const nome = dados?.moduleName ?? dados?.name
+
+        // A rolagem volta a QUALQUER modulo que feche, e nao so ao da
+        // prescricao. A Memed tem dezesseis modulos (preview, assinatura,
+        // alerta, medicamento...) e qualquer um deles pode ter sido o ultimo a
+        // sair; se a gente so destravasse no nome certo, bastaria o medico
+        // fechar pela previa para a tela continuar presa. Destravar duas vezes
+        // nao custa nada; deixar preso custa uma recarga.
+        destravarRolagem()
+
         if (nome && nome !== 'plataforma.prescricao') return
         ouvintes.onFechar?.()
       })
@@ -147,7 +211,16 @@ async function carregarScript(token: string, producao: boolean) {
         if (!hub) return
         window.clearInterval(espera)
 
-        hub.event.add('prescricaoImpressa', (receita) => ouvintes.onReceita?.(receita))
+        // Destrava tambem ao emitir: em alguns caminhos a Memed fecha sozinha
+        // depois de imprimir, e o moduleHide correspondente nem sempre chega.
+        hub.event.add('prescricaoImpressa', (receita) => {
+          destravarRolagem()
+          ouvintes.onReceita?.(receita)
+        })
+
+        // Liga a rede de seguranca so depois que a Memed existe: antes disso
+        // nao ha o que vigiar.
+        vigiarTravaDeRolagem()
         hub.event.add('prescricaoExcluida', (dados) => {
           const excluida = dados as { id?: string | number }
           if (excluida?.id !== undefined) ouvintes.onExcluida?.(String(excluida.id))
@@ -264,6 +337,7 @@ async function comando(
   dados: unknown,
   prazo = 8000,
 ) {
+  const inicio = performance.now()
   try {
     await Promise.race([
       hub.command.send('plataforma.prescricao', passo, dados),
@@ -271,11 +345,29 @@ async function comando(
         window.setTimeout(() => rejeitar(new Error('sem resposta')), prazo),
       ),
     ])
+    medir(passo, inicio)
     return true
   } catch (causa) {
+    medir(`${passo} (falhou)`, inicio)
     console.warn(`[Memed] ${passo} não respondeu`, causa)
     return false
   }
+}
+
+/**
+ * Quanto cada etapa do clique em Prescrever demora, no console.
+ *
+ * Existe para responder a uma pergunta feita em 21/09/2026: "da para abrir
+ * mais rapido?". A resposta honesta era "nao sei onde o tempo vai". O script
+ * ja carrega antes do clique; o que sobra sao tres comandos e o show da tela,
+ * e sem numero nao da para saber se vale mexer nos comandos ou se e tudo o
+ * show, que e da Memed e nao temos como acelerar.
+ *
+ * Fica no console, e nao numa tela, porque e para o desenvolvedor ler uma
+ * vez e decidir. Quando a decisao estiver tomada, isto pode sair.
+ */
+function medir(etapa: string, inicio: number) {
+  console.info(`[Memed] ${etapa}: ${Math.round(performance.now() - inicio)} ms`)
 }
 
 /**
@@ -319,9 +411,14 @@ export async function abrirPrescricao(
   ouvir: Ouvintes,
   local?: LocalDeAtendimento | null,
 ) {
+  const inicioDoClique = performance.now()
+
   // Se o prontuário já preparou, isto retorna na hora.
   const { cadastro } = await prepararPrescricao()
   ultimoCadastro = cadastro
+  // Se isto der mais que uns poucos ms, o aquecimento do prontuario nao
+  // aconteceu, e o medico esperou o download do script no clique.
+  medir('preparação (token + script)', inicioDoClique)
 
   ouvintes.onReceita = ouvir.onReceita
   ouvintes.onExcluida = ouvir.onExcluida
@@ -386,10 +483,13 @@ export async function abrirPrescricao(
   // A tela abre mesmo que algum comando acima tenha falhado: com o paciente em
   // branco o medico digita o nome e prescreve; com o botao girando, ele nao faz
   // nada.
+  const inicioDoShow = performance.now()
   await Promise.race([
     hub.module.show('plataforma.prescricao'),
     new Promise((resolver) => window.setTimeout(resolver, 8000)),
   ])
+  medir('show da tela', inicioDoShow)
+  medir('TOTAL do clique ao abrir', inicioDoClique)
   return primeiroNome
 }
 
