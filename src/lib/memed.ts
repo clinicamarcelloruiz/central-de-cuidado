@@ -139,13 +139,17 @@ async function carregarScript(token: string, producao: boolean) {
     // esse evento não vier - script inexistente, rede caída, mudança do lado
     // deles -, o botão gira para sempre e ninguém sabe por quê. Foi o que
     // aconteceu em 16/09/2026, com o endereço errado do script de produção.
-    // Vinte segundos é folgado para um arquivo de 19 KB, e transforma um
-    // travamento silencioso numa frase que a pessoa lê.
+    // Quarenta segundos, e não vinte: desde 21/09/2026 a espera inclui os
+    // módulos da Memed, não só o script dela. Medido a frio, script e módulos
+    // levaram uns 16 s juntos; vinte ficava perto demais do limite num dia de
+    // rede lenta. Como isto roda no login, e não no clique, o prazo maior não
+    // custa espera para ninguém - só evita desistir de um carregamento que ia
+    // terminar.
     const prazo = window.setTimeout(() => {
       window.clearInterval(espera)
       carregando = null
       reject(new Error('A Memed não respondeu a tempo. Tente de novo em instantes.'))
-    }, 20_000)
+    }, 40_000)
     const pronto = () => {
       window.clearTimeout(prazo)
       resolve()
@@ -206,26 +210,43 @@ async function carregarScript(token: string, producao: boolean) {
       // 60ms, e não 200: como isto agora roda antes do clique, o custo de
       // perguntar com mais frequência é invisível, e a diferença aparece
       // inteira no caso em que o médico clica logo que abre o prontuário.
+      let ouvintesRegistrados = false
       espera = window.setInterval(() => {
         const hub = janela().MdHub
         if (!hub) return
+
+        if (!ouvintesRegistrados) {
+          ouvintesRegistrados = true
+          // Destrava tambem ao emitir: em alguns caminhos a Memed fecha sozinha
+          // depois de imprimir, e o moduleHide correspondente nem sempre chega.
+          hub.event.add('prescricaoImpressa', (receita) => {
+            destravarRolagem()
+            ouvintes.onReceita?.(receita)
+          })
+
+          // Liga a rede de seguranca so depois que a Memed existe: antes disso
+          // nao ha o que vigiar.
+          vigiarTravaDeRolagem()
+          hub.event.add('prescricaoExcluida', (dados) => {
+            const excluida = dados as { id?: string | number }
+            if (excluida?.id !== undefined) ouvintes.onExcluida?.(String(excluida.id))
+          })
+        }
+
+        // O MdHub existir NAO quer dizer que da para mandar comando.
+        //
+        // Medido em 21/09/2026, primeira abertura do dia: o hub apareceu, o
+        // setFeatureToggle foi mandado na hora, e esperou 8 segundos ate
+        // desistir - o modulo da prescricao ainda estava baixando. A linha
+        // "Todos os modulos foram carregados" so apareceu no console DEPOIS
+        // do comando falhar. Oito segundos de espera por perguntar cedo.
+        //
+        // O sinal certo e o iframe do modulo estar na pagina: e o proprio
+        // MdHub que o cria, quando o modulo termina de carregar. DOM, e nao
+        // nome de evento - pelo mesmo motivo da espera pelo hub, logo acima.
+        if (!document.getElementById('mdhub-module-plataforma.prescricao')) return
+
         window.clearInterval(espera)
-
-        // Destrava tambem ao emitir: em alguns caminhos a Memed fecha sozinha
-        // depois de imprimir, e o moduleHide correspondente nem sempre chega.
-        hub.event.add('prescricaoImpressa', (receita) => {
-          destravarRolagem()
-          ouvintes.onReceita?.(receita)
-        })
-
-        // Liga a rede de seguranca so depois que a Memed existe: antes disso
-        // nao ha o que vigiar.
-        vigiarTravaDeRolagem()
-        hub.event.add('prescricaoExcluida', (dados) => {
-          const excluida = dados as { id?: string | number }
-          if (excluida?.id !== undefined) ouvintes.onExcluida?.(String(excluida.id))
-        })
-
         pronto()
       }, 60)
     }
@@ -396,6 +417,17 @@ export function prepararPrescricao() {
     preparacao = (async () => {
       const dados = await tokenDoPrescritor()
       await carregarScript(dados.token, dados.producao)
+
+      // So o VIDaaS na lista de certificadoras: e o certificado que o medico
+      // ja usa para assinar o prontuario. Sem isto a Memed oferece sete opcoes
+      // e a pessoa tem de saber qual e a sua.
+      //
+      // Fica aqui, e nao no clique, porque nao depende de paciente nem de
+      // unidade - e uma vez por sessao basta. Ate 21/09/2026 era o primeiro
+      // comando do clique, e a frio custou 8 segundos (ver carregarScript).
+      const hub = janela().MdHub
+      if (hub) await comando(hub, 'setFeatureToggle', { setAllowedSignatureProviders: ['vidaas'] })
+
       return dados
     })()
     preparacao.catch(() => {
@@ -427,10 +459,8 @@ export async function abrirPrescricao(
   const hub = janela().MdHub
   if (!hub) throw new Error('A prescrição da Memed não está pronta.')
 
-  // So o VIDaaS na lista de certificadoras: e o certificado que o medico ja
-  // usa para assinar o prontuario. Sem isto a Memed oferece sete opcoes e a
-  // pessoa tem de saber qual e a sua. O resto fica no padrao da Memed.
-  await comando(hub, 'setFeatureToggle', { setAllowedSignatureProviders: ['vidaas'] })
+  // setFeatureToggle ja foi no aquecimento (prepararPrescricao). Daqui para
+  // baixo so o que depende deste paciente e desta unidade.
 
   const primeiroNome = patient.nome.trim().split(/\s+/)[0] ?? patient.nome
 

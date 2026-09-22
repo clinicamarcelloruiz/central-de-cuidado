@@ -28,6 +28,7 @@ import Dashboard from '@/sections/Dashboard'
 import Patients from '@/sections/Patients'
 import Followups from '@/sections/Followups'
 import Conversations from '@/sections/Conversations'
+import { prepararPrescricao } from '@/lib/memed'
 import Agenda from '@/sections/Agenda'
 import Settings from '@/sections/Settings'
 import AccessAdmin from '@/sections/AccessAdmin'
@@ -208,6 +209,28 @@ export default function Home() {
   }, [carregarSolicitacoes])
   const meta = PAGE_META[tab]
   const tabs = role === 'owner' ? TABS : TABS.filter((item) => item.key !== 'admin')
+
+  /**
+   * Aquece a Memed no login, e nao no prontuario.
+   *
+   * Medido em 21/09/2026: o primeiro Prescrever do dia levou 18,9 segundos, e
+   * 7,7 deles foram o download do script da Memed - que ja era "aquecido" ao
+   * abrir o prontuario, so que o medico clicou logo em seguida e o aquecimento
+   * nao tinha terminado. Do segundo clique em diante, 1,7 s.
+   *
+   * Entre entrar no sistema e prescrever a primeira receita passam minutos, nao
+   * segundos. Esse e o intervalo que o download precisa. Comeca aqui, assim que
+   * os dados da clinica carregam, e roda uma vez por sessao.
+   *
+   * So para quem prescreve: a recepcao nunca abre a Memed, e o script dela nao
+   * e leve. Falha nao incomoda ninguem - a proxima tentativa e no clique, com o
+   * erro aparecendo ai, como sempre foi.
+   */
+  useEffect(() => {
+    if (loading || loadError) return
+    if (role !== 'owner' && role !== 'clinician') return
+    void prepararPrescricao().catch(() => {})
+  }, [loading, loadError, role])
 
   // Ver o bloco CHAVE_TOPO_RESPOSTAS, mais acima, para o porque.
   const [topoEscolhido, setTopoEscolhido] = useState<boolean | null>(preferenciaDeTopo)
