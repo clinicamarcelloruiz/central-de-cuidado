@@ -172,3 +172,75 @@ export function respostaAoAcompanhamento(resposta: Resposta): string | null {
   }
   return null
 }
+
+// ---------------------------------------------------------------------------
+// Quando o lembrete sai
+// ---------------------------------------------------------------------------
+
+/** Perto demais da consulta o lembrete perde a serventia e vira susto. */
+export const ANTECEDENCIA_MINIMA_HORAS = 2
+
+/**
+ * Deslocamento do fuso naquele instante, em ms. Negativo a oeste de Greenwich
+ * (Sao Paulo: -3h).
+ *
+ * Calculado com Intl, e nao com o truque de `new Date(x.toLocaleString(...))`:
+ * aquele depende do fuso da MAQUINA onde roda, e este codigo roda em dois
+ * lugares com fusos diferentes - o Edge (UTC) e o teste no computador da
+ * clinica (Sao Paulo). O truque acertava num e errava no outro em exatas tres
+ * horas, que e o suficiente para o lembrete sair no dia errado.
+ */
+function deslocamentoDoFusoMs(instante: Date, timezone: string): number {
+  const partes = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(instante)
+  const valor = (tipo: string) => Number(partes.find((p) => p.type === tipo)?.value)
+  const relogioLocalComoUtc = Date.UTC(
+    valor('year'), valor('month') - 1, valor('day'),
+    valor('hour'), valor('minute'), valor('second'),
+  )
+  return relogioLocalComoUtc - instante.getTime()
+}
+
+/** Meia-noite (inicio) do dia local que vem `dias` depois de hoje, como instante. */
+export function fimDoDiaLocal(agora: Date, dias: number, timezone: string): Date {
+  const [ano, mes, dia] = agora
+    .toLocaleDateString('en-CA', { timeZone: timezone })
+    .split('-')
+    .map(Number)
+  // Meia-noite do dia seguinte ao alvo, ainda como se fosse UTC...
+  const semFuso = new Date(Date.UTC(ano, mes - 1, dia + dias + 1))
+  // ...corrigida para o fuso da clinica.
+  return new Date(semFuso.getTime() - deslocamentoDoFusoMs(semFuso, timezone))
+}
+
+/**
+ * Consultas que entram na conta de lembretes agora.
+ *
+ * A janela vai de daqui a duas horas ate o FIM DO DIA de `dias` a frente, no
+ * fuso da clinica. Com dias = 1, e o fim de amanha.
+ *
+ * Por que o fim do dia, e nao "24 horas a frente" (que era a regra ate
+ * 21/09/2026): com 24 horas, a consulta das 17:20 de amanha so entrava na
+ * janela as 17:20 de hoje - e a familia era avisada no fim da tarde, sem tempo
+ * de se programar. Com o fim do dia, a passada da manha ja pega o dia inteiro
+ * de amanha, e todo mundo e avisado cedo.
+ *
+ * A passada continua sendo de hora em hora, e isto e deliberado: em 31/08/2026
+ * o lembrete rodava uma vez por dia, e quem marcava depois da passada para o
+ * dia seguinte ficava sem aviso. A passada da manha avisa a maioria; as
+ * seguintes pegam quem marcou depois, e quem marcou hoje para daqui a pouco.
+ */
+export function janelaDeLembrete(agora: Date, dias: number, timezone: string) {
+  return {
+    inicio: new Date(agora.getTime() + ANTECEDENCIA_MINIMA_HORAS * 3600 * 1000),
+    fim: fimDoDiaLocal(agora, dias, timezone),
+  }
+}

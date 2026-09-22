@@ -1,13 +1,16 @@
 import { adminClient, corsHeaders, json, toBrazilE164 } from '../_shared/whatsapp.ts'
 import { textoDoModelo } from '../_shared/modelos.ts'
 import { cadastrarDaFicha } from '../_shared/cadastro.ts'
+import { janelaDeLembrete } from '../_shared/lembrete.ts'
 
 /**
  * Lembrete automatico de consulta.
  *
- * Roda uma vez por dia pelo pg_cron e avisa quem tem consulta daqui a N dias
- * (padrao 1, ou seja, a vespera). A mensagem pede que o paciente confirme ou
- * peca para remarcar; a resposta cai no meta-webhook.
+ * Roda de hora em hora pelo pg_cron (aos :20, das 9h as 20h no fuso da clinica)
+ * e avisa quem tem consulta ate o fim do dia de daqui a N dias (padrao 1, ou
+ * seja, a vespera). A passada das 09:20 avisa o dia inteiro de amanha; as
+ * seguintes pegam quem marcou depois. A mensagem pede que o paciente confirme
+ * ou peca para remarcar; a resposta cai no meta-webhook.
  *
  * Duas regras deliberadas, iguais as do disparo de acompanhamentos:
  *  - so envia para quem ja tem consentimento registrado. Um robo nao presume
@@ -27,30 +30,15 @@ type Settings = {
   enabled: boolean
 }
 
-/** Nao mandar lembrete de madrugada. Fora desta faixa, espera a proxima hora. */
-const HORA_INICIAL = 8
-const HORA_FINAL = 20
-/** Perto demais da consulta o lembrete perde a serventia e vira susto. */
-const ANTECEDENCIA_MINIMA_HORAS = 2
-
 /**
- * Consultas que entram na conta de lembretes agora.
+ * Nao mandar lembrete de madrugada. Fora desta faixa, espera a proxima hora.
  *
- * Antes a funcao mirava um dia inteiro do calendario e rodava uma vez por dia,
- * as 10h. Quem marcasse depois das 10h para o dia seguinte ficava sem lembrete
- * nenhum: a unica passada do dia ja tinha acontecido. Em 31/08/2026 um paciente
- * marcou as 08:56 e so recebeu porque faltava uma hora para a passada.
- *
- * Agora a janela e continua - de daqui a duas horas ate `dias` a frente - e a
- * funcao roda de hora em hora. Cada consulta recebe uma vez so, garantido pelo
- * reminder_sent_at.
+ * Comeca as 9, e nao as 8, desde 21/09/2026: a passada das 09:20 e a "da
+ * manha", a que avisa o dia inteiro de amanha de uma vez (ver janelaDeLembrete
+ * em _shared/lembrete.ts). As 8 ainda e cedo para mensagem de consultorio.
  */
-function janelaDeLembrete(dias: number) {
-  const agora = new Date()
-  const inicio = new Date(agora.getTime() + ANTECEDENCIA_MINIMA_HORAS * 3600 * 1000)
-  const fim = new Date(agora.getTime() + dias * 24 * 3600 * 1000)
-  return { inicio, fim }
-}
+const HORA_INICIAL = 9
+const HORA_FINAL = 20
 
 /** Hora local da clinica, para nao acordar ninguem com lembrete. */
 function horaLocal(timezone: string) {
@@ -120,7 +108,7 @@ Deno.serve(async (req) => {
         continue
       }
 
-      const { inicio, fim } = janelaDeLembrete(clinica.reminderDays)
+      const { inicio, fim } = janelaDeLembrete(new Date(), clinica.reminderDays, clinica.timezone)
 
       const { data: consultas, error: consultasError } = await admin
         .from('appointments')

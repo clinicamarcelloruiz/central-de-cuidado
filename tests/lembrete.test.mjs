@@ -12,6 +12,8 @@ import {
   interpretarResposta,
   mudancaDaConsulta,
   respondendoEnvioNosso,
+  janelaDeLembrete,
+  fimDoDiaLocal,
 } from './lembrete.build.mjs'
 
 let passou = 0
@@ -248,6 +250,94 @@ console.log('\n===== RESPOSTA AO LEMBRETE =====')
   conferir('nao quero receber confirma', /não enviaremos/.test(respostaAoAcompanhamento({ ...base, optedOut: true }) ?? ''))
   conferir('sem botao, sem resposta', respostaAoAcompanhamento(base) === null)
 }
+
+
+// ---------------------------------------------------------------------------
+// A janela de envio: quem recebe lembrete em cada passada
+// ---------------------------------------------------------------------------
+//
+// Regra desde 21/09/2026: a passada da manha avisa o dia INTEIRO de amanha.
+// Antes a janela era "24 horas a frente", e a consulta das 17:20 de amanha so
+// era avisada as 17:20 de hoje - tarde demais para a familia se programar.
+//
+// PARA PROVAR QUE ESTES TESTES PEGAM O DEFEITO: em janelaDeLembrete, troque
+// `fim: fimDoDiaLocal(...)` por `fim: new Date(agora.getTime() + dias*24*3600*1000)`
+// (a regra antiga). Os casos "manha" abaixo caem.
+
+const SP = 'America/Sao_Paulo'
+const emSP = (texto) => new Date(`${texto}-03:00`) // Sao Paulo nao tem horario de verao desde 2019
+const dentro = (janela, instante) => instante >= janela.inicio && instante < janela.fim
+
+{
+  // Passada da manha de segunda 21/09, 09:20. Amanha e terca 22/09.
+  const janela = janelaDeLembrete(emSP('2026-09-21T09:20:00'), 1, SP)
+
+  conferir(
+    'Manha: o fim da janela e a meia-noite que encerra amanha',
+    janela.fim.toISOString() === emSP('2026-09-23T00:00:00').toISOString(),
+    `veio ${janela.fim.toISOString()}`,
+  )
+  conferir(
+    'Manha: consulta das 14:00 de amanha entra',
+    dentro(janela, emSP('2026-09-22T14:00:00')),
+  )
+  conferir(
+    'Manha: consulta das 17:20 de amanha TAMBEM entra (era o que faltava)',
+    dentro(janela, emSP('2026-09-22T17:20:00')),
+  )
+  conferir(
+    'Manha: consulta das 09:00 de depois de amanha ainda nao entra',
+    !dentro(janela, emSP('2026-09-23T09:00:00')),
+  )
+  conferir(
+    'Manha: consulta de hoje daqui a 3 horas entra (marcou de manha para a tarde)',
+    dentro(janela, emSP('2026-09-21T12:30:00')),
+  )
+  conferir(
+    'Manha: consulta de hoje daqui a 1 hora NAO entra - perto demais, vira susto',
+    !dentro(janela, emSP('2026-09-21T10:20:00')),
+  )
+}
+
+{
+  // A protecao de 31/08: quem marca DEPOIS da passada da manha para amanha e
+  // pego na passada seguinte, e nao fica sem aviso.
+  const janela = janelaDeLembrete(emSP('2026-09-21T15:20:00'), 1, SP)
+  conferir(
+    'Tarde: consulta marcada as 15h para amanha 09:00 entra na passada das 15:20',
+    dentro(janela, emSP('2026-09-22T09:00:00')),
+  )
+}
+
+{
+  // O fuso: as 23:50 de Sao Paulo ainda e 21/09, mesmo que em UTC ja seja
+  // 22/09 02:50. "Amanha" precisa continuar sendo 22/09.
+  const janela = janelaDeLembrete(emSP('2026-09-21T23:50:00'), 1, SP)
+  conferir(
+    'Fuso: as 23:50 de SP, amanha ainda e 22/09 (em UTC ja virou o dia)',
+    janela.fim.toISOString() === emSP('2026-09-23T00:00:00').toISOString(),
+    `veio ${janela.fim.toISOString()}`,
+  )
+  // ...e as 00:10 de SP ja e 22/09, entao amanha e 23/09.
+  const depois = janelaDeLembrete(emSP('2026-09-22T00:10:00'), 1, SP)
+  conferir(
+    'Fuso: as 00:10 de SP, amanha e 23/09',
+    depois.fim.toISOString() === emSP('2026-09-24T00:00:00').toISOString(),
+    `veio ${depois.fim.toISOString()}`,
+  )
+}
+
+conferir(
+  'Dois dias de antecedencia: fim da janela e o fim de depois de amanha',
+  fimDoDiaLocal(emSP('2026-09-21T09:20:00'), 2, SP).toISOString() ===
+    emSP('2026-09-24T00:00:00').toISOString(),
+)
+
+conferir(
+  'Zero dias: fim da janela e o fim de hoje',
+  fimDoDiaLocal(emSP('2026-09-21T09:20:00'), 0, SP).toISOString() ===
+    emSP('2026-09-22T00:00:00').toISOString(),
+)
 
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)
 console.log(`FALHAS: ${falhas.length}`)
