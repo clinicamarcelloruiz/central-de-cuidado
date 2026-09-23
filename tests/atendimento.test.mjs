@@ -1155,6 +1155,17 @@ await caso('Resposta pronta na fila não solta a conversa da equipe', [
   ['bom dia', null],
 ], { respostasProntas: RESPOSTAS })
 
+// Caso real de 22/09/2026: a familia estava na fila desde a vespera e mandou
+// "Boa tarde". Calar esta certo. O defeito era outro: o webhook calava sem
+// acender a conversa, e ela ficou apagada o dia inteiro. Este caso fixa que o
+// robo devolve silencio aqui - e e esse silencio (resultado nulo) que agora faz
+// o webhook subir a bandeira de atencao.
+await caso('Real 22/09: "Boa tarde" de quem está na fila fica em silêncio', [
+  ['Oi', 'Como podemos ajudar'],
+  ['3', 'direcionando você'],
+  ['Boa tarde', null],
+])
+
 // Com alguem da equipe escrevendo agora, nem palavra-chave aparece: seria o
 // robo falando por cima da atendente.
 await caso('Equipe conversando: o robô não responde nem palavra-chave', [
@@ -2458,6 +2469,128 @@ function exigirEvento(lista, evento, titulo, detalhe = undefined) {
   if (eventos.some((e) => e.evento === 'agendou')) {
     falhas.push('Evento do agendamento que falhou | contou como consulta marcada')
   } else passou++
+}
+
+
+// ---------------------------------------------------------------
+// Trocar de dia estando na lista de horarios
+// ---------------------------------------------------------------
+//
+// Caso real de 22/09/2026: a mae via os horarios de um dia, mudou de ideia e
+// tocou no item de OUTRO dia, na lista de datas da mensagem anterior. O robo
+// marcou um horario que ela nunca escolheu. O webhook agora passa o texto do
+// item ("terça, 01/09") quando o toque e numa lista antiga - e o robo precisa
+// entender esse texto como troca de dia, nunca como horario.
+//
+// PARA PROVAR: apague o bloco "Mudou de ideia sobre o DIA" em
+// aguardando_horario. O primeiro caso cai.
+await caso(
+  'Real 22/09: data digitada na lista de horários mostra os horários daquele dia',
+  [
+    ['Oi', 'Olá, Ana!'],
+    ['2', 'Em qual unidade'],
+    ['1', 'Datas disponíveis'],
+    ['1', 'Horários de'],
+    ['terça, 01/09', ['Horários de', '01/09']],
+  ],
+  {
+    pacientes: [ANA],
+    verificar: ({ marcadas, titulo }) => {
+      if (marcadas.length !== 0) {
+        falhas.push(`${titulo} | marcou ${marcadas.length} consulta(s) sem a pessoa escolher horário`)
+      } else passou++
+    },
+  },
+)
+
+await caso(
+  'Data sem vaga na lista de horários avisa e não marca nada',
+  [
+    ['Oi', 'Olá, Ana!'],
+    ['2', 'Em qual unidade'],
+    ['1', 'Datas disponíveis'],
+    ['1', 'Horários de'],
+    ['25/12', 'Não há horários livres em 25/12'],
+  ],
+  {
+    pacientes: [ANA],
+    verificar: ({ marcadas, titulo }) => {
+      if (marcadas.length !== 0) falhas.push(`${titulo} | marcou sem escolha`)
+      else passou++
+    },
+  },
+)
+
+// ...e o numero continua valendo como sempre: "4" e o quarto horario.
+await caso(
+  'Número na lista de horários continua marcando aquele horário',
+  [
+    ['Oi', 'Olá, Ana!'],
+    ['2', 'Em qual unidade'],
+    ['1', 'Datas disponíveis'],
+    ['1', 'Horários de'],
+    ['4', 'Consulta marcada!'],
+  ],
+  { pacientes: [ANA] },
+)
+
+
+// ---------------------------------------------------------------
+// Pedido de nota fiscal (22/09/2026)
+// ---------------------------------------------------------------
+//
+// Uma mae pediu a NF de uma consulta na primeira mensagem e recebeu o menu
+// inteiro, como se nao tivesse dito nada. O pedido e administrativo: o robo
+// entende, pede o que falta e chama a equipe.
+//
+// PARA PROVAR: comente as duas linhas `if (pediuNotaFiscal(texto))` em
+// atendimento.ts. Os dois primeiros casos caem.
+await caso(
+  'NF pedida na primeira mensagem vira pedido para a equipe, sem menu',
+  [['Boa tarde, estive com meu filho em consulta com o dr. e foi solicitado a nf', ['Anotei o pedido de *nota fiscal', 'nome do paciente']]],
+  {
+    primeiraMensagem: true,
+    verificar: ({ conversa, ultimoToque, titulo }) => {
+      if (ultimoToque.atencao !== 'documento') falhas.push(`${titulo} | atenção ${ultimoToque.atencao}`)
+      else passou++
+      if (conversa.booking_state !== 'atendente') falhas.push(`${titulo} | estado ${conversa.booking_state}`)
+      else passou++
+      if (ultimoToque.resposta.includes('Como podemos ajudar')) falhas.push(`${titulo} | mandou o menu`)
+      else passou++
+    },
+  },
+)
+
+await caso('NF escrita com o menu na tela também é entendida', [
+  ['Oi', 'Como podemos ajudar'],
+  ['preciso da nota fiscal da consulta de agosto', 'Anotei o pedido de *nota fiscal'],
+])
+
+await caso('"preciso do recibo da consulta" também é pedido', [
+  ['Oi', 'Como podemos ajudar'],
+  ['preciso do recibo da consulta para o reembolso', 'Anotei o pedido'],
+])
+
+// Pergunta sobre a clinica nao e pedido: quem so quer saber se ha recibo nao
+// pode ir para a fila da equipe.
+{
+  const { transcricao } = await caso('"vocês emitem recibo?" não vira pedido', [
+    ['Oi', 'Como podemos ajudar'],
+    ['vocês emitem recibo?', ''],
+  ])
+  const ultima = transcricao.at(-1) ?? ''
+  if (ultima.includes('Anotei o pedido')) falhas.push('"vocês emitem recibo?" virou pedido de nota')
+  else passou++
+}
+
+// Palavras que contem "nf" nao podem disparar.
+{
+  const { transcricao } = await caso('"confirmar" não é nota fiscal', [
+    ['Oi', 'Como podemos ajudar'],
+    ['quero confirmar uma informação', ''],
+  ])
+  if ((transcricao.at(-1) ?? '').includes('Anotei o pedido')) falhas.push('"confirmar" virou pedido de nota')
+  else passou++
 }
 
 console.log('\n============================================')

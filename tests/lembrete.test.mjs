@@ -14,6 +14,7 @@ import {
   respondendoEnvioNosso,
   janelaDeLembrete,
   fimDoDiaLocal,
+  oQueFoiEscolhido,
 } from './lembrete.build.mjs'
 
 let passou = 0
@@ -153,11 +154,50 @@ for (const rotulo of ['Cancelar consulta', 'preciso cancelar', 'quero desmarcar'
   conferir(`"${rotulo}" cancela`, interpretarResposta(rotulo, true).cancela === true)
 }
 
-// A negacao inverte a frase inteira: melhor cair no atendimento humano do que
-// confirmar a presenca de quem acabou de dizer que nao vai.
-for (const frase of ['não posso confirmar', 'não vou poder confirmar', 'não quero cancelar']) {
+// A negacao que manda na palavra inverte o sentido: melhor cair no atendimento
+// humano do que confirmar a presenca de quem acabou de dizer que nao vai.
+for (const frase of [
+  'não posso confirmar',
+  'não vou poder confirmar',
+  'não quero cancelar',
+  'não vou conseguir confirmar',
+  'não quero mais cancelar',
+]) {
   const r = interpretarResposta(frase, true)
   conferir(`"${frase}" não é tratada como resposta ao lembrete`, r.respondeuLembrete === false)
+}
+
+// ...mas so a negacao que MANDA na palavra. Ate 22/09/2026 qualquer "nao" em
+// qualquer lugar anulava o pedido inteiro, e uma mae ficou sem resposta: o
+// "nao" dela era da explicacao, nao do pedido. (Nomes inventados: este
+// repositorio e publico.)
+//
+// PARA PROVAR: volte `semNegacao` para a regra antiga (um "nao" em qualquer
+// lugar) e estes casos caem.
+{
+  const real =
+    'Bom dia! Aqui é a Marta, mãe da Helena, vou precisar reagendar a consulta, ' +
+    'pois fiquei doente e não consegui levar ela para fazer os exames que o doutor pediu.'
+  conferir(
+    'Caso de 22/09: "reagendar ... pois não consegui" pede remarcação',
+    interpretarResposta(real, true).remarca === true,
+  )
+}
+for (const [frase, campo] of [
+  ['Não vou conseguir ir. Preciso remarcar', 'remarca'],
+  ['não posso ir amanhã, pode cancelar', 'cancela'],
+  ['Não, quero confirmar sim', 'confirma'],
+  ['eu não tenho como ir amanhã então quero remarcar', 'remarca'],
+]) {
+  conferir(`"${frase}" é entendida (${campo})`, interpretarResposta(frase, true)[campo] === true)
+}
+
+// Duvida declarada nunca confirma nem cancela sozinha: cancelar apaga a vaga.
+{
+  const r = interpretarResposta('não sei se vou conseguir confirmar', true)
+  conferir('"não sei se vou conseguir confirmar" não confirma', r.confirma === false)
+  const c = interpretarResposta('não sei se preciso cancelar', true)
+  conferir('"não sei se preciso cancelar" não cancela', c.cancela === false)
 }
 
 conferir(
@@ -338,6 +378,38 @@ conferir(
   fimDoDiaLocal(emSP('2026-09-21T09:20:00'), 0, SP).toISOString() ===
     emSP('2026-09-22T00:00:00').toISOString(),
 )
+
+
+// ---------------------------------------------------------------------------
+// Toque em lista antiga (caso real de 22/09/2026)
+// ---------------------------------------------------------------------------
+//
+// PARA PROVAR: em oQueFoiEscolhido, devolva sempre `toque.id`. O caso da lista
+// antiga cai - e era ele que marcava o horario que ninguem escolheu.
+{
+  const real = { id: '4', titulo: 'sexta, 02/10', respondeA: 'wamid.LISTA_DE_DATAS', ultimoEnvio: 'wamid.LISTA_DE_HORARIOS' }
+  conferir(
+    'Toque numa lista antiga usa o texto do item, não o número',
+    oQueFoiEscolhido(real) === 'sexta, 02/10',
+    `veio ${oQueFoiEscolhido(real)}`,
+  )
+  conferir(
+    'Toque na lista mais recente usa o número, como sempre',
+    oQueFoiEscolhido({ ...real, respondeA: 'wamid.LISTA_DE_HORARIOS' }) === '4',
+  )
+  conferir(
+    'Sem saber qual foi a última mensagem, fica como sempre foi',
+    oQueFoiEscolhido({ ...real, ultimoEnvio: null }) === '4',
+  )
+  conferir(
+    'Evento sem contexto fica como sempre foi',
+    oQueFoiEscolhido({ ...real, respondeA: null }) === '4',
+  )
+  conferir(
+    'Texto digitado passa direto',
+    oQueFoiEscolhido({ id: '', titulo: 'quero marcar' }) === 'quero marcar',
+  )
+}
 
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)
 console.log(`FALHAS: ${falhas.length}`)

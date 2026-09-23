@@ -87,17 +87,49 @@ export function interpretarResposta(escolhido: string, dentroDaJanela: boolean):
   // Meta deixa de ser uma mudanca que quebra o sistema em silencio.
   const tem = (...palavras: string[]) => palavras.some((p) => r.includes(p))
 
-  // "Nao posso confirmar", "nao vou poder", "nao quero cancelar": a negacao
-  // inverte o sentido da frase inteira. Melhor cair no atendimento humano do que
-  // confirmar uma consulta que a pessoa acabou de dizer que nao vai comparecer.
-  const negou = /(^|\s)nao(\s|$)/.test(r)
+  // A palavra aparece SEM um "nao" mandando nela.
+  //
+  // "Nao posso confirmar", "nao quero cancelar": a negacao inverte o sentido, e
+  // e melhor cair no atendimento humano do que confirmar uma consulta que a
+  // pessoa acabou de dizer que nao vai comparecer.
+  //
+  // Ate 22/09/2026 bastava um "nao" em QUALQUER lugar da mensagem para anular
+  // tudo. Uma mae escreveu "vou precisar reagendar a consulta, pois nao
+  // consegui leva-la para fazer os exames" - o "nao"
+  // era da explicacao, nao do pedido. O robo descartou o reagendamento, ficou
+  // calado, e o pedido se perdeu.
+  //
+  // Agora o "nao" so vale se estiver na mesma oracao (sem virgula ou ponto no
+  // meio) e ate tres palavras antes. Cobre "nao posso confirmar" e "nao vou
+  // conseguir remarcar", e deixa passar "nao, quero confirmar" e o "nao" que
+  // vem depois do pedido.
+  const semNegacao = (...palavras: string[]) =>
+    palavras.some((palavra) => {
+      let desde = 0
+      for (;;) {
+        const pos = r.indexOf(palavra, desde)
+        if (pos < 0) return false
+        const oracao = r.slice(0, pos).split(/[,.;!?\n]/).pop() ?? ''
+        const antes = oracao.trim().split(/\s+/).filter(Boolean).slice(-3)
+        if (!antes.includes('nao')) return true
+        desde = pos + palavra.length
+      }
+    })
+
+  // "Nao sei se vou conseguir confirmar" tem o "nao" longe demais da palavra
+  // para a regra acima pegar, e mesmo assim nao e confirmacao. Duvida declarada
+  // nunca confirma nem cancela sozinha - cancelar apaga a vaga da familia.
+  // Remarcar pode: ele nao muda nada na agenda, so chama a equipe.
+  const duvida = /(^|\s)nao sei(\s|$)/.test(r)
 
   // O numero so vale dentro da janela para nao roubar as opcoes do menu.
-  const confirma = dentroDaJanela && !negou && (r === '1' || tem('confirmar', 'confirmo', 'confirmado'))
+  const confirma =
+    dentroDaJanela && !duvida && (r === '1' || semNegacao('confirmar', 'confirmo', 'confirmado'))
   const remarca =
-    dentroDaJanela && !negou && (r === '2' || tem('remarcar', 'reagendar', 'trocar a data', 'outro horario'))
+    dentroDaJanela &&
+    (r === '2' || semNegacao('remarcar', 'reagendar', 'trocar a data', 'outro horario'))
   const cancela =
-    dentroDaJanela && !negou && (r === '3' || tem('cancelar', 'cancelo', 'desmarcar'))
+    dentroDaJanela && !duvida && (r === '3' || semNegacao('cancelar', 'cancelo', 'desmarcar'))
 
   const pediuAjuda = tem('preciso de ajuda', 'preciso falar')
 
@@ -137,7 +169,11 @@ export function avisoDaResposta(resposta: Resposta) {
   const aviso = resposta.confirma
     ? 'Consulta confirmada, obrigado! Até lá.'
     : resposta.cancela
-      ? 'Consulta cancelada. Se quiser marcar outra data, digite 2.'
+      ? // Com botao desde 22/09/2026. "Digite 2" sozinho nem funcionava: sem
+        // etapa aberta, o 2 caia no menu, e a pessoa precisava mandar 2 de
+        // novo. Agora o webhook deixa o menu ativo e oferece o botao - quem
+        // cancelou pode ter so trocado de ideia sobre o dia.
+        'Consulta cancelada. Quer já escolher uma nova data? Toque no botão abaixo ou digite 2.'
       : 'Certo! Já avisei a nossa equipe para remarcar com você. Alguém retorna por aqui.'
   return `${aviso}\n\nDigite 0 se precisar de mais alguma coisa.`
 }
@@ -243,4 +279,45 @@ export function janelaDeLembrete(agora: Date, dias: number, timezone: string) {
     inicio: new Date(agora.getTime() + ANTECEDENCIA_MINIMA_HORAS * 3600 * 1000),
     fim: fimDoDiaLocal(agora, dias, timezone),
   }
+}
+
+// ---------------------------------------------------------------------------
+// Toque em botao ou lista
+// ---------------------------------------------------------------------------
+
+/**
+ * O que a pessoa escolheu ao tocar num botao ou item de lista do robo.
+ *
+ * Os ids das opcoes sao o numero da opcao ("1", "2", "4"), para que tocar e
+ * digitar entrem pelo mesmo caminho. So que o WhatsApp deixa tocar em listas de
+ * mensagens ANTIGAS, e ai o numero responde a pergunta errada.
+ *
+ * Caso real de 22/09/2026: a mae estava escolhendo o horario do dia 09/10, mudou
+ * de ideia e tocou em "sexta, 02/10" na lista de DATAS da mensagem anterior.
+ * Esse item era o 4. O robo leu "4" como resposta a pergunta atual, de
+ * HORARIOS, e marcou 09/10 as 10:40 - um horario que ela nunca escolheu.
+ *
+ * A Meta diz em qual mensagem estava o botao tocado (context.id). Se nao e a
+ * nossa ultima mensagem, o numero nao vale: usa-se o texto do item ("sexta,
+ * 02/10"), que diz o que a pessoa quis sem depender da pergunta. No pior caso o
+ * robo responde "nao entendi" - nunca marca o que ninguem escolheu.
+ *
+ * Sem os dois ids para comparar (envio que falhou, evento sem contexto), fica
+ * como sempre foi.
+ */
+export function oQueFoiEscolhido(toque: {
+  /** Id do botao ou item tocado. Vazio quando a pessoa digitou. */
+  id: string
+  /** Texto visivel do botao ou item, ou o que a pessoa digitou. */
+  titulo: string
+  /** Id da mensagem onde estava o botao (context.id da Meta). */
+  respondeA?: string | null
+  /** Id da nossa mensagem mais recente nesta conversa. */
+  ultimoEnvio?: string | null
+}): string {
+  if (!toque.id) return toque.titulo
+  const antigo = Boolean(
+    toque.respondeA && toque.ultimoEnvio && toque.respondeA !== toque.ultimoEnvio,
+  )
+  return antigo && toque.titulo ? toque.titulo : toque.id
 }

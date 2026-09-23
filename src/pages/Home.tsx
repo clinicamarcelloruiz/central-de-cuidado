@@ -18,9 +18,11 @@ import {
 } from 'lucide-react'
 import { useDb } from '@/lib/store'
 import {
+  conversasEsperandoEquipe,
   getCurrentMembership,
   listPendingRequests,
   PENDING_ACCESS_MESSAGE,
+  type EsperaDaEquipe,
   type PendingRequest,
 } from '@/lib/repository'
 import { dueCount } from '@/lib/followup'
@@ -127,6 +129,20 @@ function preferenciaDeTopo(): boolean | null {
   return null
 }
 
+/** Titulo original da aba, do index.html. */
+const TITULO_DA_ABA = 'Central de Cuidado | Dr. Marcello Ruiz'
+
+/** Meia hora: a partir disso a espera deixa de ser "chegou agora". */
+const ESPERA_LONGA_MS = 30 * 60 * 1000
+
+function haQuantoTempo(iso: string | null): string {
+  if (!iso) return ''
+  const minutos = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  if (minutos < 60) return `há ${minutos} min`
+  const horas = Math.floor(minutos / 60)
+  return horas < 24 ? `há ${horas}h` : `há ${Math.floor(horas / 24)} dia(s)`
+}
+
 export default function Home() {
   const { user, signOut } = useAuth()
   const {
@@ -179,6 +195,14 @@ export default function Home() {
   >(null)
   const pendentes = dueCount(db.patients)
   const [solicitacoes, setSolicitacoes] = useState<PendingRequest[]>([])
+  // Conversas esperando alguem da equipe (22/09/2026). Ver o bloco do
+  // contador, mais abaixo, para o porque.
+  const [espera, setEspera] = useState<EsperaDaEquipe & { longa: boolean; ha: string }>({
+    total: 0,
+    maisAntigaDesde: null,
+    longa: false,
+    ha: '',
+  })
 
   // Solicitacoes do WhatsApp esperando a equipe. Ficam aqui, e nao dentro da
   // Agenda, porque o aviso precisa aparecer para quem abre o sistema em
@@ -187,6 +211,19 @@ export default function Home() {
     try {
       const membership = await getCurrentMembership()
       if (!membership) return
+      // Junto das solicitacoes, e no mesmo relogio de 60s: um aviso a mais
+      // nao justifica outra rodada de consultas.
+      // "Ha quanto tempo" e calculado aqui, na chegada do dado, e nao durante
+      // o desenho da tela: o relogio no meio do render faria a tela mudar de
+      // opiniao a cada redesenho.
+      void conversasEsperandoEquipe(membership.clinicId).then((dados) => {
+        const desde = dados.maisAntigaDesde ? new Date(dados.maisAntigaDesde).getTime() : null
+        setEspera({
+          ...dados,
+          longa: desde !== null && Date.now() - desde > ESPERA_LONGA_MS,
+          ha: haQuantoTempo(dados.maisAntigaDesde),
+        })
+      })
       setSolicitacoes(await listPendingRequests(membership.clinicId))
     } catch (cause) {
       console.error('Nao consegui carregar as solicitacoes pendentes', cause)
@@ -207,6 +244,20 @@ export default function Home() {
     const timer = window.setInterval(() => void carregarSolicitacoes(), 60_000)
     return () => window.clearInterval(timer)
   }, [carregarSolicitacoes])
+  /**
+   * O contador no titulo da aba do navegador.
+   *
+   * Em 22/09/2026 quatro familias esperaram a tarde inteira sem resposta, e a
+   * unica pista estava dentro da tela de Respostas. Com o numero no titulo -
+   * "(3) Central de Cuidado" - quem esta na Agenda, num prontuario, ou ate em
+   * outra aba do navegador ve que tem gente esperando. E o mesmo recurso que o
+   * WhatsApp Web usa, e por isso a recepcao ja sabe ler.
+   */
+  useEffect(() => {
+    document.title = espera.total > 0 ? `(${espera.total}) ${TITULO_DA_ABA}` : TITULO_DA_ABA
+  }, [espera.total])
+  const esperaLonga = espera.longa
+
   const meta = PAGE_META[tab]
   const tabs = role === 'owner' ? TABS : TABS.filter((item) => item.key !== 'admin')
 
@@ -416,6 +467,21 @@ export default function Home() {
                     }`}>
                       {solicitacoes.length}
                     </span>
+                  ) : item.key === 'conversas' && espera.total > 0 ? (
+                    /* Ambar enquanto a espera e curta; vermelho depois de meia
+                       hora, que e quando "chegou agora" virou "esquecido". */
+                    <span
+                      title={`${espera.total} ${espera.total === 1 ? 'conversa esperando' : 'conversas esperando'} a equipe. A mais antiga: ${espera.ha}.`}
+                      className={`min-w-6 rounded-full px-1.5 py-1 text-center text-[10px] font-extrabold ${
+                        active
+                          ? 'bg-[#081b2c] text-white'
+                          : esperaLonga
+                            ? 'bg-red-500 text-white'
+                            : 'bg-[#e0a33a] text-[#081b2c]'
+                      }`}
+                    >
+                      {espera.total}
+                    </span>
                   ) : item.key === 'followups' && pendentes > 0 ? (
                     <span className={`min-w-6 rounded-full px-1.5 py-1 text-center text-[10px] font-extrabold ${
                       active ? 'bg-[#081b2c] text-white' : 'bg-[#3585c6] text-white'
@@ -613,6 +679,13 @@ export default function Home() {
               <span>{item.shortLabel}</span>
               {item.key === 'followups' && pendentes > 0 && !active && (
                 <span className="absolute right-[25%] top-1.5 h-2 w-2 rounded-full bg-[#2f7fc1] ring-2 ring-white" />
+              )}
+              {item.key === 'conversas' && espera.total > 0 && !active && (
+                <span
+                  className={`absolute right-[25%] top-1.5 h-2 w-2 rounded-full ring-2 ring-white ${
+                    esperaLonga ? 'bg-red-500' : 'bg-[#e0a33a]'
+                  }`}
+                />
               )}
             </button>
           )

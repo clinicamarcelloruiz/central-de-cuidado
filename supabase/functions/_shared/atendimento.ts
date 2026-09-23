@@ -18,6 +18,7 @@
  * meta-webhook, que ja tem o token e o numero em maos.
  */
 
+import { dataDeNascimentoIso } from './datas.ts'
 import type { adminClient } from './whatsapp.ts'
 import { cadastrarDaFicha, type ConsultaParaCadastro } from './cadastro.ts'
 import {
@@ -1021,6 +1022,48 @@ async function chamarEquipe(admin: Admin, conversationId: string): Promise<Resul
       'Atendemos de segunda a sexta, das 8h às 18h. Fora desse horário, ' +
       'respondemos no próximo dia útil.\n\n' + VOLTA,
     atencao: 'atendente',
+  }
+}
+
+/**
+ * Pedido de nota fiscal ou recibo de consulta ja feita.
+ *
+ * Existe desde 22/09/2026. Uma mae escreveu "estive com meu filho em consulta
+ * e foi solicitada a NF" e recebeu o menu inteiro, como se nao tivesse dito
+ * nada; depois apertou "falar com a equipe" e escreveu tudo de novo. E pedido
+ * administrativo que so a equipe resolve - o robo so precisa entender o que e,
+ * pedir o que falta e chamar alguem.
+ *
+ * "Recibo" so conta com verbo de pedido ou "da consulta": "voces emitem
+ * recibo?" e pergunta sobre a clinica, e a resposta pronta de valores ja cobre.
+ */
+export function pediuNotaFiscal(texto: string): boolean {
+  const t = normalizar(texto)
+  if (/(^|[^a-z])(nf|nfe|nfs|nfse|nfs-e|nota fiscal|notinha)([^a-z]|$)/.test(t)) return true
+  return (
+    /(preciso|precisava|gostaria|quero|queria|mandar|manda|enviar|envia|solicitar|pedir|nao recebi)[^.?!]{0,30}recibo/.test(t) ||
+    /recibo d[aeo] (consulta|atendimento)/.test(t)
+  )
+}
+
+async function registrarPedidoDeNota(admin: Admin, conversationId: string): Promise<Resultado> {
+  registrar('nota_fiscal_pedida')
+  // Mesma fila do "falar com a equipe": o robo para de oferecer menu enquanto
+  // alguem nao responde, e a conversa acende com o motivo "documento".
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'atendente',
+    booking_options: null,
+    booking_unit_id: null,
+    auto_replies_while_waiting: 0,
+  })
+  return {
+    resposta:
+      '🧾 Anotei o pedido de *nota fiscal / recibo*.\n\n' +
+      'Para a equipe já localizar, escreva aqui o *nome do paciente* e a *data da consulta*, ' +
+      'se ainda não mandou.\n\n' +
+      'Atendemos de segunda a sexta, das 8h às 18h. Fora desse horário, ' +
+      'respondemos no próximo dia útil.',
+    atencao: 'documento',
   }
 }
 
@@ -2164,9 +2207,10 @@ async function guardarDado(
   // Data so quando e data: "marco de 2019" fica no agendamento, para alguem ler.
   let paraOCadastro: string = valor
   if (pergunta.chave === 'nascimento') {
-    const m = valor.trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/)
-    if (!m) return
-    paraOCadastro = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+    // Mesma leitura do cadastro criado na vespera (ver _shared/datas.ts).
+    const iso = dataDeNascimentoIso(valor)
+    if (!iso) return
+    paraOCadastro = iso
   }
 
   const { error: erroDoCadastro } = await admin
@@ -2696,6 +2740,9 @@ export async function tratarConversa(opcoes: {
     // que a secretaria esta tocando, atrapalha em vez de ajudar.
     if (!opcoes.podeIniciarMenu) return null
 
+    // Nota fiscal: a mensagem ja diz o que a pessoa quer. Ver pediuNotaFiscal.
+    if (pediuNotaFiscal(texto)) return await registrarPedidoDeNota(admin, conversationId)
+
     // Quem pediu para marcar na primeira mensagem ve o MENU, e nao uma resposta
     // pronta. Sem esta linha, "quero marcar retorno para o Anthony" caia no
     // texto de documentos, porque "retorno" e palavra-chave dele - foi o que
@@ -2878,6 +2925,9 @@ export async function tratarConversa(opcoes: {
     // A trava ja existia (12 horas desde a ultima mensagem de gente), mas so
     // valia para quem estava sem etapa nenhuma. No menu, ela nao valia.
     if (!opcoes.podeIniciarMenu) return null
+
+    // Com o menu na tela, a pessoa pode escrever o pedido em vez de escolher.
+    if (pediuNotaFiscal(texto)) return await registrarPedidoDeNota(admin, conversationId)
 
     // Antes de dizer "nao entendi": a pessoa pode ter ignorado a lista e
     // escrito a duvida dela, que e o que se faz num WhatsApp de verdade.
@@ -3519,6 +3569,37 @@ export async function tratarConversa(opcoes: {
         resposta:
           `Esse horário não está entre os livres deste dia. Os disponíveis são:\n\n${linhas}\n\n` +
           'Responda com o número, ou digite VOLTAR para escolher outro dia.',
+      }
+    }
+
+    // Mudou de ideia sobre o DIA, ja estando na lista de horarios.
+    //
+    // Caso real de 22/09/2026: a mae via os horarios de 09/10 e tocou em
+    // "sexta, 02/10" na lista de datas da mensagem anterior. O certo e mostrar
+    // os horarios de 02/10 - foi isso que ela pediu. Vem depois da hora escrita
+    // de proposito: "09/10 as 10h" e pedido de HORARIO, e ja foi tratado acima.
+    //
+    // O dia e procurado entre os horarios livres, e nao montado da data: assim
+    // nao ha ano para adivinhar, e um dia sem vaga responde que nao tem vaga.
+    const outroDia = dataEscrita(texto)
+    if (outroDia && unidadeEmAndamento) {
+      const timezone = await fusoDaClinica(admin, clinicId)
+      const { horarios } = await horariosLivres(admin, clinicId, unidadeEmAndamento)
+      const chave = horarios
+        .map((h) => chaveDoDia(h.inicio, timezone))
+        .find((c) => {
+          const [, mes, dia] = c.split('-').map(Number)
+          return dia === outroDia.dia && mes === outroDia.mes
+        })
+      if (chave) {
+        return await perguntarHorario(admin, clinicId, conversationId, unidadeEmAndamento, chave)
+      }
+      const dd = String(outroDia.dia).padStart(2, '0')
+      const mm = String(outroDia.mes).padStart(2, '0')
+      return {
+        resposta:
+          `Não há horários livres em ${dd}/${mm}.\n\n` +
+          'Responda com o número de um horário da lista acima, ou digite VOLTAR para ver os dias disponíveis.',
       }
     }
 

@@ -1,4 +1,5 @@
 import type { adminClient } from './whatsapp.ts'
+import { dataDeNascimentoIso } from './datas.ts'
 
 /**
  * O cadastro do paciente a partir do que a familia informou no WhatsApp.
@@ -70,10 +71,7 @@ export async function cadastrarDaFicha(
 
   // Data so quando e data. "marco de 2019" fica em branco e a equipe pergunta:
   // uma data inventada no prontuario e pior do que um campo vazio.
-  const m = (consulta.intake_birth_date ?? '').trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/)
-  const nascimento = m
-    ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
-    : null
+  const nascimento = dataDeNascimentoIso(consulta.intake_birth_date ?? '')
 
   const unidade = Array.isArray(consulta.clinic_units)
     ? consulta.clinic_units[0]?.name ?? ''

@@ -2934,3 +2934,38 @@ export async function listVagasDeCancelamento(
     canceladoEm: linha.cancelled_at ?? '',
   }))
 }
+
+/**
+ * Quantas conversas esperam alguem da equipe, e desde quando a mais antiga.
+ *
+ * Existe desde 22/09/2026. Naquele dia quatro familias esperaram horas - uma
+ * delas escreveu "alguem pode me ajudar?" quatro horas e meia depois do
+ * primeiro pedido - e nenhuma mensagem da equipe saiu o dia inteiro. O aviso
+ * existia, mas so dentro da tela de Respostas: quem estava na Agenda ou num
+ * prontuario nao via nada.
+ *
+ * O "desde" e a ultima mensagem da conversa, e nao a hora exata em que a
+ * bandeira subiu (que nao e guardada). Serve para o que importa: saber se a
+ * espera e de minutos ou de horas.
+ */
+export interface EsperaDaEquipe {
+  total: number
+  maisAntigaDesde: string | null
+}
+
+export async function conversasEsperandoEquipe(clinicId: string): Promise<EsperaDaEquipe> {
+  const { data, error } = await supabase
+    .from('whatsapp_conversations')
+    .select('last_message_at')
+    .eq('clinic_id', clinicId)
+    .eq('needs_attention', true)
+    .neq('status', 'opted_out')
+    .order('last_message_at', { ascending: true, nullsFirst: false })
+  // Aviso de apoio: se a consulta falhar, o sistema segue sem o contador.
+  if (error) return { total: 0, maisAntigaDesde: null }
+  const linhas = data ?? []
+  return {
+    total: linhas.length,
+    maisAntigaDesde: linhas.find((l) => l.last_message_at)?.last_message_at ?? null,
+  }
+}

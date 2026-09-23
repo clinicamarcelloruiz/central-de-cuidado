@@ -192,8 +192,14 @@ Deno.serve(async (req) => {
         // Na telemedicina o lembrete diz "por vídeo", e nao o nome da unidade
         // que cedeu o horario - senao a familia sai de casa para uma consulta
         // que era online.
+        //
+        // O texto em volta e do modelo aprovado na Meta ("na unidade {{4}}") e
+        // nao muda sem nova aprovacao. Ate 22/09/2026 o parametro era
+        // "telemedicina (por vídeo)", e a familia lia "na unidade telemedicina
+        // (por vídeo)". Com "virtual", a frase fecha: "na unidade virtual
+        // (consulta por vídeo)".
         const unidade = consulta.modality === 'telemedicina'
-          ? 'telemedicina (por vídeo)'
+          ? 'virtual (consulta por vídeo)'
           : (consulta.clinic_units as { name?: string } | null)?.name || 'a clínica'
 
         const { data: conversa, error: conversaError } = await admin

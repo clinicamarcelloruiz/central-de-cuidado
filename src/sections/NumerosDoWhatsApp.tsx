@@ -41,7 +41,8 @@ const NOME_DO_MOTIVO: Record<string, string> = {
   atendente: 'Pediu para falar com a equipe',
   anexo: 'Mandou foto ou documento',
   ajuda: 'Pediu ajuda no acompanhamento',
-  documento: '2ª via de receita ou exame',
+  // Desde 22/09/2026 o pedido de nota fiscal tambem entra como 'documento'.
+  documento: '2ª via, exame ou nota fiscal',
   farmacia: 'Correção pedida pela farmácia',
   falha: 'O robô não conseguiu concluir',
   cancelou_sozinho: 'Cancelou a consulta',
@@ -296,6 +297,30 @@ export default function NumerosDoWhatsApp() {
               )}
             </Bloco>
           </div>
+
+          {/* Respostas ao lembrete da vespera (22/09/2026). O lembrete existe
+              para produzir estas tres respostas, e ate aqui elas nao eram
+              contadas em lugar nenhum. */}
+          <Bloco
+            titulo="Respostas ao lembrete da véspera"
+            subtitulo="O que as famílias fizeram com o lembrete, pelo botão ou por escrito"
+          >
+            {(() => {
+              const respostas = [
+                { nome: 'Confirmaram presença', valor: dados.eventos.lembrete_confirmou ?? 0, cor: SAGE },
+                { nome: 'Pediram para remarcar', valor: dados.eventos.lembrete_remarcar ?? 0, cor: AZUL },
+                { nome: 'Cancelaram', valor: dados.eventos.lembrete_cancelou ?? 0, cor: VERMELHO },
+              ]
+              const maior = Math.max(...respostas.map((r) => r.valor), 1)
+              return respostas.every((r) => r.valor === 0) ? (
+                <p className="text-[11px] text-slate-500">Nenhuma resposta a lembrete registrada neste período.</p>
+              ) : (
+                respostas.map((r) => (
+                  <Barra key={r.nome} rotulo={r.nome} valor={r.valor} max={maior} cor={r.cor} />
+                ))
+              )
+            })()}
+          </Bloco>
 
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
             <Numero

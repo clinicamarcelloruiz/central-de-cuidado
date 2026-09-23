@@ -8,6 +8,7 @@ import {
   equipeFalouRecentemente as equipeFalouHaPouco,
   interpretarResposta,
   mudancaDaConsulta,
+  oQueFoiEscolhido,
   respondendoEnvioNosso as dentroDaJanelaDeResposta,
 } from '../_shared/lembrete.ts'
 
@@ -31,6 +32,8 @@ type WebhookMessage = {
     button_reply?: { id?: string; title?: string }
     list_reply?: { id?: string; title?: string }
   }
+  /** Em qual mensagem nossa estava o botao tocado. */
+  context?: { id?: string; from?: string }
 }
 
 type DeliveryError = { title?: string; message?: string }
@@ -405,11 +408,14 @@ Deno.serve(async (req) => {
           // voz: respondeu 11:36, a pessoa escreveu "Oi" as 14:28 e nao recebeu
           // nada.
           let equipeFalouRecentemente = false
+          // Id da nossa mensagem mais recente, para saber se um toque veio de
+          // uma lista antiga. Ver oQueFoiEscolhido em _shared/lembrete.ts.
+          let ultimoEnvioId: string | null = null
           if (conversaAnterior?.id) {
             const [ultimoNossoResult, ultimoHumanoResult] = await Promise.all([
               admin
                 .from('whatsapp_messages')
-                .select('followup_id,appointment_id,created_at')
+                .select('followup_id,appointment_id,created_at,external_message_id')
                 .eq('conversation_id', conversaAnterior.id)
                 .eq('direction', 'outbound')
                 .order('created_at', { ascending: false })
@@ -427,13 +433,27 @@ Deno.serve(async (req) => {
             ])
 
             respondendoEnvioNosso = dentroDaJanelaDeResposta(ultimoNossoResult.data)
+            ultimoEnvioId = (ultimoNossoResult.data as { external_message_id?: string | null } | null)?.external_message_id ?? null
             equipeFalouRecentemente = equipeFalouHaPouco(ultimoHumanoResult.data)
           }
 
           const body = messageBody(message)
           // O que a pessoa quis dizer. Vindo de toque, e o id do botao; digitado,
           // e o proprio texto. O `body` segue sendo o que aparece no historico.
-          const escolhido = idDoToque(message) || body
+          //
+          // Toque em lista do robo passa por oQueFoiEscolhido: se a lista era de
+          // uma mensagem antiga, o numero da opcao responderia a pergunta errada.
+          // Botao de modelo aprovado (lembrete) fica fora - o payload dele,
+          // "CONFIRMAR", significa a mesma coisa em qualquer mensagem.
+          const escolhido =
+            message.type === 'interactive'
+              ? oQueFoiEscolhido({
+                  id: idDoToque(message),
+                  titulo: body,
+                  respondeA: message.context?.id ?? null,
+                  ultimoEnvio: ultimoEnvioId,
+                })
+              : idDoToque(message) || body
           // Uma chamada so, e a regra mora em _shared/lembrete.ts, coberta por
           // testes. Aqui ficou apenas o desempacotar.
           const resposta = interpretarResposta(escolhido, respondendoEnvioNosso)
@@ -652,6 +672,41 @@ Deno.serve(async (req) => {
                     .eq('id', conversation.id)
                 }
               }
+            } else {
+              /**
+               * O robo decidiu ficar calado: quem responde e uma pessoa.
+               *
+               * Calar e certo em tres situacoes - a conversa ja esta na fila da
+               * equipe, alguem da equipe falou ha pouco, ou a pessoa respondeu a
+               * um lembrete ou acompanhamento com algo que o robo nao sabe ler.
+               * O erro era calar SEM AVISAR NINGUEM.
+               *
+               * Em 22/09/2026 duas familias ficaram assim o dia inteiro. Uma mae
+               * pediu para remarcar respondendo ao lembrete; uma
+               * outra familia, que ja estava na fila desde a vespera, mandou
+               * "Boa tarde". O robo se calou nas duas - corretamente - e as duas
+               * conversas ficaram apagadas na tela, so com o contador de nao
+               * lidas. Ninguem da equipe olhou.
+               *
+               * Silencio deliberado agora acende a conversa. O motivo que ja
+               * existia fica; sem motivo, entra "atendente", que o banco aceita
+               * desde sempre (um motivo novo exigiria migration, e a funcao
+               * costuma subir antes dela).
+               */
+              try {
+                const { error: erroDoSilencio } = await admin
+                  .from('whatsapp_conversations')
+                  .update({
+                    needs_attention: true,
+                    attention_reason: conversaAnterior?.attention_reason || 'atendente',
+                  })
+                  .eq('id', conversation.id)
+                if (erroDoSilencio) {
+                  console.warn('Robo calou mas nao consegui acender a conversa', erroDoSilencio)
+                }
+              } catch (erro) {
+                console.warn('Robo calou mas nao consegui acender a conversa', erro)
+              }
             }
 
             /**
@@ -722,7 +777,43 @@ Deno.serve(async (req) => {
                 .eq('status', 'scheduled')
             }
 
-            await responder(avisoDaResposta(resposta))
+            // Cancelou: deixa o menu ativo, para o "2" do botao abrir a agenda
+            // direto em vez de mostrar o menu de novo.
+            if (resposta.cancela) {
+              const agora = new Date().toISOString()
+              await admin
+                .from('whatsapp_conversations')
+                .update({
+                  booking_state: 'menu',
+                  booking_options: null,
+                  menu_sent_at: agora,
+                  booking_updated_at: agora,
+                })
+                .eq('id', conversation.id)
+            }
+            await responder(avisoDaResposta(resposta), null, {
+              botoes: resposta.cancela ? [{ id: '2', titulo: 'Escolher nova data' }] : undefined,
+            })
+
+            // Resposta ao lembrete tambem entra nos numeros (22/09/2026). Ate
+            // aqui so o menu registrava eventos, e o painel nao sabia quantas
+            // familias confirmaram ou cancelaram pelo lembrete - que e justamente
+            // o que o lembrete existe para produzir.
+            try {
+              const evento = resposta.confirma
+                ? 'lembrete_confirmou'
+                : resposta.cancela
+                  ? 'lembrete_cancelou'
+                  : 'lembrete_remarcar'
+              const { error: erroDoEvento } = await admin.from('whatsapp_bot_events').insert({
+                clinic_id: clinicId,
+                conversation_id: conversation.id,
+                evento,
+              })
+              if (erroDoEvento) console.warn('Nao consegui registrar a resposta ao lembrete', erroDoEvento)
+            } catch (erro) {
+              console.warn('Nao consegui registrar a resposta ao lembrete', erro)
+            }
           }
 
           // "Preciso de ajuda" explicito, e nao qualquer coisa que acendeu a

@@ -1,5 +1,7 @@
 // A marca de "vagou por cancelamento" nos horarios livres da Agenda.
 //
+// Nomes inventados: este repositorio e publico.
+//
 // Esta tela nao tem banco falso como o robo, entao o que se testa aqui e a
 // unica regra com chance real de errar: casar o horario livre com a consulta
 // cancelada. Os dois vem de lugares diferentes do Postgres e podem escrever o
@@ -29,19 +31,19 @@ const vagou = (mapa, slot) => mapa.get(new Date(slot).getTime())
 
 {
   // O caso que motivou o teste: o mesmo momento escrito de tres formas.
-  const mapa = montarMapa([{ quando: '2026-09-23T19:40:00+00:00', paciente: 'Helena' }])
+  const mapa = montarMapa([{ quando: '2026-09-23T19:40:00+00:00', paciente: 'Beatriz' }])
 
   conferir(
     'Mesmo instante com "Z" em vez de "+00:00" casa',
-    vagou(mapa, '2026-09-23T19:40:00Z')?.paciente === 'Helena',
+    vagou(mapa, '2026-09-23T19:40:00Z')?.paciente === 'Beatriz',
   )
   conferir(
     'Mesmo instante com milissegundos casa',
-    vagou(mapa, '2026-09-23T19:40:00.000Z')?.paciente === 'Helena',
+    vagou(mapa, '2026-09-23T19:40:00.000Z')?.paciente === 'Beatriz',
   )
   conferir(
     'Mesmo instante escrito no fuso de Sao Paulo casa',
-    vagou(mapa, '2026-09-23T16:40:00-03:00')?.paciente === 'Helena',
+    vagou(mapa, '2026-09-23T16:40:00-03:00')?.paciente === 'Beatriz',
   )
   conferir(
     'Comparar TEXTO perderia a marca (e por isso a tela nao faz isso)',
@@ -51,7 +53,7 @@ const vagou = (mapa, slot) => mapa.get(new Date(slot).getTime())
 
 {
   // Nao pode marcar horario que ninguem cancelou.
-  const mapa = montarMapa([{ quando: '2026-09-23T19:40:00Z', paciente: 'Helena' }])
+  const mapa = montarMapa([{ quando: '2026-09-23T19:40:00Z', paciente: 'Beatriz' }])
   conferir('Horario vizinho de 40min depois nao e marcado', !vagou(mapa, '2026-09-23T20:20:00Z'))
   conferir('Horario vizinho de 40min antes nao e marcado', !vagou(mapa, '2026-09-23T19:00:00Z'))
   conferir('Mesmo horario em outro dia nao e marcado', !vagou(mapa, '2026-09-24T19:40:00Z'))
@@ -60,11 +62,11 @@ const vagou = (mapa, slot) => mapa.get(new Date(slot).getTime())
 {
   // Duas pessoas cancelaram o mesmo dia: cada horario com o seu nome.
   const mapa = montarMapa([
-    { quando: '2026-09-23T17:00:00Z', paciente: 'Marta' },
-    { quando: '2026-09-23T19:40:00Z', paciente: 'Helena' },
+    { quando: '2026-09-23T17:00:00Z', paciente: 'Otávio' },
+    { quando: '2026-09-23T19:40:00Z', paciente: 'Beatriz' },
   ])
-  conferir('Cada vaga leva o nome certo (1)', vagou(mapa, '2026-09-23T17:00:00Z')?.paciente === 'Marta')
-  conferir('Cada vaga leva o nome certo (2)', vagou(mapa, '2026-09-23T19:40:00Z')?.paciente === 'Helena')
+  conferir('Cada vaga leva o nome certo (1)', vagou(mapa, '2026-09-23T17:00:00Z')?.paciente === 'Otávio')
+  conferir('Cada vaga leva o nome certo (2)', vagou(mapa, '2026-09-23T19:40:00Z')?.paciente === 'Beatriz')
 }
 
 {
