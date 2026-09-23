@@ -641,23 +641,13 @@ export default function Conversations({
       ])
       setMessages(historico)
       setJanelaAte(janela)
-      if (conversation.unreadCount > 0 || conversation.needsAttention) {
+      if (conversation.unreadCount > 0) {
         await markConversationSeen(conversation.id)
-        // Pedido de 2ª via e de farmácia continuam marcados depois de lidos:
-        // eles só terminam quando o documento sai. O servidor decide isso; a
-        // tela repete a mesma regra para não piscar a etiqueta e trazê-la de
-        // volta no recarregamento seguinte.
-        const pendente =
-          conversation.attentionReason === 'documento' ||
-          conversation.attentionReason === 'farmacia'
+        // Abrir so zera as novas. A etiqueta de atencao ("Quer falar com a
+        // equipe" e as outras) fica ate alguem responder, concluir ou
+        // destravar: ler para acompanhar nao e atender (ver markConversationSeen).
         setConversations((current) =>
-          current.map((item) =>
-            item.id === conversation.id
-              ? pendente
-                ? { ...item, unreadCount: 0 }
-                : { ...item, unreadCount: 0, needsAttention: false, attentionReason: null }
-              : item,
-          ),
+          current.map((item) => (item.id === conversation.id ? { ...item, unreadCount: 0 } : item)),
         )
       }
     } catch (cause) {

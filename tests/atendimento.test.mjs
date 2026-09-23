@@ -264,6 +264,10 @@ async function caso(titulo, passos, opcoes = {}) {
   // mensagem passa `primeiraMensagem: true`.
   conversa.menu_sent_at = opcoes.primeiraMensagem ? null : '2026-08-31T12:00:00Z'
 
+  // Conversa que ja estava no meio de uma etapa quando o caso comeca - por
+  // exemplo, parada numa pergunta que deixou de fazer sentido.
+  Object.assign(conversa, opcoes.estadoInicial ?? {})
+
   const transcricao = []
   let ultimoToque = { resposta: '', botoes: undefined, lista: undefined }
 
@@ -1715,6 +1719,16 @@ await caso('Responder o nome do plano por escrito também vale', [
   ['2', 'pelo convênio'],
   ['trasmontano', 'Datas disponíveis'],
 ], { unidades: UNIDADE_COM_CONVENIO, slots: { 'u-santos': SLOTS_CHEIOS['u-santos'] } })
+
+// 23/09/2026: o convênio foi encerrado com uma família parada na pergunta.
+// A unidade agora está sem plano; a próxima mensagem dela não pode receber
+// "Responda 1 para  ou 2 para particular" com o nome em branco.
+await caso('Convênio encerrado no meio da pergunta segue como particular', [
+  ['quero marcar', 'Datas disponíveis'],
+], {
+  unidades: UMA_UNIDADE,
+  estadoInicial: { booking_state: 'aguardando_convenio', booking_unit_id: UMA_UNIDADE[0].id },
+})
 
 // A unidade sem convênio não ganha passo nenhum: vai direto para as datas.
 await caso('Unidade sem convênio vai direto para as datas', [

@@ -1053,8 +1053,12 @@ export default function Agenda({
                                 Pediu para remarcar
                               </span>
                             )}
+                            {/* Vermelho desde 23/09/2026, a pedido da clinica.
+                                Era cinza-claro e passava por "tudo certo":
+                                quem nao confirmou e justamente quem a recepcao
+                                precisa ligar antes da consulta. */}
                             {!item.confirmedAt && !item.rescheduleRequestedAt && item.reminderSentAt && (
-                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-extrabold text-white/70">
+                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[9px] font-extrabold text-white">
                                 Lembrete enviado, sem resposta
                               </span>
                             )}
