@@ -286,9 +286,17 @@ Deno.serve(async (req) => {
     }
 
     // Respondeu: a conversa deixa de pedir atencao e some o contador de novas.
+    // E se estava concluida, volta a aberta: quem escreve de novo esta
+    // retomando o atendimento, e ele nao pode continuar com cara de encerrado
+    // (23/09/2026, conversa concluida recebeu mensagem e seguiu "Concluida").
     await admin
       .from('whatsapp_conversations')
-      .update({ needs_attention: false, unread_count: 0, last_message_at: agora })
+      .update({
+        needs_attention: false,
+        unread_count: 0,
+        last_message_at: agora,
+        ...(visivel.status === 'resolved' ? { status: 'open' } : {}),
+      })
       .eq('id', visivel.id)
 
     return json({ ok: true, message: salva, windowClosesAt: fechaEm.toISOString() })

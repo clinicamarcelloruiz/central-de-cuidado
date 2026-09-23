@@ -155,13 +155,23 @@ function messageBody(message: WebhookMessage) {
 }
 
 
+/**
+ * Ordem dos estados de uma mensagem: um aviso so substitui outro de ordem
+ * igual ou maior.
+ *
+ * "failed" era o mais alto e travava a mensagem ali. Em 23/09/2026 a Meta
+ * mandou "Message undeliverable" para um convite que chegou no celular, e o
+ * "entregue" que veio depois foi descartado: a tela mostrou "falhou" para uma
+ * mensagem recebida. Entregue e lida sao prova de que chegou, entao valem mais
+ * do que uma falha. Falha continua valendo mais do que aceita e enviada.
+ */
 const statusRank: Record<string, number> = {
   queued: 0,
   accepted: 1,
   sent: 2,
+  failed: 2.5,
   delivered: 3,
   read: 4,
-  failed: 5,
 }
 
 Deno.serve(async (req) => {
@@ -883,7 +893,13 @@ Deno.serve(async (req) => {
             .select('id,status,followup_id')
             .eq('external_message_id', externalId)
             .maybeSingle()
-          if (!stored || statusRank[status] < (statusRank[stored.status] ?? 0)) continue
+          if (!stored) continue
+          if (statusRank[status] < (statusRank[stored.status] ?? 0)) {
+            if (status === 'failed') {
+              console.warn('Meta marcou como falha mensagem ja entregue; mantida como entregue', externalId, delivery.errors)
+            }
+            continue
+          }
 
           const at = delivery.timestamp
             ? new Date(Number(delivery.timestamp) * 1000).toISOString()
@@ -896,6 +912,13 @@ Deno.serve(async (req) => {
           if (status === 'sent') update.sent_at = at
           if (status === 'delivered') update.delivered_at = at
           if (status === 'read') update.read_at = at
+          // Chegou depois de um "falhou": a falha era falsa, e o motivo dela
+          // nao pode continuar aparecendo embaixo de uma mensagem entregue.
+          if ((status === 'delivered' || status === 'read') && stored.status === 'failed') {
+            console.warn('Meta entregou mensagem que tinha marcado como falha', externalId)
+            update.failed_at = null
+            update.failure_reason = null
+          }
           if (status === 'failed') {
             update.failed_at = at
             update.failure_reason = errorText || 'Falha informada pela Meta.'

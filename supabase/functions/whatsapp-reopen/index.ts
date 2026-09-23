@@ -176,6 +176,8 @@ Deno.serve(async (req) => {
     // do atendimento, e some se guardarmos "modelo enviado".
     const resumo = enviandoResposta
       ? textoDoModelo(templateName, parametros) ?? mensagem
+      // ATENCAO: listConversations (repository.ts) reconhece o convite pelo
+      // comeco deste texto para nao conta-lo como resposta. Mudou aqui, muda la.
       : `Mensagem enviada para retomar o atendimento com ${primeiroNome}.`
 
     if (!resposta.ok) {
@@ -229,7 +231,12 @@ Deno.serve(async (req) => {
 
     await admin
       .from('whatsapp_conversations')
-      .update({ needs_attention: false, last_message_at: agora })
+      // Retomar o atendimento tira a conversa de "Concluida" (23/09/2026).
+      .update({
+        needs_attention: false,
+        last_message_at: agora,
+        ...(visivel.status === 'resolved' ? { status: 'open' } : {}),
+      })
       .eq('id', visivel.id)
 
     return json({ ok: true, enviadoPara: primeiroNome })

@@ -1489,7 +1489,7 @@ export async function listConversations(clinicId: string): Promise<Conversation[
       : Promise.resolve({ data: [], error: null }),
     supabase
       .from('whatsapp_messages')
-      .select('conversation_id,body,created_at,direction,automatic')
+      .select('conversation_id,body,created_at,direction,automatic,status')
       .eq('clinic_id', clinicId)
       .order('created_at', { ascending: false }),
   ])
@@ -1509,7 +1509,16 @@ export async function listConversations(clinicId: string): Promise<Conversation[
     }
     if (!respondidaPorConversa.has(message.conversation_id)) {
       const doPaciente = message.direction === 'inbound'
-      const daEquipe = message.direction === 'outbound' && message.automatic === false
+      // Nao conta como resposta (23/09/2026): mensagem que falhou, porque nao
+      // chegou; e o convite para retomar, porque ele nao responde nada - a
+      // equipe esta esperando a familia, e a conversa nao pode encolher como
+      // se estivesse encerrada.
+      const convite = String(message.body ?? '').startsWith('Mensagem enviada para retomar o atendimento')
+      const daEquipe =
+        message.direction === 'outbound' &&
+        message.automatic === false &&
+        message.status !== 'failed' &&
+        !convite
       if (doPaciente) respondidaPorConversa.set(message.conversation_id, false)
       else if (daEquipe) respondidaPorConversa.set(message.conversation_id, true)
     }
