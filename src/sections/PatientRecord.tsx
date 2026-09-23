@@ -51,6 +51,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { fmtBR, idade, todayISO } from '@/lib/followup'
+import { acrescentarReceitas } from '@/lib/receita-no-texto'
 import {
   archiveNoteTemplate,
   concluirAssinatura,
@@ -2285,32 +2286,38 @@ export default function PatientRecord({
    * que prescreveu no proprio texto do atendimento, e e esse texto que sai na
    * impressao e vai para a assinatura. Copia so o que ainda nao esta la, e
    * nunca mexe em consulta assinada: o PDF assinado e o que vale.
+   *
+   * Esta funcao roda dentro do evento da Memed, que guarda a tela do momento
+   * em que a prescricao abriu. Por isso nada aqui confia no que veio junto:
+   * a consulta e relida do banco e o formulario e lido pelos refs. Ate
+   * 23/09/2026 a segunda receita da mesma consulta partia do texto antigo e
+   * apagava a primeira (ver receita-no-texto.ts).
    */
-  async function copiarReceitaParaPrescricao(consultation: Consultation | null, lista: Receita[]) {
-    if (!patient || !consultation || consultation.assinadoEm) return
-    const receita = lista.find((r) => r.consultationId === consultation.id && !r.excluidaEm)
-    if (!receita || receita.itens.length === 0) return
+  function copiarReceitaParaPrescricao(consultation: Consultation | null, lista: Receita[]) {
+    // Em fila: duas receitas emitidas em sequencia nao podem ler o mesmo texto
+    // de partida e gravar uma por cima da outra.
+    filaDaReceita.current = filaDaReceita.current
+      .catch(() => undefined)
+      .then(() => copiarReceitaAgora(consultation, lista))
+    return filaDaReceita.current
+  }
 
-    const atual = editingConsultationId === consultation.id ? form.prescricao : consultation.prescricao
-    // O campo guarda HTML quando foi escrito no editor e texto puro quando
-    // veio de fora; a comparacao e o acrescimo respeitam o formato que ja esta.
-    const emHtml = /[<>]|&[a-z]+;|&#\d+;/i.test(atual)
-    const textoAtual = emHtml ? atual.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ') : atual
-    const linhas = receita.itens
-      .map((item) => (item.posologia ? `${item.nome}: ${item.posologia}` : item.nome))
-      .filter((linha) => !textoAtual.includes(linha))
-    if (linhas.length === 0) return
+  async function copiarReceitaAgora(consultation: Consultation | null, lista: Receita[]) {
+    if (!patient || !consultation) return
+    const daConsulta = lista.filter((r) => r.consultationId === consultation.id && !r.excluidaEm)
+    if (daConsulta.length === 0) return
 
-    const titulo = `Receita Memed de ${fmtBR(receita.emitidaEm.slice(0, 10))}`
-    const texto = emHtml
-      ? `${atual}<p><strong>${escapeHtml(titulo)}</strong><br>${linhas.map(escapeHtml).join('<br>')}</p>`
-      : [atual.trim(), `${titulo}\n${linhas.join('\n')}`].filter(Boolean).join('\n\n')
+    const fresca = (await listConsultations(patient.id)).find((c) => c.id === consultation.id)
+    if (!fresca || fresca.assinadoEm) return
 
-    if (editingConsultationId === consultation.id) {
-      set('prescricao', texto)
-    }
+    const editando = editandoRef.current === consultation.id
+    const atual = editando ? formRef.current.prescricao : fresca.prescricao
+    const texto = acrescentarReceitas(atual, daConsulta)
+    if (texto === null) return
+
+    if (editando) set('prescricao', texto)
     await updateConsultation(patient.id, consultation.id, {
-      ...consultationToDraft(consultation),
+      ...consultationToDraft(fresca),
       prescricao: texto,
     })
     await load(patient.id)
@@ -2486,6 +2493,15 @@ export default function PatientRecord({
   })()
   const [form, setForm] = useState<ConsultationDraft>(() => emptyConsultation(patient, unidadesDaClinica[0]))
   const [editingConsultationId, setEditingConsultationId] = useState<string | null>(null)
+  // Copias sempre atuais do formulario, para o evento da Memed (que guarda a
+  // tela do momento em que abriu) ler o que esta na tela AGORA.
+  const formRef = useRef(form)
+  const editandoRef = useRef(editingConsultationId)
+  const filaDaReceita = useRef<Promise<void>>(Promise.resolve())
+  useEffect(() => {
+    formRef.current = form
+    editandoRef.current = editingConsultationId
+  }, [form, editingConsultationId])
   const consultaEmEdicaoAssinada = Boolean(
     editingConsultationId &&
       consultations.find((item) => item.id === editingConsultationId)?.assinadoEm,
