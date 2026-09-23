@@ -62,6 +62,19 @@ import type { Patient } from '@/types/patient'
 type Aba = 'calendario' | 'historico' | 'configuracao'
 
 /**
+ * As cores das etiquetas dos cartoes, na ordem em que pedem acao da recepcao.
+ * As classes precisam ser as MESMAS dos chips la embaixo: legenda que diverge
+ * da tela ensina errado.
+ */
+const LEGENDA_DA_AGENDA = [
+  { rotulo: 'Confirmou presença', cor: 'bg-[#3fa88a]' },
+  { rotulo: 'Pediu para remarcar', cor: 'bg-orange-500' },
+  { rotulo: 'Lembrete sem resposta', cor: 'bg-red-600' },
+  { rotulo: 'Lembrete falhou', cor: 'bg-[#b42318]' },
+  { rotulo: 'Vagou por cancelamento', cor: 'border border-[#c98a2b]/60 bg-[#fdf4e3]' },
+]
+
+/**
  * Sugestoes de paciente mostradas de uma vez ao vincular uma consulta.
  *
  * Cinco cabe na tela sem rolar e obriga quem procura a escrever mais duas
@@ -880,6 +893,20 @@ export default function Agenda({
                 ))}
               </div>
             </div>
+            {/* Legenda das cores dos cartoes. Pedida em 23/09/2026: com
+                verde, laranja e dois vermelhos, a recepcao precisava saber o
+                que cada cor pede dela sem ter de perguntar. So no calendario,
+                que e onde as etiquetas aparecem. */}
+            {aba === 'calendario' && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-semibold text-[#557f75]">
+                {LEGENDA_DA_AGENDA.map((item) => (
+                  <span key={item.rotulo} className="inline-flex items-center gap-1.5">
+                    <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${item.cor}`} />
+                    {item.rotulo}
+                  </span>
+                ))}
+              </div>
+            )}
             <button
               type="button"
               onClick={() => void carregarUnidade()}
@@ -1048,8 +1075,11 @@ export default function Agenda({
                                 Paciente confirmou presença
                               </span>
                             )}
+                            {/* Laranja desde 23/09/2026. Era o mesmo azul do
+                                chip de convenio e se confundia com ele: e um
+                                pedido que espera a recepcao, nao um dado. */}
                             {item.rescheduleRequestedAt && !item.confirmedAt && (
-                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#2f7fc1] px-2 py-0.5 text-[9px] font-extrabold text-white">
+                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-orange-500 px-2 py-0.5 text-[9px] font-extrabold text-white">
                                 Pediu para remarcar
                               </span>
                             )}
