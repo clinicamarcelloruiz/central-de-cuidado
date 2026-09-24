@@ -23,8 +23,10 @@ import {
   MessageCircle,
   Mic,
   MicOff,
+  FlaskConical,
   Pill,
   Plus,
+  ShieldAlert,
   Printer,
   RefreshCw,
   Ruler,
@@ -51,7 +53,47 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { fmtBR, idade, todayISO } from '@/lib/followup'
-import { acrescentarReceitas } from '@/lib/receita-no-texto'
+import { acrescentarReceitas, dataDaReceita } from '@/lib/receita-no-texto'
+import {
+  categoriaDaReceita,
+  ORDEM_DAS_CATEGORIAS,
+  type CategoriaDaReceita,
+} from '@/lib/categoria-da-receita'
+
+/**
+ * Cor e icone de cada categoria de documento da Memed (23/09/2026). Classes
+ * completas, e nao montadas por concatenacao: o Tailwind so gera o que le
+ * escrito por inteiro no codigo.
+ */
+const ESTILO_DA_CATEGORIA: Record<
+  CategoriaDaReceita,
+  { titulo: string; icone: typeof Pill; cartao: string; texto: string }
+> = {
+  especial: {
+    titulo: 'Receita especial',
+    icone: ShieldAlert,
+    cartao: 'border-[#b42318]/25 bg-[#fef5f4]',
+    texto: 'text-[#b42318]',
+  },
+  medicacao: {
+    titulo: 'Medicação',
+    icone: Pill,
+    cartao: 'border-[#2563eb]/20 bg-[#f7f9fe]',
+    texto: 'text-[#1d4ed8]',
+  },
+  exame: {
+    titulo: 'Exames',
+    icone: FlaskConical,
+    cartao: 'border-[#7c3aed]/20 bg-[#f9f7fe]',
+    texto: 'text-[#6d28d9]',
+  },
+  documento: {
+    titulo: 'Atestados e documentos',
+    icone: FileText,
+    cartao: 'border-[#3fa88a]/30 bg-[#f4faf8]',
+    texto: 'text-[#23755f]',
+  },
+}
 import {
   archiveNoteTemplate,
   concluirAssinatura,
@@ -1804,20 +1846,34 @@ function ConsultationCard({
               <p className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-slate-500">
                 Receitas emitidas
               </p>
-              <div className="mt-2 space-y-2">
-                {receitas.map((receita) => (
+              {/* Separadas por categoria, cada uma com sua cor (23/09/2026).
+                  Dentro de cada grupo, a ordem de sempre: a mais nova em cima. */}
+              {ORDEM_DAS_CATEGORIAS.map((categoria) => {
+                const doGrupo = receitas.filter((r) => categoriaDaReceita(r.itens) === categoria)
+                if (doGrupo.length === 0) return null
+                const estilo = ESTILO_DA_CATEGORIA[categoria]
+                const Icone = estilo.icone
+                return (
+              <div key={categoria} className="mt-2">
+                <p className={`mb-1.5 inline-flex items-center gap-1.5 text-[10px] font-extrabold ${estilo.texto}`}>
+                  <Icone className="h-3.5 w-3.5" />
+                  {estilo.titulo}
+                </p>
+              <div className="space-y-2">
+                {doGrupo.map((receita) => (
                   <div
                     key={receita.id}
                     className={`rounded-[14px] border px-4 py-3 ${
-                      receita.excluidaEm
-                        ? 'border-[#081b2c]/10 bg-[#fafaf8]'
-                        : 'border-[#2563eb]/20 bg-[#f7f9fe]'
+                      receita.excluidaEm ? 'border-[#081b2c]/10 bg-[#fafaf8]' : estilo.cartao
                     }`}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-[#1d4ed8]">
-                        <Pill className="h-3.5 w-3.5" />
-                        {fmtBR(receita.emitidaEm.slice(0, 10))}
+                      <span className={`inline-flex items-center gap-1.5 text-[11px] font-extrabold ${estilo.texto}`}>
+                        <Icone className="h-3.5 w-3.5" />
+                        {dataDaReceita(receita.emitidaEm)}
+                        {categoria === 'especial' && receita.itens[0]?.receituario && (
+                          <span className="font-bold opacity-80">· {receita.itens[0].receituario}</span>
+                        )}
                       </span>
                       {receita.excluidaEm ? (
                         <span className="text-[10px] font-bold text-slate-400">
@@ -1829,7 +1885,7 @@ function ConsultationCard({
                             href={receita.link}
                             target="_blank"
                             rel="noreferrer"
-                            className="text-[10px] font-extrabold text-[#1d4ed8] underline underline-offset-2"
+                            className={`text-[10px] font-extrabold underline underline-offset-2 ${estilo.texto}`}
                           >
                             Abrir receita
                           </a>
@@ -1851,6 +1907,9 @@ function ConsultationCard({
                   </div>
                 ))}
               </div>
+              </div>
+                )
+              })}
             </div>
           )}
           <Detail label="Retorno" value={consultation.retorno} />

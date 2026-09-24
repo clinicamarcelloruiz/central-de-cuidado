@@ -2398,6 +2398,10 @@ export interface ItemDaReceita {
   posologia: string
   quantidade: number | null
   unidade: string | null
+  /** 'alopático', 'exame', 'custom' (atestado)... Ver categoria-da-receita.ts. */
+  tipo?: string | null
+  /** 'Simples' ou o talao especial ('Especial-2 vias (C1)' etc.). */
+  receituario?: string | null
 }
 
 export interface Receita {

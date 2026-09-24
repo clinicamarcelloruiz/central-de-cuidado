@@ -19,9 +19,25 @@
  * copia guardada de antes.
  */
 
+import { categoriaDaReceita, type CategoriaDaReceita } from './categoria-da-receita'
+
 export interface ItemDeReceita {
   nome: string
   posologia: string
+  tipo?: string | null
+  receituario?: string | null
+}
+
+/**
+ * Titulo de cada bloco no texto do atendimento, pela categoria. Ate 23/09/2026
+ * tudo saia como "Receita Memed de ...", inclusive atestado e pedido de exame,
+ * e o prontuario impresso lia como se o medico tivesse receitado um hemograma.
+ */
+const TITULO_NO_TEXTO: Record<CategoriaDaReceita, string> = {
+  especial: 'Receita especial',
+  medicacao: 'Receita',
+  exame: 'Pedido de exames',
+  documento: 'Atestado ou documento',
 }
 
 export interface ReceitaParaTexto {
@@ -37,9 +53,24 @@ function escapar(texto: string) {
     .replace(/"/g, '&quot;')
 }
 
-function dataBR(iso: string) {
-  const [ano, mes, dia] = iso.slice(0, 10).split('-')
-  return ano && mes && dia ? `${dia}/${mes}/${ano}` : iso
+/**
+ * Data da receita no fuso da clinica.
+ *
+ * Era iso.slice(0, 10), que e a data em UTC: uma receita emitida as 21h de
+ * 23/09 em Santos saia como "24/09" (23/09/2026, atestado de teste da noite).
+ * Ler as partes pelo Intl nao depende do fuso da maquina de quem abre.
+ */
+export function dataDaReceita(iso: string): string {
+  const instante = new Date(iso)
+  if (Number.isNaN(instante.getTime())) return iso
+  const partes = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).formatToParts(instante)
+  const pega = (tipo: string) => partes.find((p) => p.type === tipo)?.value ?? ''
+  return `${pega('day')}/${pega('month')}/${pega('year')}`
 }
 
 /** Devolve o texto novo, ou null quando nada falta. */
@@ -61,7 +92,7 @@ export function acrescentarReceitas(atual: string, receitas: ReceitaParaTexto[])
       .filter((linha) => !lido.includes(linha))
     if (linhas.length === 0) continue
 
-    const titulo = `Receita Memed de ${dataBR(receita.emitidaEm)}`
+    const titulo = `${TITULO_NO_TEXTO[categoriaDaReceita(receita.itens)]} · Memed · ${dataDaReceita(receita.emitidaEm)}`
     texto = emHtml
       ? `${texto}<p><strong>${escapar(titulo)}</strong><br>${linhas.map(escapar).join('<br>')}</p>`
       : [texto.trim(), `${titulo}\n${linhas.join('\n')}`].filter(Boolean).join('\n\n')
