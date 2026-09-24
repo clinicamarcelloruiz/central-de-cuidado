@@ -1,6 +1,9 @@
 /**
  * Mascaras de digitacao do cadastro (pedido em 23/09/2026).
  *
+ * O repositorio e PUBLICO: exemplo aqui e sempre numero inventado. Ate
+ * 24/09/2026 este comentario trazia CPF e celular de verdade.
+ *
  * So mudam o que aparece no campo. O repositorio tira tudo que nao e digito
  * antes de gravar (createPatient/updatePatient), entao o banco continua com
  * "11987654321" e "12345678901" - que e o que o robo, a Memed e a busca por
@@ -15,7 +18,7 @@ function digitos(valor: string) {
   return String(valor ?? '').replace(/\D/g, '')
 }
 
-/** (13) 9 8765-4321 para celular, (13) 3222-1234 para fixo. */
+/** (11) 9 8765-4321 para celular, (11) 3456-7890 para fixo. */
 export function mascararTelefone(valor: string): string {
   const todos = digitos(valor).slice(0, 13)
   const comPais = todos.length > 11 && todos.startsWith('55')
