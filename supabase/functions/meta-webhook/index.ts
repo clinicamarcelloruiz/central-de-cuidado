@@ -2,6 +2,7 @@ import '../_shared/whatsapp.ts'
 import { adminClient, digits, sha256HmacHex, safeEqual } from '../_shared/whatsapp.ts'
 import { colherEventos, type Estado, type Toque, tratarConversa } from '../_shared/atendimento.ts'
 import { montarConteudo } from '../_shared/conteudo.ts'
+import { RegistroDeEventos } from '../_shared/eventos-do-webhook.ts'
 import {
   avisoDaResposta,
   respostaAoAcompanhamento,
@@ -196,12 +197,22 @@ Deno.serve(async (req) => {
   const expected = `sha256=${await sha256HmacHex(appSecret, rawBody)}`
   if (!safeEqual(expected, providedSignature)) return text('Invalid signature', 401)
 
+  // Fora do try: o catch precisa dele para liberar o evento que falhou.
+  let registro: RegistroDeEventos | null = null
+
   try {
     const payload = JSON.parse(rawBody)
     const admin = adminClient()
+    registro = new RegistroDeEventos({
+      inserir: (linha) => admin.from('whatsapp_webhook_events').insert(linha),
+      apagar: (chave) => admin.from('whatsapp_webhook_events').delete().eq('event_key', chave),
+    })
 
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
+        // Tudo que veio antes terminou; um erro daqui ate o proximo registrar
+        // nao pertence a nenhum evento.
+        registro.concluir()
         if (change.field !== 'messages') continue
         const value = change.value ?? {}
         const phoneNumberId = String(value.metadata?.phone_number_id ?? '')
@@ -228,6 +239,8 @@ Deno.serve(async (req) => {
         }
 
         for (const message of value.messages ?? []) {
+          // A mensagem anterior do lote terminou (inclusive pelos continue).
+          registro.concluir()
           const externalId = String(message.id ?? '')
           if (!externalId) continue
 
@@ -245,13 +258,11 @@ Deno.serve(async (req) => {
           // entender o caso.
           if (message.type === 'reaction') continue
 
-          const { error: eventError } = await admin.from('whatsapp_webhook_events').insert({
-            event_key: `message:${externalId}`,
-            event_kind: 'message',
-            payload: { entry_id: entry.id, change },
-          })
-          if (eventError?.code === '23505') continue
-          if (eventError) throw eventError
+          // Ver eventos-do-webhook.ts: se algo falhar daqui em diante, a chave
+          // e apagada no catch e o reenvio da Meta processa de novo.
+          if ((await registro.registrar(`message:${externalId}`, 'message', { entry_id: entry.id, change })) === 'repetido') {
+            continue
+          }
 
           const waId = digits(String(message.from ?? ''))
           const localDigits = waId.startsWith('55') ? waId.slice(2) : waId
@@ -532,7 +543,20 @@ Deno.serve(async (req) => {
             delivered_at: receivedAt,
             ...(anexo ? { media_path: anexo.path, media_mime: anexo.mime } : {}),
           })
-          if (messageError?.code !== '23505' && messageError) throw messageError
+          if (messageError?.code === '23505') {
+            // A mensagem ja esta gravada: isto e o reenvio da Meta depois de
+            // uma tentativa que caiu DEPOIS de salvar e antes de terminar (ver
+            // eventos-do-webhook.ts). Refazer o resto arriscaria resposta ou
+            // consulta dobrada; em vez disso a conversa acende para a equipe,
+            // que ve a mensagem e confere se o robo chegou a responder.
+            console.warn('Reenvio de mensagem ja gravada; entregue a equipe', externalId)
+            await admin
+              .from('whatsapp_conversations')
+              .update({ needs_attention: true, attention_reason: 'falha' })
+              .eq('id', conversation.id)
+            continue
+          }
+          if (messageError) throw messageError
 
           if (patient?.id && optedOut) {
             await admin.from('patients').update({ whatsapp_opt_out_at: receivedAt }).eq('id', patient.id)
@@ -765,26 +789,63 @@ Deno.serve(async (req) => {
           // silencio. Foi o que aconteceu em 31/08/2026 - o paciente confirmou
           // as 10:00 e so foi cadastrado depois.
           if (respondeuLembrete) {
-            const { data: ultimoLembrete } = await admin
-              .from('whatsapp_messages')
-              .select('appointment_id')
-              .eq('conversation_id', conversation.id)
-              .eq('direction', 'outbound')
-              .not('appointment_id', 'is', null)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle()
+            // Irmaos (24/09/2026): a mae recebe um lembrete por filho no mesmo
+            // celular. Tocando o botao de um deles, o WhatsApp diz a qual
+            // mensagem ela respondeu (context.id) - e e ESSA consulta que vale.
+            // Antes valia sempre o ultimo lembrete enviado, e o outro irmao
+            // ficava "sem resposta" para sempre. Sem context (resposta
+            // digitada), continua valendo o ultimo, como antes.
+            const respondidoId = String(message.context?.id ?? '')
+            const { data: lembreteTocado } = respondidoId
+              ? await admin
+                  .from('whatsapp_messages')
+                  .select('appointment_id')
+                  .eq('conversation_id', conversation.id)
+                  .eq('external_message_id', respondidoId)
+                  .not('appointment_id', 'is', null)
+                  .maybeSingle()
+              : { data: null }
+            const { data: ultimoLembrete } = lembreteTocado?.appointment_id
+              ? { data: lembreteTocado }
+              : await admin
+                  .from('whatsapp_messages')
+                  .select('appointment_id')
+                  .eq('conversation_id', conversation.id)
+                  .eq('direction', 'outbound')
+                  .not('appointment_id', 'is', null)
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .maybeSingle()
 
+            // A consulta ainda estava marcada? Ate 24/09/2026 isto nao era
+            // conferido: se a clinica ja tinha cancelado, o UPDATE nao mudava
+            // nada e mesmo assim a familia lia "Consulta confirmada!" - e vinha.
+            let consultaValida = false
             if (ultimoLembrete?.appointment_id) {
               // Cancelar muda o status: o indice unico de horario ignora
               // canceladas, entao a vaga volta a aparecer como livre na hora.
               const mudanca = mudancaDaConsulta(resposta, receivedAt)
 
-              await admin
+              const { data: mudou } = await admin
                 .from('appointments')
                 .update(mudanca)
                 .eq('id', ultimoLembrete.appointment_id)
                 .eq('status', 'scheduled')
+                .select('id')
+              consultaValida = (mudou ?? []).length > 0
+            }
+
+            if (!consultaValida) {
+              console.warn('Resposta a lembrete de consulta que nao esta mais marcada', conversation.id)
+              await admin
+                .from('whatsapp_conversations')
+                .update({ needs_attention: true, attention_reason: 'atendente' })
+                .eq('id', conversation.id)
+              await responder(
+                'Recebi sua resposta, mas essa consulta não aparece mais como marcada na nossa agenda. ' +
+                  'Já avisei a equipe, que confirma com você por aqui.',
+              )
+              continue
             }
 
             // Cancelou: deixa o menu ativo, para o "2" do botao abrir a agenda
@@ -875,18 +936,15 @@ Deno.serve(async (req) => {
         }
 
         for (const delivery of value.statuses ?? []) {
+          registro.concluir()
           const externalId = String(delivery.id ?? '')
           const status = String(delivery.status ?? '')
           if (!externalId || statusRank[status] === undefined) continue
 
           const eventKey = `status:${externalId}:${status}:${delivery.timestamp ?? ''}`
-          const { error: eventError } = await admin.from('whatsapp_webhook_events').insert({
-            event_key: eventKey,
-            event_kind: `status_${status}`,
-            payload: { entry_id: entry.id, change },
-          })
-          if (eventError?.code === '23505') continue
-          if (eventError) throw eventError
+          if ((await registro.registrar(eventKey, `status_${status}`, { entry_id: entry.id, change })) === 'repetido') {
+            continue
+          }
 
           const { data: stored } = await admin
             .from('whatsapp_messages')
@@ -944,7 +1002,9 @@ Deno.serve(async (req) => {
     return text('EVENT_RECEIVED')
   } catch (error) {
     console.error(error)
-    // A non-2xx response asks Meta to retry transient failures.
+    // O 500 pede para a Meta reenviar. Sem liberar a chave do evento que
+    // falhou, o reenvio seria descartado como repetido e a mensagem sumiria.
+    await registro?.desfazerEmCurso()
     return text('Processing failed', 500)
   }
 })

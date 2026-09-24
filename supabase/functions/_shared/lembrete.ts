@@ -11,6 +11,8 @@
  * dono de buscar os dados e gravar o resultado.
  */
 
+import { avisoDeHorario } from './expediente.ts'
+
 /** Quanto tempo depois de um envio nosso um numero ainda responde a ele. */
 const JANELA_RESPOSTA_MS = 48 * 3600 * 1000
 /** Enquanto alguem da equipe estiver conversando, o robo nao interrompe. */
@@ -197,7 +199,7 @@ export function respostaAoAcompanhamento(resposta: Resposta): string | null {
     return (
       'Já avisei a nossa equipe. Pode escrever sua dúvida por aqui: quem assumir o ' +
       'atendimento vai ler tudo antes de responder.\n\n' +
-      'Atendemos de segunda a sexta, das 8h às 18h. Fora desse horário, respondemos no próximo dia útil.'
+      avisoDeHorario()
     )
   }
   if (resposta.optedOut) {

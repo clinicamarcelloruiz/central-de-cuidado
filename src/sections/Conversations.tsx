@@ -27,6 +27,8 @@ import {
   getAutoReply,
   getCurrentMembership,
   listConversationMessages,
+  listRespostasProntas,
+  type RespostaPronta,
   listConversations,
   getReplyWindow,
   markConversationSeen,
@@ -205,6 +207,52 @@ const MOTIVO_ATENCAO: Record<
 }
 
 /**
+ * Recortes da lista (24/09/2026).
+ *
+ * Busca e datas respondem "onde esta aquela conversa?". O dia a dia pergunta
+ * outra coisa: "quem esta esperando o que?" - todas as urgencias, todos os
+ * pedidos de 2a via, quem ainda nao tem cadastro. Um recorte por vez, que
+ * soma com a busca e as datas.
+ */
+type Recorte =
+  | 'todas'
+  | 'atencao'
+  | 'novas'
+  | 'sem_cadastro'
+  | 'robo_parado'
+  | `motivo:${NonNullable<Conversation['attentionReason']>}`
+
+function passaNoRecorte(conversa: Conversation, recorte: Recorte): boolean {
+  if (recorte === 'todas') return true
+  if (recorte === 'atencao') return Boolean(conversa.needsAttention && conversa.attentionReason)
+  if (recorte === 'novas') return conversa.unreadCount > 0
+  if (recorte === 'sem_cadastro') return !conversa.patientId
+  if (recorte === 'robo_parado') {
+    // Mesma regra do estaConcluida: "menu" e "atendente" sao descanso, nao
+    // etapa. Parado e quem esta no meio de escolher dia, horario, cadastro.
+    return Boolean(
+      conversa.bookingState && conversa.bookingState !== 'menu' && conversa.bookingState !== 'atendente',
+    )
+  }
+  const motivo = recorte.slice('motivo:'.length)
+  return Boolean(conversa.needsAttention && conversa.attentionReason === motivo)
+}
+
+// A ordem e a da urgencia: o que tem gente parada esperando vem primeiro.
+const ORDEM_DOS_MOTIVOS: NonNullable<Conversation['attentionReason']>[] = [
+  'urgencia',
+  'atendente',
+  'documento',
+  'farmacia',
+  'remarcacao',
+  'cancelamento',
+  'cancelou_sozinho',
+  'anexo',
+  'ajuda',
+  'falha',
+]
+
+/**
  * O papel do WhatsApp: bege com o rabisco discreto por cima.
  *
  * O padrao vai inline como SVG porque nenhum arquivo externo carrega dentro do
@@ -339,6 +387,7 @@ export default function Conversations({
   // clinica. Esconder por conta propria seria decidir pela equipe que o dia
   // anterior nao interessa mais.
   const [esconderConcluidas, setEsconderConcluidas] = useState(false)
+  const [recorte, setRecorte] = useState<Recorte>('todas')
   // Cartoes com a previa aberta por inteiro. A previa e uma linha cortada com
   // reticencias, e mensagens como "Voce ja tem uma consulta marcada: Aline
   // Lapetina, sexta 25/09 as 10:40 em Liferty Santos" perdiam justamente a
@@ -358,6 +407,20 @@ export default function Conversations({
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [error, setError] = useState('')
   const [clinicId, setClinicId] = useState<string | null>(null)
+  const [prontas, setProntas] = useState<RespostaPronta[]>([])
+
+  // As respostas prontas mudam pouco: uma leitura quando a clinica e conhecida.
+  // Falhar aqui so tira o atalho; a caixa de resposta continua igual.
+  useEffect(() => {
+    if (!clinicId) return
+    let vivo = true
+    listRespostasProntas(clinicId)
+      .then((lista) => vivo && setProntas(lista.filter((p) => p.ativa && p.resposta.trim())))
+      .catch((erro) => console.warn('Nao consegui carregar as respostas prontas', erro))
+    return () => {
+      vivo = false
+    }
+  }, [clinicId])
   const [aoVivo, setAoVivo] = useState(false)
   const [resposta, setResposta] = useState('')
   const [enviando, setEnviando] = useState(false)
@@ -816,6 +879,7 @@ export default function Conversations({
       // proprio leitor, no instante em que a resposta sai, seria tirar a
       // conversa da tela de quem ainda esta nela.
       if (esconderConcluidas && estaConcluida(item) && item.id !== selectedId) return false
+      if (!passaNoRecorte(item, recorte) && item.id !== selectedId) return false
       if (inicio !== null || fim !== null) {
         const quando = item.lastMessageAt ? new Date(item.lastMessageAt).getTime() : null
         if (quando === null) return false
@@ -836,11 +900,11 @@ export default function Conversations({
     // mostrar o que falta fazer. O sort do JS e estavel, entao a ordem por
     // horario dentro de cada grupo se mantem.
     return [...filtradas].sort((a, b) => Number(estaConcluida(a)) - Number(estaConcluida(b)))
-  }, [conversations, busca, de, ate, esconderConcluidas, selectedId])
+  }, [conversations, busca, de, ate, esconderConcluidas, recorte, selectedId])
 
   const concluidas = useMemo(() => conversations.filter(estaConcluida).length, [conversations])
 
-  const filtrando = Boolean(busca.trim() || de || ate)
+  const filtrando = Boolean(busca.trim() || de || ate || recorte !== 'todas')
   /**
    * Solta o robo numa conversa travada, sem depender de ninguem mexer no banco.
    *
@@ -1103,6 +1167,7 @@ export default function Conversations({
                 setBusca('')
                 setDe('')
                 setAte('')
+                setRecorte('todas')
               }}
               className="inline-flex items-center gap-1 rounded-[12px] bg-slate-100 px-3 py-2 text-[10px] font-extrabold text-slate-600 transition hover:bg-slate-200"
             >
@@ -1151,6 +1216,7 @@ export default function Conversations({
                   setBusca('')
                   setDe('')
                   setAte('')
+                  setRecorte('todas')
                 }}
                 title="Limpar busca e datas"
                 className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
@@ -1161,7 +1227,37 @@ export default function Conversations({
           </div>
         )}
 
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          {/* Fica nesta barra, e nao no cabecalho, para funcionar tambem com o
+              topo recolhido - que e como a recepcao trabalha em tela pequena. */}
+          {conversations.length > 0 && (
+            <select
+              value={recorte}
+              onChange={(e) => setRecorte(e.target.value as Recorte)}
+              title="Mostrar só um tipo de conversa"
+              className={`rounded-xl border px-2.5 py-1.5 text-[10px] font-extrabold outline-none transition ${
+                recorte === 'todas'
+                  ? 'border-[#081b2c]/10 bg-white text-slate-600'
+                  : 'border-[#2f7fc1] bg-[#eef5fd] text-[#16456b]'
+              }`}
+            >
+              <option value="todas">Todas as conversas</option>
+              <option value="atencao">Pedindo atenção (qualquer motivo)</option>
+              {ORDEM_DOS_MOTIVOS.map((chave) => {
+                const quantas = conversations.filter(
+                  (c) => c.needsAttention && c.attentionReason === chave,
+                ).length
+                return (
+                  <option key={chave} value={`motivo:${chave}`}>
+                    {MOTIVO_ATENCAO[chave].rotulo} ({quantas})
+                  </option>
+                )
+              })}
+              <option value="novas">Com mensagens novas</option>
+              <option value="sem_cadastro">Sem cadastro</option>
+              <option value="robo_parado">Robô parado numa etapa</option>
+            </select>
+          )}
           {onAlternarCompacto && (
             <button
               type="button"
@@ -1725,9 +1821,37 @@ export default function Conversations({
                         <p className="text-[10px] font-bold text-[#557f75]">
                           Pode responder livremente até {formatWhen(janelaAte)}
                         </p>
-                        <p className="text-[10px] font-semibold text-slate-400">
-                          {resposta.length}/4096
-                        </p>
+                        <div className="flex items-center gap-2">
+                          {/* Respostas prontas para a equipe (24/09/2026). As
+                              mesmas que o robo usa, cadastradas em Configuracoes:
+                              a recepcao escrevia de novo, a mao, os valores e
+                              enderecos que o sistema ja sabia. Entra no campo
+                              para revisar antes de enviar - nunca sai sozinha. */}
+                          {prontas.length > 0 && (
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                const escolhida = prontas.find((p) => p.id === e.target.value)
+                                if (!escolhida) return
+                                setResposta((atual) =>
+                                  atual.trim() ? `${atual.trimEnd()}\n\n${escolhida.resposta}` : escolhida.resposta,
+                                )
+                              }}
+                              title="Coloca o texto de uma resposta pronta no campo, para revisar e enviar"
+                              className="max-w-[200px] rounded-lg border border-[#081b2c]/10 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 outline-none"
+                            >
+                              <option value="">Resposta pronta…</option>
+                              {prontas.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.assunto}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          <p className="text-[10px] font-semibold text-slate-400">
+                            {resposta.length}/4096
+                          </p>
+                        </div>
                       </div>
                       <textarea
                         value={resposta}

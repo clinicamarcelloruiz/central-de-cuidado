@@ -42,3 +42,5 @@ tests/receita-no-texto.build.mjs
 tests/nome.build.mjs
 tests/categoria-da-receita.build.mjs
 tests/mascaras.build.mjs
+tests/eventos-do-webhook.build.mjs
+tests/expediente.build.mjs

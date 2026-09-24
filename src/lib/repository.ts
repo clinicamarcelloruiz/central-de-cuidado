@@ -965,18 +965,39 @@ async function marcarPresencaPeloProntuario(
     // Vírgula e parênteses quebram a sintaxe do filtro "ou" do PostgREST.
     const nome = (ficha?.name ?? '').trim().replace(/[(),]/g, ' ')
 
-    const alternativas = [`patient_id.eq.${patientId}`]
-    if (finalDoTelefone) alternativas.push(`contact_phone.like.*${finalDoTelefone}`)
-    if (nome) alternativas.push(`contact_name.ilike.${nome}`)
-
-    await supabase
+    // Irmaos (24/09/2026). Numa gastropediatria a mae marca os dois filhos com
+    // o proprio celular. Casar por telefone com "ou" marcava presenca no irmao
+    // que faltou quando o medico salvava a evolucao do outro. Agora:
+    //  - consulta ligada a uma ficha so casa pela ficha;
+    //  - consulta sem ficha casa pelo nome; pelo telefone, so se for a UNICA
+    //    consulta sem ficha daquele telefone no dia. Havendo duas, o telefone
+    //    nao diz qual e qual, e marcar nenhuma e melhor que marcar a errada.
+    const ids = new Set<string>()
+    const { data: doDia } = await supabase
       .from('appointments')
-      .update({ status: 'attended' })
+      .select('id,patient_id,contact_name,contact_phone')
       .eq('clinic_id', clinicId)
       .eq('status', 'scheduled')
       .gte('starts_at', inicio.toISOString())
       .lte('starts_at', fim.toISOString())
-      .or(alternativas.join(','))
+
+    const semFicha = (doDia ?? []).filter((a) => !a.patient_id)
+    const mesmoNome = (a: { contact_name: string | null }) =>
+      Boolean(nome) && (a.contact_name ?? '').trim().toLowerCase() === nome.toLowerCase()
+    const mesmoTelefone = (a: { contact_phone: string | null }) =>
+      Boolean(finalDoTelefone) && (a.contact_phone ?? '').replace(/\D/g, '').endsWith(finalDoTelefone)
+
+    for (const a of doDia ?? []) if (a.patient_id === patientId) ids.add(a.id)
+    for (const a of semFicha) if (mesmoNome(a)) ids.add(a.id)
+    const peloTelefone = semFicha.filter(mesmoTelefone)
+    if (peloTelefone.length === 1) ids.add(peloTelefone[0].id)
+
+    if (ids.size === 0) return
+    await supabase
+      .from('appointments')
+      .update({ status: 'attended' })
+      .in('id', [...ids])
+      .eq('status', 'scheduled')
   } catch (causa) {
     console.warn('Não consegui marcar presença a partir do prontuário', causa)
   }
@@ -1005,6 +1026,86 @@ function dataDoRetorno(ultimaConsulta: string | null, inicioDaMarcacao: string):
 
   const dias = Math.floor((marcada.getTime() - anterior.getTime()) / 86_400_000)
   return dias > 0 && dias <= 30 ? ultimaConsulta : null
+}
+
+export type MotivoDeLigar = 'remarcar' | 'lembrete_falhou' | 'sem_resposta' | 'sem_telefone'
+
+export interface PendenciaDeLigar {
+  id: string
+  unitId: string
+  unitName: string
+  nome: string
+  telefone: string
+  startsAt: string
+  motivo: MotivoDeLigar
+  detalhe: string | null
+}
+
+/**
+ * "Ligar hoje": consultas de agora ate o fim de amanha que pedem uma ligacao
+ * da recepcao, na clinica inteira (24/09/2026).
+ *
+ * As mesmas etiquetas ja apareciam no cartao da Agenda, mas so na unidade
+ * selecionada: quem trabalhava em Santos nao via o "pediu para remarcar" de
+ * Sao Paulo. Aqui vem tudo junto, em ordem de horario, com o motivo.
+ *
+ * Mesmas regras das etiquetas, na mesma prioridade: pediu para remarcar >
+ * lembrete falhou > lembrete sem resposta > sem telefone. Uma linha por
+ * consulta, com o motivo mais forte.
+ */
+export async function listLigarHoje(clinicId: string): Promise<PendenciaDeLigar[]> {
+  const agora = new Date()
+  const fimDeAmanha = new Date(agora)
+  fimDeAmanha.setDate(fimDeAmanha.getDate() + 1)
+  fimDeAmanha.setHours(23, 59, 59, 999)
+
+  const { data, error } = await supabase
+    .from('appointments')
+    .select(
+      'id,unit_id,patient_id,contact_name,contact_phone,starts_at,confirmed_at,reschedule_requested_at,reminder_sent_at,reminder_failed_at,reminder_failure_reason',
+    )
+    .eq('clinic_id', clinicId)
+    .eq('status', 'scheduled')
+    .eq('confirmed_by_clinic', true)
+    .gte('starts_at', agora.toISOString())
+    .lte('starts_at', fimDeAmanha.toISOString())
+    .order('starts_at', { ascending: true })
+  if (error) fail(error)
+  const rows = data ?? []
+  if (rows.length === 0) return []
+
+  const patientIds = [...new Set(rows.map((r) => r.patient_id).filter(Boolean))] as string[]
+  const [{ data: pacientes }, { data: units }] = await Promise.all([
+    patientIds.length
+      ? supabase.from('patients').select('id,name,phone').in('id', patientIds)
+      : Promise.resolve({ data: [] as { id: string; name: string; phone: string | null }[] }),
+    supabase.from('clinic_units').select('id,name').eq('clinic_id', clinicId),
+  ])
+  const pacientePorId = new Map((pacientes ?? []).map((p) => [p.id, p]))
+  const nomePorUnidade = new Map((units ?? []).map((u) => [u.id, u.name]))
+
+  const lista: PendenciaDeLigar[] = []
+  for (const row of rows) {
+    const paciente = row.patient_id ? pacientePorId.get(row.patient_id) : undefined
+    const telefone = (paciente?.phone || row.contact_phone || '').trim()
+    let motivo: MotivoDeLigar | null = null
+    if (row.reschedule_requested_at && !row.confirmed_at) motivo = 'remarcar'
+    else if (!row.reminder_sent_at && row.reminder_failed_at) motivo = 'lembrete_falhou'
+    else if (row.reminder_sent_at && !row.confirmed_at) motivo = 'sem_resposta'
+    else if (!row.reminder_sent_at && telefone.replace(/\D/g, '').length < 10) motivo = 'sem_telefone'
+    if (!motivo) continue
+    lista.push({
+      id: row.id,
+      unitId: row.unit_id,
+      unitName: nomePorUnidade.get(row.unit_id) ?? 'Unidade',
+      nome: paciente?.name || row.contact_name || 'Sem nome',
+      telefone: formatarTelefone(telefone),
+      startsAt: row.starts_at,
+      motivo,
+      detalhe: motivo === 'lembrete_falhou' ? row.reminder_failure_reason ?? null : null,
+    })
+  }
+  return lista
 }
 
 export interface PendingRequest {

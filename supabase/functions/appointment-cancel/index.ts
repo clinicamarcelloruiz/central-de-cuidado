@@ -196,27 +196,81 @@ Deno.serve(async (req) => {
         if (data) return data
       }
 
-      const telefone = (consulta.contact_phone ?? '').trim()
-      if (!telefone) return null
-      const { data } = await admin
-        .from('whatsapp_conversations')
-        .select('id,wa_id,status,profile_name')
-        .eq('clinic_id', consulta.clinic_id)
-        .eq('wa_id', toBrazilE164(telefone))
-        .order('last_message_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      return data
+      for (const telefone of telefones) {
+        const { data } = await admin
+          .from('whatsapp_conversations')
+          .select('id,wa_id,status,profile_name')
+          .eq('clinic_id', consulta.clinic_id)
+          .eq('wa_id', toBrazilE164(telefone))
+          .order('last_message_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (data) return data
+      }
+      return null
     }
 
-    const conversa = await acharConversa()
+    // Telefones possiveis: o da consulta e o do cadastro. O do cadastro faltava
+    // aqui ate 24/09/2026 - paciente cadastrado sem conversa nunca era achado.
+    const { data: cadastro } = consulta.patient_id
+      ? await admin
+          .from('patients')
+          .select('phone,whatsapp_opt_out_at')
+          .eq('id', consulta.patient_id)
+          .maybeSingle()
+      : { data: null }
+    const telefones = [...new Set(
+      [consulta.contact_phone, cadastro?.phone]
+        .map((t) => String(t ?? '').trim())
+        .filter((t) => t.replace(/\D/g, '').length >= 10),
+    )]
+
+    if (cadastro?.whatsapp_opt_out_at) {
+      return json({ ok: true, avisado: false, motivoDoSilencio: 'Este paciente pediu para não receber mensagens.' })
+    }
+
+    let conversa = await acharConversa()
+
+    /**
+     * Quem nunca escreveu para a clinica tambem e avisado (24/09/2026).
+     *
+     * Antes, sem conversa, a funcao desistia: "Nao encontrei conversa no
+     * WhatsApp da clinica para este telefone". E o caso mais comum de quem
+     * marcou por telefone com a recepcao - justamente quem nao tem outro canal.
+     * A familia aparecia com a crianca numa consulta cancelada.
+     *
+     * O lembrete da vespera ja resolvia isso criando a conversa e mandando
+     * modelo aprovado; aqui e o mesmo caminho. Sem conversa nao ha janela de 24h,
+     * entao o envio sai pelo modelo de cancelamento.
+     */
+    if (!conversa && telefones.length > 0) {
+      const telefone = telefones[0]
+      const { data: criada, error: erroCriar } = await admin
+        .from('whatsapp_conversations')
+        .upsert(
+          {
+            clinic_id: consulta.clinic_id,
+            // So com paciente de verdade: nulo aqui apagaria um vinculo que a
+            // conversa ja tivesse (mesmo defeito corrigido no webhook).
+            ...(consulta.patient_id ? { patient_id: consulta.patient_id } : {}),
+            wa_id: toBrazilE164(telefone),
+            display_phone: telefone,
+            last_message_at: agora,
+          },
+          { onConflict: 'clinic_id,wa_id' },
+        )
+        .select('id,wa_id,status,profile_name')
+        .single()
+      if (erroCriar) console.error('Nao consegui criar a conversa para avisar o cancelamento', erroCriar)
+      conversa = criada ?? null
+    }
 
     if (!conversa) {
       return json({
         ok: true,
         avisado: false,
-        motivoDoSilencio: consulta.contact_phone
-          ? 'Não encontrei conversa no WhatsApp da clínica para este telefone.'
+        motivoDoSilencio: telefones.length > 0
+          ? 'Não consegui abrir uma conversa no WhatsApp para este telefone. Ligue para avisar.'
           : 'Esta consulta não tem telefone nem cadastro, então não há para onde avisar.',
       })
     }

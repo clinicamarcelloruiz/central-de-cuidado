@@ -18,6 +18,7 @@
  * meta-webhook, que ja tem o token e o numero em maos.
  */
 
+import { avisoDeHorario } from './expediente.ts'
 import { dataDeNascimentoIso } from './datas.ts'
 import type { adminClient } from './whatsapp.ts'
 import { cadastrarDaFicha, type ConsultaParaCadastro } from './cadastro.ts'
@@ -1019,8 +1020,7 @@ async function chamarEquipe(admin: Admin, conversationId: string): Promise<Resul
       'Estou direcionando você para um atendente da clínica.\n\n' +
       'Pode já escrever sua dúvida por aqui: a pessoa que assumir o atendimento ' +
       'vai ler tudo antes de responder.\n\n' +
-      'Atendemos de segunda a sexta, das 8h às 18h. Fora desse horário, ' +
-      'respondemos no próximo dia útil.\n\n' + VOLTA,
+      avisoDeHorario() + '\n\n' + VOLTA,
     atencao: 'atendente',
   }
 }
@@ -1061,8 +1061,7 @@ async function registrarPedidoDeNota(admin: Admin, conversationId: string): Prom
       '🧾 Anotei o pedido de *nota fiscal / recibo*.\n\n' +
       'Para a equipe já localizar, escreva aqui o *nome do paciente* e a *data da consulta*, ' +
       'se ainda não mandou.\n\n' +
-      'Atendemos de segunda a sexta, das 8h às 18h. Fora desse horário, ' +
-      'respondemos no próximo dia útil.',
+      avisoDeHorario(),
     atencao: 'documento',
   }
 }
@@ -2588,7 +2587,7 @@ export async function tratarConversa(opcoes: {
       resposta:
         '📎 Recebi o que você enviou e já avisei a nossa equipe: alguém do consultório vai olhar e responder por aqui.\n\n' +
         'Se quiser, escreva junto o que é e o que você gostaria de saber. Isso ajuda quem for responder.\n\n' +
-        'Atendemos de segunda a sexta, das 8h às 18h. Fora desse horário, respondemos no próximo dia útil.\n\n' +
+        avisoDeHorario() + '\n\n' +
         VOLTA,
       atencao: 'anexo',
     }
@@ -3010,7 +3009,7 @@ export async function tratarConversa(opcoes: {
       resposta:
         '✅ Registrado. Vou passar para o Dr. Marcello.\n\n' +
         'O documento corrigido é enviado ao paciente, não por este canal.\n\n' +
-        'Atendemos de segunda a sexta, das 8h às 18h.',
+        avisoDeHorario(),
       atencao: 'farmacia',
     }
   }
@@ -3165,7 +3164,7 @@ export async function tratarConversa(opcoes: {
           'original, então a 2ª via não pode ser resolvida por aqui automaticamente.\n\n' +
           'Já avisei a equipe: alguém do consultório responde por aqui para combinar como ' +
           'retirar.\n\n' +
-          'Atendemos de segunda a sexta, das 8h às 18h.',
+          avisoDeHorario(),
         atencao: 'documento',
       }
     }

@@ -7,6 +7,7 @@ import {
   CalendarOff,
   CalendarPlus,
   Clock,
+  Phone,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -36,6 +37,8 @@ import {
   listAppointmentHistory,
   listVagasDeCancelamento,
   type VagaDeCancelamento,
+  listLigarHoje,
+  type PendenciaDeLigar,
   marcarPresenca,
   listAvailabilityRules,
   listAvailableSlots,
@@ -58,6 +61,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import type { Patient } from '@/types/patient'
+import { supabase } from '@/lib/supabase'
 
 type Aba = 'calendario' | 'historico' | 'configuracao'
 
@@ -284,6 +288,32 @@ function Resumo({ rotulo, valor, cor }: { rotulo: string; valor: number; cor: st
       </p>
     </div>
   )
+}
+
+/** Mesmas cores da legenda e das etiquetas dos cartoes. */
+const ESTILO_DE_LIGAR: Record<PendenciaDeLigar['motivo'], { rotulo: string; classe: string }> = {
+  remarcar: { rotulo: 'Pediu para remarcar', classe: 'bg-orange-500 text-white' },
+  lembrete_falhou: { rotulo: 'Lembrete falhou', classe: 'bg-[#b42318] text-white' },
+  sem_resposta: { rotulo: 'Sem resposta ao lembrete', classe: 'bg-red-600 text-white' },
+  sem_telefone: { rotulo: 'Sem telefone', classe: 'bg-slate-200 text-slate-600' },
+}
+
+/** "Hoje 14:40" ou "Amanhã 09:20". */
+function quandoCurto(iso: string) {
+  const d = new Date(iso)
+  const dia = ehHoje(iso) ? 'Hoje' : 'Amanhã'
+  return `${dia} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+}
+
+/**
+ * A consulta e de hoje, no relogio de quem esta na recepcao.
+ *
+ * Presenca so se marca no dia: amanha ninguem chegou ainda. Fora do componente
+ * de proposito, porque ler a hora durante a renderizacao e o que a regra de
+ * pureza do React proibe.
+ */
+function ehHoje(iso: string) {
+  return new Date(iso).toDateString() === new Date().toDateString()
 }
 
 /** Clicar de novo desfaz: registro de presença errado é pior do que nenhum. */
@@ -533,6 +563,7 @@ export default function Agenda({
   const [historico, setHistorico] = useState<Appointment[]>([])
   const [vagas, setVagas] = useState<VagaDeCancelamento[]>([])
   const [marcando, setMarcando] = useState<string | null>(null)
+  const [ligarHoje, setLigarHoje] = useState<PendenciaDeLigar[]>([])
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [units, setUnits] = useState<Unit[]>([])
   const [unitId, setUnitId] = useState<string | null>(null)
@@ -603,13 +634,20 @@ export default function Agenda({
       return
     }
     try {
-      const [regras, livres, marcados, passadas, vagasCanceladas] = await Promise.all([
+      const [regras, livres, marcados, passadas, vagasCanceladas, pendencias] = await Promise.all([
         listAvailabilityRules(unitId),
         listAvailableSlots(unitId),
         listAppointments(clinicId, unitId),
         listAppointmentHistory(clinicId, unitId),
         listVagasDeCancelamento(clinicId, unitId),
+        // Da clinica inteira, e nao da unidade: ver listLigarHoje. Se falhar,
+        // a agenda carrega do mesmo jeito - e um atalho, nao a agenda.
+        listLigarHoje(clinicId).catch((erro) => {
+          console.warn('Nao consegui montar a lista "ligar hoje"', erro)
+          return [] as PendenciaDeLigar[]
+        }),
       ])
+      setLigarHoje(pendencias)
       setRules(regras)
       setSlots(livres)
       setAppointments(marcados)
@@ -626,6 +664,49 @@ export default function Agenda({
   useEffect(() => {
     void carregarUnidade()
   }, [carregarUnidade])
+
+  /**
+   * A Agenda se atualiza sozinha (24/09/2026).
+   *
+   * Ate aqui so o botao Atualizar trazia o que mudou: confirmacao pelo
+   * lembrete, "pediu para remarcar", consulta marcada pelo robo. A recepcao
+   * olhava a tela aberta desde cedo e decidia em cima de uma agenda velha.
+   *
+   * Duas vias, porque a primeira pode cair sem avisar:
+   *  - tempo real na tabela de consultas (ja publicada desde 09/09), com uma
+   *    espera de 1,5s para juntar a rajada de eventos de uma marcacao;
+   *  - uma passada a cada 2 minutos e sempre que a janela volta ao foco.
+   *
+   * Recarregar so troca as listas: o que esta sendo editado num formulario
+   * mora em outro estado e nao e apagado.
+   */
+  useEffect(() => {
+    if (!clinicId) return
+    let espera: number | undefined
+    const recarregar = () => {
+      window.clearTimeout(espera)
+      espera = window.setTimeout(() => void carregarUnidade(), 1500)
+    }
+    const canal = supabase
+      .channel(`agenda-${clinicId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'appointments', filter: `clinic_id=eq.${clinicId}` },
+        recarregar,
+      )
+      .subscribe()
+    const relogio = window.setInterval(() => void carregarUnidade(), 120_000)
+    const aoVoltar = () => {
+      if (document.visibilityState === 'visible') recarregar()
+    }
+    document.addEventListener('visibilitychange', aoVoltar)
+    return () => {
+      window.clearTimeout(espera)
+      window.clearInterval(relogio)
+      document.removeEventListener('visibilitychange', aoVoltar)
+      void supabase.removeChannel(canal)
+    }
+  }, [clinicId, carregarUnidade])
 
   const dias = useMemo(() => {
     const limite = new Date()
@@ -744,6 +825,25 @@ export default function Agenda({
         ? 'Consulta confirmada e paciente avisado pelo WhatsApp.'
         : 'Consulta confirmada. Não consegui avisar pelo WhatsApp. Responda pela tela de Respostas.',
     )
+  }
+
+  /**
+   * Chegou / faltou. Usado no Historico e, desde 24/09/2026, no cartao da
+   * consulta de hoje: antes so dava para marcar a partir do dia seguinte, e
+   * ninguem voltava la - as faltas ficavam sem registro e a taxa de falta
+   * saia menor do que a real.
+   */
+  async function registrarPresenca(id: string, presenca: 'attended' | 'no_show' | 'scheduled') {
+    setMarcando(id)
+    setError('')
+    try {
+      await marcarPresenca(id, presenca)
+      await carregarUnidade()
+    } catch (causa) {
+      setError(causa instanceof Error ? causa.message : 'Não foi possível registrar a presença.')
+    } finally {
+      setMarcando(null)
+    }
   }
 
   async function salvarConsulta() {
@@ -921,23 +1021,48 @@ export default function Agenda({
             <HistoricoDaAgenda
               itens={historico}
               marcando={marcando}
-              onMarcar={async (id, presenca) => {
-                setMarcando(id)
-                setError('')
-                try {
-                  await marcarPresenca(id, presenca)
-                  await carregarUnidade()
-                } catch (causa) {
-                  setError(
-                    causa instanceof Error ? causa.message : 'Não foi possível registrar a presença.',
-                  )
-                } finally {
-                  setMarcando(null)
-                }
-              }}
+              onMarcar={registrarPresenca}
             />
           ) : aba === 'calendario' ? (
             <div className="space-y-3">
+              {/* Ligar hoje (24/09/2026): o que pede telefonema, de hoje ate
+                  amanha, em todas as unidades. As etiquetas dos cartoes so
+                  mostravam a unidade aberta. Clicar leva para a unidade. */}
+              {ligarHoje.length > 0 && (
+                <div className="surface-card rounded-[20px] p-4">
+                  <p className="flex items-center gap-2 text-xs font-extrabold text-[#081b2c]">
+                    <Phone className="h-3.5 w-3.5 text-[#b42318]" />
+                    Ligar hoje ({ligarHoje.length})
+                    <span className="text-[10px] font-semibold text-slate-400">
+                      consultas até amanhã, todas as unidades
+                    </span>
+                  </p>
+                  <div className="mt-2.5 space-y-1.5">
+                    {ligarHoje.map((p) => {
+                      const estilo = ESTILO_DE_LIGAR[p.motivo]
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setUnitId(p.unitId)}
+                          title={p.detalhe ?? 'Abrir a agenda desta unidade'}
+                          className="flex w-full flex-wrap items-center gap-2 rounded-xl bg-[#fafaf8] px-3 py-2 text-left transition hover:bg-[#f0f6fc]"
+                        >
+                          <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${estilo.classe}`}>
+                            {estilo.rotulo}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-[11px] font-bold text-[#081b2c]">
+                            {quandoCurto(p.startsAt)} · {p.nome}
+                          </span>
+                          <span className="text-[10px] font-semibold text-slate-500">
+                            {p.telefone || 'sem telefone'} · {p.unitName}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               {rules.length === 0 && (
                 <div className="flex items-start gap-2 rounded-[16px] border border-[#2f7fc1]/40 bg-[#eef5fd] p-3 text-[11px] font-bold text-[#16456b]">
                   <Clock className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1211,6 +1336,31 @@ export default function Agenda({
                             >
                               Confirmar
                             </button>
+                          )}
+                          {/* Presenca no proprio dia (24/09/2026). So para
+                              consulta confirmada e de hoje: reserva provisoria
+                              ainda nao e consulta, e amanha ninguem chegou. */}
+                          {item.confirmedByClinic && ehHoje(item.startsAt) && (
+                            <div className="flex shrink-0 items-center gap-1">
+                              <BotaoPresenca
+                                ativo={item.status === 'attended'}
+                                corAtiva="#3fa88a"
+                                rotulo="Chegou"
+                                ocupado={marcando === item.id}
+                                onClick={() =>
+                                  void registrarPresenca(item.id, item.status === 'attended' ? 'scheduled' : 'attended')
+                                }
+                              />
+                              <BotaoPresenca
+                                ativo={item.status === 'no_show'}
+                                corAtiva="#b42318"
+                                rotulo="Faltou"
+                                ocupado={marcando === item.id}
+                                onClick={() =>
+                                  void registrarPresenca(item.id, item.status === 'no_show' ? 'scheduled' : 'no_show')
+                                }
+                              />
+                            </div>
                           )}
                           <button
                             type="button"
