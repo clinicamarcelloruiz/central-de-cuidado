@@ -21,6 +21,7 @@ import type { Consultation, ConsultationDraft, Patient } from '@/types/patient'
 import type { PatientDraft } from '@/lib/store'
 import PatientRecord from '@/sections/PatientRecord'
 import { fmtBR, idade } from '@/lib/followup'
+import { editarComMascara, mascararCpf, mascararTelefone } from '@/lib/mascaras'
 import { FOLLOWUP_LABEL } from '@/types/patient'
 import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
 import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco'
@@ -314,7 +315,7 @@ export default function Patients({
     const sugerido = preCadastro
       ? {
           nome: preCadastro.nome,
-          telefone: preCadastro.telefone,
+          telefone: mascararTelefone(preCadastro.telefone),
           ...(preCadastro.dataConsulta ? { dataConsulta: preCadastro.dataConsulta } : {}),
           ...(preCadastro.unidade &&
           unidadeEquivalente(preCadastro.unidade, opcoesDeUnidade(unidadesDaClinica))
@@ -326,7 +327,7 @@ export default function Patients({
           // 2019" fica de fora e a recepcao pergunta.
           ...(dataDoTexto(preCadastro.nascimento) ? { nascimento: dataDoTexto(preCadastro.nascimento)! } : {}),
           ...(preCadastro.responsavel ? { responsavel: preCadastro.responsavel } : {}),
-          ...(preCadastro.cpf ? { cpf: preCadastro.cpf } : {}),
+          ...(preCadastro.cpf ? { cpf: mascararCpf(preCadastro.cpf) } : {}),
           ...(preCadastro.email ? { email: preCadastro.email } : {}),
         }
       : {}
@@ -427,8 +428,9 @@ export default function Patients({
       responsavel: patient.responsavel,
       nascimento: patient.nascimento,
       sexo: patient.sexo,
-      telefone: patient.telefone,
-      cpf: patient.cpf ?? '',
+      // Com mascara ao abrir; o repositorio tira de novo antes de gravar.
+      telefone: mascararTelefone(patient.telefone),
+      cpf: mascararCpf(patient.cpf ?? ''),
       email: patient.email ?? '',
       cidade: patient.cidade,
       bairro: patient.bairro,
@@ -913,7 +915,14 @@ export default function Patients({
                 <input className={inputClass} value={form.responsavel} onChange={(event) => set('responsavel', event.target.value)} placeholder="Nome do pai, mãe ou tutor" />
               </Field>
               <Field label="WhatsApp com DDD" required>
-                <input className={inputClass} value={form.telefone} onChange={(event) => set('telefone', event.target.value)} placeholder="(13) 99999-9999" inputMode="tel" />
+                <input
+                  className={inputClass}
+                  value={form.telefone}
+                  onChange={(event) => set('telefone', editarComMascara(form.telefone, event.target.value, mascararTelefone))}
+                  placeholder="(13) 9 9999-9999"
+                  inputMode="tel"
+                  maxLength={21}
+                />
               </Field>
               <Field label="Data de nascimento">
                 <input type="date" className={inputClass} value={form.nascimento} onChange={(event) => set('nascimento', event.target.value)} />
@@ -927,7 +936,7 @@ export default function Patients({
                 <input
                   className={inputClass}
                   value={form.cpf}
-                  onChange={(event) => set('cpf', event.target.value)}
+                  onChange={(event) => set('cpf', editarComMascara(form.cpf, event.target.value, mascararCpf))}
                   placeholder="Necessário para emitir receita"
                   inputMode="numeric"
                   maxLength={14}
