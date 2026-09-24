@@ -27,6 +27,8 @@ function fazerAdmin({
   // Colunas que este banco falso NÃO tem. Recusa o update inteiro quando
   // alguma aparece, que é exatamente o que o Postgres faz.
   colunasAusentes = [],
+  // Consultas com o cadastro (intake_*) como o banco devolve.
+  consultasComFicha = [],
 }) {
   const conversa = {
     booking_state: null,
@@ -47,6 +49,7 @@ function fazerAdmin({
     select: () => chain(resultado),
     eq: (_col, valor) => chain(resultado._porId ? { ...resultado, single: resultado._porId(valor) } : resultado),
     is: () => chain(resultado),
+    in: () => chain(resultado),
     order: () => chain(resultado),
     limit: () => chain(resultado),
     maybeSingle: async () => ({ data: resultado.single ?? null, error: resultado.erro ?? null }),
@@ -135,6 +138,8 @@ function fazerAdmin({
           // regra do "manual", e nao a data.
           select: () =>
             chain({
+              // Consultas lidas em lista (cadastro pela metade, 24/09/2026).
+              list: consultasComFicha,
               single: {
                 reschedule_count: remarcacoesAnteriores,
                 starts_at: '2027-09-14T18:00:00Z',
@@ -252,6 +257,7 @@ async function caso(titulo, passos, opcoes = {}) {
     respostasProntas: opcoes.respostasProntas ?? [],
     telemedicina: opcoes.telemedicina ?? { ativa: false, texto: '' },
     colunasAusentes: opcoes.colunasAusentes ?? [],
+    consultasComFicha: opcoes.fichas ?? [],
   })
 
   // A conversa começa como se o menu já tivesse aparecido alguma vez.
@@ -1719,6 +1725,72 @@ await caso('Responder o nome do plano por escrito também vale', [
   ['2', 'pelo convênio'],
   ['trasmontano', 'Datas disponíveis'],
 ], { unidades: UNIDADE_COM_CONVENIO, slots: { 'u-santos': SLOTS_CHEIOS['u-santos'] } })
+
+// ---------------------------------------------------------------
+// Cadastro que ficou pela metade (24/09/2026)
+// ---------------------------------------------------------------
+//
+// A mãe marcou, tocou em "Voltar ao menu" no meio do cadastro e depois
+// escreveu o nome da criança. Recebia "Não entendi" e a recepção tinha de
+// mandar o questionário à mão. Nomes inventados.
+
+const CONSULTA_SEM_FICHA = [
+  { id: 'c-ficha', inicio: '2027-09-14T18:00:00Z', unidade: 'Liferty · Santos', endereco: '', paciente: '', confirmada: true },
+]
+const FICHA_VAZIA = [
+  { id: 'c-ficha', starts_at: '2027-09-14T18:00:00Z', patient_id: null, intake_patient_name: null, intake_birth_date: null, intake_guardian: null, intake_cpf: null, intake_email: null },
+]
+const FICHA_COMPLETA = [
+  { ...FICHA_VAZIA[0], intake_patient_name: 'Helena Souza Lima', intake_birth_date: '01/02/2020', intake_guardian: 'Marta Souza' },
+]
+const NO_MENU = { booking_state: 'menu' }
+
+await caso('Nome escrito depois de sair do cadastro é anotado e o cadastro segue', [
+  ['Helena Souza Lima', ['Anotei o nome', 'data de nascimento']],
+], { consultas: CONSULTA_SEM_FICHA, fichas: FICHA_VAZIA, estadoInicial: NO_MENU })
+
+await caso('Texto que não é nome oferece completar o cadastro', [
+  ['tudo bem', ['ficou pela metade', 'Quer completar agora']],
+], { consultas: CONSULTA_SEM_FICHA, fichas: FICHA_VAZIA, estadoInicial: NO_MENU })
+
+await caso('Tocar em Completar cadastro retoma da primeira pergunta', [
+  ['FICHA', 'nome completo do paciente'],
+], { consultas: CONSULTA_SEM_FICHA, fichas: FICHA_VAZIA, estadoInicial: NO_MENU })
+
+// O caminho real de 24/09: saiu do cadastro, tocou em "Marcar uma consulta",
+// caiu em "você já tem uma consulta" e escreveu o nome da criança.
+await caso('Já tem consulta com cadastro pela metade: oferece completar', [
+  ['2', ['já tem uma consulta', 'Completar cadastro']],
+], { consultas: CONSULTA_SEM_FICHA, fichas: FICHA_VAZIA, estadoInicial: NO_MENU })
+
+await caso('Nome escrito em "já tem consulta" é anotado', [
+  ['2', 'já tem uma consulta'],
+  ['Helena Souza Lima', ['Anotei o nome', 'data de nascimento']],
+], { consultas: CONSULTA_SEM_FICHA, fichas: FICHA_VAZIA, estadoInicial: NO_MENU })
+
+// Na fila da equipe, com gente conversando: o toque em "Marcar uma
+// consulta" de um menu antigo abre o agendamento (24/09/2026).
+await caso('Toque em Marcar uma consulta na fila da equipe abre o agendamento', [
+  ['Marcar uma consulta', 'Em qual unidade'],
+], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false })
+
+// Mas texto qualquer, na mesma situação, continua sendo da equipe.
+await caso('Texto solto na fila com equipe conversando continua sem robô', [
+  ['pode agendar', null],
+], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false })
+
+// "Consigo para amanhã com o dr" recebia "Não entendi" (24/09/2026).
+await caso('Pedido de vaga sem o verbo marcar abre o agendamento', [
+  ['Consigo para amanhã com o dr Marcello', 'Em qual unidade'],
+], { estadoInicial: NO_MENU })
+
+await caso('"Tem vaga?" abre o agendamento', [
+  ['Tem vaga essa semana?', 'Em qual unidade'],
+], { estadoInicial: NO_MENU })
+
+await caso('Com o cadastro completo, nome solto continua sem ser entendido', [
+  ['Helena Souza Lima', 'Não entendi'],
+], { consultas: CONSULTA_SEM_FICHA, fichas: FICHA_COMPLETA, estadoInicial: NO_MENU })
 
 // 23/09/2026: o convênio foi encerrado com uma família parada na pergunta.
 // A unidade agora está sem plano; a próxima mensagem dela não pode receber

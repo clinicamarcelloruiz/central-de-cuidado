@@ -240,7 +240,14 @@ export function pediuAgendamento(texto: string) {
   //
   // "consulta" sozinha fica de fora de proposito: "quanto custa a consulta?" e
   // pergunta de preco, e abriria a escolha de unidade sem ninguem pedir.
-  return /\b(marcar|marcacao|agendar|agendamento|horarios?)\b/.test(t)
+  if (/\b(marcar|marcacao|agendar|agendamento|horarios?)\b/.test(t)) return true
+
+  // Pedido de vaga sem o verbo (24/09/2026): "Consigo para amanha com o dr
+  // Marcelo" recebeu "Nao entendi". Vaga e dia pedidos juntos sao agendamento.
+  return (
+    /\b(tem|teria|ha|existe)\s+(uma\s+)?vagas?\b/.test(t) ||
+    /\bconsigo\b.*\b(amanha|hoje|semana|segunda|terca|quarta|quinta|sexta|sabado|dia|consulta)\b/.test(t)
+  )
 }
 
 /** A saida de emergencia. Vale em qualquer etapa, inclusive com a equipe. */
@@ -1244,17 +1251,25 @@ async function iniciarAgendamento(
       booking_options: [consultas[0].id],
       booking_replaces_id: null,
     })
+    // Consulta recem-marcada com o cadastro pela metade: quem toca em "Marcar
+    // uma consulta" logo depois quase sempre esta tentando terminar o que
+    // comecou, e nao marcar outra (24/09/2026). A saida vira o terceiro botao.
+    const pendente = await fichaPendente(admin, consultas)
     return {
       resposta:
         `Você já tem uma consulta marcada:\n\n${descreverConsulta(consultas[0], timezone)}\n\n` +
+        (pendente ? '📋 O cadastro dessa consulta ainda está incompleto.\n\n' : '') +
         'O que você prefere?\n\n' +
         '1 - Remarcar (trocar por outra data)\n' +
-        '2 - Marcar mais uma consulta, além dessa\n\n' +
+        '2 - Marcar mais uma consulta, além dessa\n' +
+        (pendente ? 'Ou toque em *Completar cadastro*.\n\n' : '\n') +
         VOLTA,
       botoes: [
         { id: '1', titulo: 'Remarcar essa' },
         { id: '2', titulo: 'Marcar mais uma' },
-        { id: 'MENU', titulo: 'Voltar ao menu' },
+        pendente
+          ? { id: 'FICHA', titulo: 'Completar cadastro' }
+          : { id: 'MENU', titulo: 'Voltar ao menu' },
       ],
     }
   }
@@ -2068,6 +2083,126 @@ async function terminarDados(
   }
 }
 
+// ---------------------------------------------------------------
+// Cadastro que ficou pela metade
+// ---------------------------------------------------------------
+
+/**
+ * A consulta marcada pelo robo cujo cadastro ficou pela metade (24/09/2026).
+ *
+ * Caso real: a mae marcou, recebeu "Qual e o nome completo do paciente?",
+ * tocou em "Voltar ao menu", e depois escreveu o nome da crianca. Com o menu
+ * na tela, o nome virava "Nao entendi. Responda com o numero da opcao", e a
+ * recepcao teve de disparar o questionario a mao.
+ *
+ * Pendente = consulta futura deste telefone, sem ficha ligada, com alguma das
+ * tres perguntas obrigatorias sem resposta. Nunca lanca: sem a informacao, o
+ * robo segue como antes.
+ */
+async function fichaPendente(
+  admin: Admin,
+  consultas: ConsultaMarcada[],
+): Promise<{ id: string; inicio: string; faltam: string[] } | null> {
+  if (consultas.length === 0) return null
+  try {
+    const { data } = await admin
+      .from('appointments')
+      .select('id,starts_at,patient_id,intake_patient_name,intake_birth_date,intake_guardian,intake_cpf,intake_email')
+      .in('id', consultas.map((c) => c.id))
+    const linhas = ((data ?? []) as Record<string, unknown>[])
+      .filter((l) => !l.patient_id)
+      .sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)))
+    for (const linha of linhas) {
+      const vazia = (coluna: string) => !String(linha[coluna] ?? '').trim()
+      const faltaObrigatoria = PERGUNTAS.some((p) => p.obrigatoria && vazia(p.coluna))
+      if (!faltaObrigatoria) continue
+      return {
+        id: String(linha.id),
+        inicio: String(linha.starts_at),
+        faltam: PERGUNTAS.filter((p) => vazia(p.coluna)).map((p) => p.chave),
+      }
+    }
+  } catch (causa) {
+    console.warn('Nao consegui conferir cadastro pendente', causa)
+  }
+  return null
+}
+
+/**
+ * O texto parece um nome de gente: so letras, duas palavras ou mais, sem
+ * pergunta. "Joao Pedro Silva" passa; "qual o endereco?", "ok obrigado" e
+ * "12/03/2019" nao.
+ */
+function pareceNome(texto: string) {
+  const t = texto.trim()
+  if (t.length < 5 || t.length > 80 || /[?0-9@]/.test(t)) return false
+  if (!/^[\p{L}' .-]+$/u.test(t)) return false
+  const palavras = t.split(/\s+/).filter((p) => p.length >= 2)
+  if (palavras.length < 2) return false
+  const comuns = new Set(['ok', 'obrigado', 'obrigada', 'bom', 'boa', 'dia', 'tarde', 'noite', 'oi', 'ola', 'tudo', 'bem', 'sim', 'nao', 'quero', 'queria', 'gostaria', 'por', 'favor'])
+  return !palavras.every((p) => comuns.has(normalizar(p)))
+}
+
+/**
+ * Texto solto de quem tem cadastro pela metade (24/09/2026). Se o que falta
+ * primeiro e o nome e o texto tem cara de nome, e a resposta atrasada: anota e
+ * segue. Senao, oferece retomar em um toque. Null quando nao ha pendencia.
+ *
+ * Vale no menu e na pergunta "voce ja tem uma consulta marcada": foi ali que a
+ * familia de 24/09 escreveu o nome da crianca e recebeu "Nao entendi".
+ */
+async function tentarFichaPendente(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+  texto: string,
+  consultas: ConsultaMarcada[],
+): Promise<Resultado | null> {
+  const pendente = await fichaPendente(admin, consultas)
+  if (!pendente) return null
+
+  if (['ficha', 'completar cadastro', 'completar'].includes(normalizar(texto))) {
+    registrar('ficha_retomada', 'botao')
+    return await retomarFicha(admin, conversationId, pendente, '📋 Vamos completar o cadastro da consulta.')
+  }
+
+  const primeira = PERGUNTAS.find((p) => p.chave === pendente.faltam[0])
+  if (primeira?.chave === 'nome' && pareceNome(texto)) {
+    const nome = texto.trim().slice(0, 160)
+    await guardarDado(admin, pendente.id, primeira, nome, null)
+    registrar('ficha_retomada', 'nome')
+    return await retomarFicha(
+      admin,
+      conversationId,
+      { id: pendente.id, faltam: pendente.faltam.slice(1) },
+      `Anotei o nome: *${nome}*. Vamos completar o cadastro da consulta.`,
+    )
+  }
+
+  registrar('ficha_oferecida')
+  const quando = formatarData(pendente.inicio, await fusoDaClinica(admin, clinicId))
+  return {
+    resposta:
+      `📋 O cadastro da sua consulta de *${quando}* ficou pela metade. ` +
+      'São poucas perguntas, e ajudam o Dr. Marcello a já ter os dados na hora.\n\n' +
+      'Quer completar agora?',
+    botoes: [
+      { id: 'FICHA', titulo: 'Completar cadastro' },
+      { id: '0', titulo: 'Ver o menu' },
+    ],
+  }
+}
+
+/** Retoma o cadastro pendente a partir da primeira pergunta sem resposta. */
+async function retomarFicha(
+  admin: Admin,
+  conversationId: string,
+  pendente: { id: string; faltam: string[] },
+  aviso: string,
+): Promise<Resultado> {
+  return await perguntarDados(admin, conversationId, pendente.id, pendente.faltam, aviso)
+}
+
 /**
  * Recomeça o questionário do cadastro, a pedido da equipe.
  *
@@ -2602,6 +2737,19 @@ export async function tratarConversa(opcoes: {
   // possivel - a mae avisando que a crianca esta mal, e a tela sem sinal
   // nenhum de que aquilo era diferente das outras conversas em espera.
   if (estadoAtual === 'atendente') {
+    // Toque em "Marcar uma consulta" de um menu antigo, na fila da equipe
+    // (24/09/2026). A atendente respondeu "selecione Agendar e marque direto";
+    // a mae tocou - e o robo, calado porque havia gente na conversa, ignorou.
+    // Ela escreveu "nao estou conseguindo marcar" e esperou 35 minutos. O
+    // titulo exato do item so chega por toque (quem digita escreve outra
+    // coisa), entao isto nao atropela conversa nenhuma: e pedido explicito.
+    if (normalizar(texto) === 'marcar uma consulta') {
+      registrar('opcao_escolhida', '2')
+      return await iniciarAgendamento(
+        admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
+      )
+    }
+
     if (pediuUrgencia(texto)) {
       return {
         resposta:
@@ -2873,6 +3021,12 @@ export async function tratarConversa(opcoes: {
 
   // ---- Menu ----
   if (estadoAtual === 'menu') {
+    // Toque em "Completar cadastro" (ver tentarFichaPendente).
+    if (['ficha', 'completar cadastro', 'completar'].includes(normalizar(texto))) {
+      const retomada = await tentarFichaPendente(admin, clinicId, conversationId, texto, opcoes.consultas)
+      if (retomada) return retomada
+    }
+
     const escolhido = escolha(texto, 5)
 
     // A resposta da pergunta "o que as pessoas mais pedem?". Guardado como o
@@ -2957,6 +3111,10 @@ export async function tratarConversa(opcoes: {
     // entao precisa do proprio registro. Sem esta linha o painel contaria so
     // os "nao entendi" de dentro dos fluxos, que sao a minoria, e diria que o
     // menu esta claro quando nao esta.
+    // Antes do "nao entendi": o cadastro da consulta ficou pela metade?
+    const retomada = await tentarFichaPendente(admin, clinicId, conversationId, texto, opcoes.consultas)
+    if (retomada) return retomada
+
     registrar('nao_entendi')
     return await mostrarMenu(
       admin,
@@ -3342,6 +3500,10 @@ export async function tratarConversa(opcoes: {
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas, true,
       )
     }
+    // 24/09/2026: a mae saiu do cadastro, tocou em "Marcar uma consulta",
+    // caiu aqui e escreveu o nome da crianca - que virava "Nao entendi".
+    const retomada = await tentarFichaPendente(admin, clinicId, conversationId, texto, opcoes.consultas)
+    if (retomada) return retomada
     return {
       resposta: await naoEntendi(
         admin,
