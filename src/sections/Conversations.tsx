@@ -811,7 +811,7 @@ export default function Conversations({
     // dia 15 inteiro.
     const fim = ate ? new Date(`${ate}T23:59:59.999`).getTime() : null
 
-    return conversations.filter((item) => {
+    const filtradas = conversations.filter((item) => {
       // A conversa aberta continua na lista mesmo escondida: some-la debaixo do
       // proprio leitor, no instante em que a resposta sai, seria tirar a
       // conversa da tela de quem ainda esta nela.
@@ -828,6 +828,14 @@ export default function Conversations({
       if (digitosBusca && item.phoneDigits.includes(digitosBusca)) return true
       return item.textoBusca.includes(termo)
     })
+
+    // Pendentes primeiro, concluidas depois; dentro de cada grupo, a ordem de
+    // sempre (a mais recente em cima). Pedido em 23/09/2026: uma familia
+    // esperando a nota fiscal desde a vespera ficava abaixo de oito conversas
+    // concluidas so porque elas tinham mensagem mais nova. A lista existe para
+    // mostrar o que falta fazer. O sort do JS e estavel, entao a ordem por
+    // horario dentro de cada grupo se mantem.
+    return [...filtradas].sort((a, b) => Number(estaConcluida(a)) - Number(estaConcluida(b)))
   }, [conversations, busca, de, ate, esconderConcluidas, selectedId])
 
   const concluidas = useMemo(() => conversations.filter(estaConcluida).length, [conversations])
