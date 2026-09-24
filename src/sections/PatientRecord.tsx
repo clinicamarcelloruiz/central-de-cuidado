@@ -635,7 +635,9 @@ async function imprimirProntuario(
     ['Nascimento', patient.nascimento ? `${fmtBR(patient.nascimento)} (${idade(patient.nascimento)})` : ''],
     ['Responsável', patient.responsavel],
     ['Convênio', patient.convenio],
-    ['Cidade', [patient.cidade, patient.bairro].filter(Boolean).join(' · ')],
+    // Onde o paciente MORA (cadastro). "Cidade: Santos · Campo Grande" era lido
+    // como local do atendimento, que ja aparece em cada consulta (23/09/2026).
+    ['Reside em', [patient.bairro, patient.cidade].filter(Boolean).join(', ')],
     ['Contato', patient.telefone],
   ]
     .filter(([, valor]) => valor)
@@ -2872,8 +2874,8 @@ export default function PatientRecord({
                       { rotulo: 'Convênio', valor: patient.convenio },
                       { rotulo: 'Unidade', valor: patient.unidade },
                       {
-                        rotulo: 'Cidade',
-                        valor: [patient.cidade, patient.bairro].filter(Boolean).join(' · '),
+                        rotulo: 'Reside em',
+                        valor: [patient.bairro, patient.cidade].filter(Boolean).join(', '),
                       },
                       { rotulo: 'CID-10', valor: patient.cid },
                     ]

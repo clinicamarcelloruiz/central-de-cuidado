@@ -901,7 +901,7 @@ export default function Patients({
           <div className="scrollbar-subtle flex-1 overflow-y-auto px-5 py-6 sm:px-7">
             <div className="mb-5 flex items-center gap-2">
               <span className="h-px flex-1 bg-[#081b2c]/[0.07]" />
-              <span className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-slate-400">Identificação e contato</span>
+              <span className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-slate-400">Identificação, contato e endereço</span>
               <span className="h-px flex-1 bg-[#081b2c]/[0.07]" />
             </div>
 
@@ -962,11 +962,20 @@ export default function Patients({
                   </span>
                 )}
               </Field>
+              {/* Onde o paciente MORA. Ate 23/09/2026 estes dois ficavam em
+                  "Agenda e localizacao", ao lado da unidade, e liam como o local
+                  do atendimento - a pergunta foi "cade onde ele mora?". */}
+              <Field label="Cidade onde mora">
+                <input className={inputClass} value={form.cidade} onChange={(event) => set('cidade', event.target.value)} placeholder="Santos" />
+              </Field>
+              <Field label="Bairro onde mora">
+                <input className={inputClass} value={form.bairro} onChange={(event) => set('bairro', event.target.value)} placeholder="Gonzaga" />
+              </Field>
             </div>
 
             <div className="my-6 flex items-center gap-2">
               <span className="h-px flex-1 bg-[#081b2c]/[0.07]" />
-              <span className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-slate-400">Agenda e localização</span>
+              <span className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-slate-400">Consulta</span>
               <span className="h-px flex-1 bg-[#081b2c]/[0.07]" />
             </div>
 
@@ -982,12 +991,6 @@ export default function Patients({
                     </option>
                   ))}
                 </select>
-              </Field>
-              <Field label="Cidade">
-                <input className={inputClass} value={form.cidade} onChange={(event) => set('cidade', event.target.value)} placeholder="Santos" />
-              </Field>
-              <Field label="Bairro / região">
-                <input className={inputClass} value={form.bairro} onChange={(event) => set('bairro', event.target.value)} placeholder="Gonzaga" />
               </Field>
               <Field label="Convênio">
                 <input className={inputClass} value={form.convenio} onChange={(event) => set('convenio', event.target.value)} placeholder="Particular, Unimed..." />
