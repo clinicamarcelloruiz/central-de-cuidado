@@ -54,6 +54,9 @@ import {
 } from '@/components/ui/sheet'
 import { fmtBR, idade, todayISO } from '@/lib/followup'
 import { acrescentarReceitas, dataDaReceita } from '@/lib/receita-no-texto'
+// O build inlina a imagem como data: URL, e e isso que faz o logo aparecer na
+// janela de impressao (about:blank, sem acesso a arquivos do site).
+import logoDaClinica from '@/assets/logo.webp'
 import {
   categoriaDaReceita,
   ORDEM_DAS_CATEGORIAS,
@@ -668,7 +671,9 @@ async function imprimirProntuario(
         .filter(([, chave]) => temTexto(String(consulta[chave] ?? '')))
         .map(
           ([rotulo, chave]) =>
-            `<div class="bloco"><h3>${rotulo}</h3><div class="txt">${editorValue(String(consulta[chave]))}</div></div>`,
+            `<div class="bloco${
+              textoSimples(String(consulta[chave])).length > 500 ? ' longo' : ''
+            }"><h3>${rotulo}</h3><div class="txt">${editorValue(String(consulta[chave]))}</div></div>`,
         )
         .join('')
 
@@ -749,9 +754,19 @@ async function imprimirProntuario(
     <style>
       * { box-sizing: border-box; }
       body { font-family: Georgia, 'Times New Roman', serif; color: #14202c; margin: 0; padding: 28px 32px; font-size: 12pt; line-height: 1.55; }
-      header { border-bottom: 2px solid #14202c; padding-bottom: 12px; margin-bottom: 18px; }
-      header h1 { margin: 0; font-size: 17pt; }
-      header p { margin: 2px 0 0; font-size: 10pt; color: #55606b; }
+      /* Papel timbrado (23/09/2026): logo a esquerda, como em receituario, e
+         o nome do documento a direita. O logo ja traz o nome do medico, entao
+         o titulo em texto que repetia "Clinica Dr. Marcello Ruiz" saiu. */
+      header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; border-bottom: 2px solid #0b2a5b; padding-bottom: 10px; margin-bottom: 18px; }
+      header img { height: 52px; width: auto; display: block; }
+      header .doc { text-align: right; }
+      header .doc .t { margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 9pt; font-weight: bold; letter-spacing: .16em; text-transform: uppercase; color: #0b2a5b; }
+      header .doc .s { margin: 2px 0 0; font-size: 9pt; color: #55606b; }
+      /* Campo longo (prescricao com varias receitas, historia extensa) pode
+         quebrar entre paginas. Com "nao quebra" ele pulava inteiro para a folha
+         seguinte e a primeira saia com uma linha so (23/09/2026). */
+      .bloco.longo { break-inside: auto; page-break-inside: auto; }
+      .txt { orphans: 3; widows: 3; }
       .paciente { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; margin-bottom: 22px; font-size: 11pt; }
       .paciente .r { display: inline-block; min-width: 105px; color: #55606b; }
       .paciente .v { font-weight: bold; }
@@ -790,8 +805,11 @@ async function imprimirProntuario(
       @page { margin: 16mm; }
     </style></head><body>
     <header>
-      <h1>Clínica Dr. Marcello Ruiz</h1>
-      <p>Prontuário clínico</p>
+      <img src="${logoDaClinica}" alt="Dr. Marcello Ruiz, gastroenterologista pediátrico">
+      <div class="doc">
+        <p class="t">Prontuário clínico</p>
+        <p class="s">Documento sigiloso</p>
+      </div>
     </header>
     <div class="paciente">${cabecalhoPaciente}</div>
     ${corpo || '<p>Nenhuma consulta registrada.</p>'}
