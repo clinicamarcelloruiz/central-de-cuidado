@@ -500,7 +500,11 @@ Deno.serve(async (req) => {
             .from('whatsapp_conversations')
             .upsert({
               clinic_id: clinicId,
-              patient_id: patient?.id ?? null,
+              // So quando o telefone achou um paciente. Mandar nulo aqui
+              // apagava o vinculo que a equipe fez a mao (irmaos no mesmo
+              // celular, numero antigo sem o nono digito): a proxima mensagem
+              // devolvia a conversa para "Contato sem cadastro" (24/09/2026).
+              ...(patient?.id ? { patient_id: patient.id } : {}),
               wa_id: waId,
               display_phone: waId,
               status: optedOut ? 'opted_out' : 'open',
@@ -508,7 +512,7 @@ Deno.serve(async (req) => {
               last_message_at: receivedAt,
               ...(nomeDoPerfil ? { profile_name: nomeDoPerfil } : {}),
             }, { onConflict: 'clinic_id,wa_id' })
-            .select('id,unread_count')
+            .select('id,unread_count,patient_id')
             .single()
           if (conversationError) throw conversationError
 
@@ -534,7 +538,8 @@ Deno.serve(async (req) => {
           const { error: messageError } = await admin.from('whatsapp_messages').insert({
             clinic_id: clinicId,
             conversation_id: conversation.id,
-            patient_id: patient?.id ?? null,
+            // O vinculo da conversa vale quando o telefone sozinho nao achou.
+            patient_id: patient?.id ?? conversation.patient_id ?? null,
             external_message_id: externalId,
             direction: 'inbound',
             message_type: message.type || 'text',

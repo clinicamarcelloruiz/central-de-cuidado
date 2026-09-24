@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { invokeWithFormData, supabase } from '@/lib/supabase'
 import type {
   Consultation,
   ConsultationDraft,
@@ -1907,6 +1907,19 @@ export async function sendConversationQuestionnaire(conversationId: string) {
   if ((data as { error?: string } | null)?.error) {
     throw new Error((data as { error: string }).error)
   }
+}
+
+/**
+ * Envia um arquivo da equipe (PDF, imagem, Word, Excel), com o texto como
+ * legenda. Mesma funcao do texto, em formulario: o servidor revalida a janela
+ * de 24h, guarda o arquivo no acervo e manda pela Meta (24/09/2026).
+ */
+export async function sendConversationFile(conversationId: string, arquivo: File, legenda: string) {
+  const corpo = new FormData()
+  corpo.append('conversationId', conversationId)
+  corpo.append('text', legenda)
+  corpo.append('arquivo', arquivo)
+  await invokeWithFormData('whatsapp-reply', corpo)
 }
 
 /** Envia uma resposta escrita pela equipe. O servidor revalida a janela de 24h. */

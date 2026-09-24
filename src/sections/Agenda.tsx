@@ -814,11 +814,14 @@ export default function Agenda({
 
   async function confirmarEAvisar(appointmentId: string) {
     if (!clinicId) return
-    await acao(
+    const confirmou = await acao(
       () => confirmAppointment(appointmentId),
       'Consulta confirmada. A vaga deixou de ser provisória.',
     )
     onSolicitacoesMudaram?.()
+    // Sem confirmacao, nada de aviso. Ate 24/09/2026 o erro aparecia na tela e
+    // a familia recebia "Consulta confirmada!" do mesmo jeito.
+    if (!confirmou) return
     const aviso = await notifyAppointmentConfirmed(clinicId, appointmentId)
     setAviso(
       aviso.avisou
@@ -863,7 +866,8 @@ export default function Agenda({
     setEmEdicao(null)
   }
 
-  async function acao(fn: () => Promise<unknown>, mensagem?: string) {
+  /** Devolve se deu certo: quem encadeia outro passo precisa saber. */
+  async function acao(fn: () => Promise<unknown>, mensagem?: string): Promise<boolean> {
     setError('')
     setAviso('')
     try {
@@ -871,8 +875,10 @@ export default function Agenda({
       if (mensagem) setAviso(mensagem)
       await carregarBase()
       await carregarUnidade()
+      return true
     } catch (causa) {
       setError(causa instanceof Error ? causa.message : 'A operação não foi concluída.')
+      return false
     }
   }
 

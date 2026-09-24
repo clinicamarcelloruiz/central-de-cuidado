@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
       const { data: consultas, error: consultasError } = await admin
         .from('appointments')
         .select('id,patient_id,starts_at,unit_id,modality,contact_name,contact_phone,clinic_units(name),' +
-          'intake_patient_name,intake_birth_date,intake_guardian,intake_cpf,intake_email')
+          'intake_patient_name,intake_birth_date,intake_guardian,intake_cpf,intake_email,reminder_failed_at')
         .eq('clinic_id', clinica.clinic_id)
         .eq('status', 'scheduled')
         .is('reminder_sent_at', null)
@@ -133,6 +133,18 @@ Deno.serve(async (req) => {
       resumo.candidatas += consultas?.length ?? 0
 
       for (const consulta of consultas ?? []) {
+        // Recusado pela Meta ha menos de 3 horas: nao tenta de novo ainda.
+        // Ate 24/09/2026 a recusa voltava a cada passada de hora em hora e
+        // deixava ate onze mensagens "falhou" na conversa. A etiqueta "Lembrete
+        // falhou" e o "Ligar hoje" da Agenda ja avisam a recepcao; aqui fica so
+        // uma nova tentativa espacada, para o caso de a Meta ter caido.
+        const falhouEm = (consulta as { reminder_failed_at?: string | null }).reminder_failed_at
+        if (falhouEm && Date.now() - new Date(falhouEm).getTime() < 3 * 3600 * 1000) {
+          resumo.pulados += 1
+          detalhes.push({ appointmentId: consulta.id, resultado: 'recusado ha pouco; nova tentativa em 3h' })
+          continue
+        }
+
         const { data: encontrado } = consulta.patient_id
           ? await admin
               .from('patients')
@@ -207,7 +219,9 @@ Deno.serve(async (req) => {
           .upsert(
             {
               clinic_id: clinica.clinic_id,
-              patient_id: paciente?.id ?? null,
+              // Nulo aqui apagaria o vinculo que a conversa ja tinha (irmao,
+              // responsavel). Mesmo defeito corrigido no webhook em 24/09/2026.
+              ...(paciente?.id ? { patient_id: paciente.id } : {}),
               wa_id: waId,
               display_phone: telefone,
               // status fica de fora: o padrao da coluna ja e 'open' para uma

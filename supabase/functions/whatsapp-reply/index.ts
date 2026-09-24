@@ -14,6 +14,21 @@ import { montarConteudo } from '../_shared/conteudo.ts'
 const JANELA_HORAS = 24
 const LIMITE_CARACTERES = 4096
 
+/** Como a Meta recebe cada tipo, e o limite de tamanho de cada um. */
+function classificarArquivo(arquivo: File): { tipo: 'image' | 'document'; limite: number } | null {
+  const mime = arquivo.type
+  if (mime === 'image/jpeg' || mime === 'image/png') return { tipo: 'image', limite: 5 * 1048576 }
+  const documentos = [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/plain',
+  ]
+  return documentos.includes(mime) ? { tipo: 'document', limite: 20 * 1048576 } : null
+}
+
 /** O que o questionario precisa saber da ficha: o que ja esta preenchido. */
 type PacienteDaFicha = {
   id: string
@@ -55,16 +70,50 @@ Deno.serve(async (req) => {
     const authorization = req.headers.get('Authorization') ?? ''
     if (!authorization.startsWith('Bearer ')) return json({ error: 'Sessão obrigatória.' }, 401)
 
-    const body = (await req.json()) as ReplyRequest
+    // Com arquivo, o pedido chega como formulario (multipart); sem, como JSON.
+    let body: ReplyRequest
+    let arquivo: File | null = null
+    if ((req.headers.get('content-type') ?? '').includes('multipart/form-data')) {
+      const form = await req.formData()
+      body = {
+        conversationId: String(form.get('conversationId') ?? ''),
+        text: String(form.get('text') ?? ''),
+      }
+      const campo = form.get('arquivo')
+      arquivo = campo instanceof File && campo.size > 0 ? campo : null
+    } else {
+      body = (await req.json()) as ReplyRequest
+    }
     const querMenu = body.menu === true
     const querQuestionario = body.questionario === true
     let texto = (body.text ?? '').trim()
     if (!body.conversationId) return json({ error: 'Conversa não informada.' }, 400)
+
+    // Arquivo da equipe para a familia (24/09/2026): receita, pedido de exame,
+    // recibo. Antes so dava pelo celular, e o envio ficava fora do historico.
+    // Limites da Meta: imagem ate 5 MB; documento ate 100 MB, mas o acervo da
+    // clinica aceita 20 MB. A legenda de midia vai ate 1024 caracteres.
+    const envio = arquivo ? classificarArquivo(arquivo) : null
+    if (arquivo && !envio) {
+      return json({
+        error: 'Tipo de arquivo não aceito. Envie PDF, imagem (JPG ou PNG), Word, Excel ou texto.',
+        code: 'TIPO_RECUSADO',
+      }, 400)
+    }
+    if (arquivo && envio && arquivo.size > envio.limite) {
+      return json({
+        error: `Arquivo grande demais: o limite para ${envio.tipo === 'image' ? 'imagem' : 'documento'} é ${Math.round(envio.limite / 1048576)} MB.`,
+        code: 'GRANDE_DEMAIS',
+      }, 400)
+    }
+    if (arquivo && texto.length > 1024) {
+      return json({ error: 'A legenda de um arquivo vai até 1024 caracteres.' }, 400)
+    }
     // So exige texto digitado quando e a equipe escrevendo. O menu e o
     // questionario chegam aqui sem texto de proposito: quem monta a mensagem e
     // o robo, mais abaixo. Sem esta ressalva o botao Questionario batia nesta
     // linha e voltava "Escreva a mensagem antes de enviar" sem nunca enviar.
-    if (!texto && !querMenu && !querQuestionario) {
+    if (!texto && !querMenu && !querQuestionario && !arquivo) {
       return json({ error: 'Escreva a mensagem antes de enviar.' }, 400)
     }
     if (texto.length > LIMITE_CARACTERES) {
@@ -227,6 +276,60 @@ Deno.serve(async (req) => {
     const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
     const agora = new Date().toISOString()
 
+    // Com arquivo: guarda no acervo da clinica (o historico mostra o que foi
+    // enviado), sobe para a Meta e manda pelo id que ela devolve.
+    let conteudo: Record<string, unknown> = montarConteudo(texto, toques)
+    let tipoDaMensagem = toques ? 'interactive' : 'text'
+    let corpoNoHistorico = texto
+    let midia: { media_path: string; media_mime: string } | null = null
+    if (arquivo && envio) {
+      const bytes = new Uint8Array(await arquivo.arrayBuffer())
+      const caminho = `${visivel.clinic_id}/saida-${crypto.randomUUID()}`
+      const { error: erroAcervo } = await admin.storage
+        .from('whatsapp-anexos')
+        .upload(caminho, bytes, { contentType: arquivo.type, upsert: false })
+      if (erroAcervo) {
+        console.error('Nao consegui guardar o arquivo no acervo', erroAcervo)
+        return json({ error: 'Não consegui guardar o arquivo. Nada foi enviado.', code: 'ACERVO' }, 500)
+      }
+      midia = { media_path: caminho, media_mime: arquivo.type }
+
+      const paraMeta = new FormData()
+      paraMeta.append('messaging_product', 'whatsapp')
+      paraMeta.append('type', arquivo.type)
+      paraMeta.append('file', new Blob([bytes], { type: arquivo.type }), arquivo.name || 'arquivo')
+      const subida = await fetch(
+        `https://graph.facebook.com/${graphVersion}/${settings.whatsapp_phone_number_id}/media`,
+        { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: paraMeta },
+      )
+      const subidaCorpo = await subida.json().catch(() => ({}))
+      if (!subida.ok || !subidaCorpo?.id) {
+        const motivo = subidaCorpo?.error?.message || 'A Meta recusou o arquivo.'
+        console.error('Meta recusou o upload do arquivo', subidaCorpo)
+        await admin.from('whatsapp_messages').insert({
+          clinic_id: visivel.clinic_id,
+          conversation_id: visivel.id,
+          patient_id: visivel.patient_id,
+          direction: 'outbound',
+          automatic: false,
+          message_type: envio.tipo,
+          body: texto || arquivo.name || 'Arquivo',
+          status: 'failed',
+          failed_at: agora,
+          failure_reason: motivo,
+          ...midia,
+        })
+        return json({ error: 'A Meta recusou o arquivo.', code: 'META_REJECTED', details: motivo }, 502)
+      }
+
+      const legenda = texto ? { caption: texto } : {}
+      conteudo = envio.tipo === 'image'
+        ? { type: 'image', image: { id: subidaCorpo.id, ...legenda } }
+        : { type: 'document', document: { id: subidaCorpo.id, filename: arquivo.name || 'arquivo', ...legenda } }
+      tipoDaMensagem = envio.tipo
+      corpoNoHistorico = texto || arquivo.name || 'Arquivo'
+    }
+
     const resposta = await fetch(
       `https://graph.facebook.com/${graphVersion}/${settings.whatsapp_phone_number_id}/messages`,
       {
@@ -236,7 +339,7 @@ Deno.serve(async (req) => {
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
           to: visivel.wa_id,
-          ...montarConteudo(texto, toques),
+          ...conteudo,
         }),
       },
     )
@@ -251,11 +354,12 @@ Deno.serve(async (req) => {
         patient_id: visivel.patient_id,
         direction: 'outbound',
         automatic: body.automatico === true || querMenu || querQuestionario,
-        message_type: toques ? 'interactive' : 'text',
-        body: texto,
+        message_type: tipoDaMensagem,
+        body: corpoNoHistorico,
         status: 'failed',
         failed_at: agora,
         failure_reason: motivo,
+        ...(midia ?? {}),
       })
       return json({ error: 'A Meta recusou o envio.', code: 'META_REJECTED', details: motivo }, 502)
     }
@@ -269,10 +373,11 @@ Deno.serve(async (req) => {
         external_message_id: corpo?.messages?.[0]?.id ?? null,
         direction: 'outbound',
         automatic: body.automatico === true || querMenu || querQuestionario,
-        message_type: toques ? 'interactive' : 'text',
-        body: texto,
+        message_type: tipoDaMensagem,
+        body: corpoNoHistorico,
         status: 'accepted',
         sent_at: agora,
+        ...(midia ?? {}),
       })
       .select('id,status,created_at')
       .single()
@@ -293,6 +398,10 @@ Deno.serve(async (req) => {
       .from('whatsapp_conversations')
       .update({
         needs_attention: false,
+        // O motivo sai junto (24/09/2026). Ficando, ele "ressuscitava": semanas
+        // depois o robo acendia a conversa com o motivo velho ("Enviou um
+        // arquivo") para quem so escreveu "boa tarde".
+        attention_reason: null,
         unread_count: 0,
         last_message_at: agora,
         ...(visivel.status === 'resolved' ? { status: 'open' } : {}),

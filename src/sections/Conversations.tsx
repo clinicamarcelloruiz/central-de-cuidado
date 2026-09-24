@@ -28,6 +28,7 @@ import {
   getCurrentMembership,
   listConversationMessages,
   listRespostasProntas,
+  sendConversationFile,
   type RespostaPronta,
   listConversations,
   getReplyWindow,
@@ -408,6 +409,9 @@ export default function Conversations({
   const [error, setError] = useState('')
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [prontas, setProntas] = useState<RespostaPronta[]>([])
+  // Arquivo escolhido para ir junto da proxima resposta (24/09/2026).
+  const [arquivo, setArquivo] = useState<File | null>(null)
+  const seletorDeArquivo = useRef<HTMLInputElement>(null)
 
   // As respostas prontas mudam pouco: uma leitura quando a clinica e conhecida.
   // Falhar aqui so tira o atalho; a caixa de resposta continua igual.
@@ -686,6 +690,8 @@ export default function Conversations({
 
   async function openConversation(conversation: Conversation) {
     setSelectedId(conversation.id)
+    // Arquivo escolhido numa conversa nao pode ir parar em outra.
+    setArquivo(null)
     setLoadingMessages(true)
     setResposta('')
     setJanelaAte(null)
@@ -722,12 +728,15 @@ export default function Conversations({
 
   async function enviarResposta() {
     const texto = resposta.trim()
-    if (!selectedId || !texto || enviando) return
+    if (!selectedId || (!texto && !arquivo) || enviando) return
     setEnviando(true)
     setError('')
     try {
-      await sendConversationReply(selectedId, texto)
+      // Com arquivo, o texto vira a legenda dele.
+      if (arquivo) await sendConversationFile(selectedId, arquivo, texto)
+      else await sendConversationReply(selectedId, texto)
       setResposta('')
+      setArquivo(null)
       acabamosDeEnviar.current = true
       // O tempo real ja traz a mensagem nova, mas recarregar aqui evita a
       // sensacao de "sumiu" caso a assinatura esteja fora do ar.
@@ -1868,6 +1877,35 @@ export default function Conversations({
                         placeholder="Escreva sua resposta..."
                         className="mt-2 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[12px] leading-relaxed outline-none focus:border-[#2f7fc1]"
                       />
+                      {/* Arquivo escolhido: vai junto no Enviar, com o texto
+                          acima como legenda. */}
+                      {arquivo && (
+                        <div className="mt-2 inline-flex max-w-full items-center gap-2 rounded-xl bg-[#eef5fd] px-3 py-1.5 text-[10px] font-bold text-[#16456b]">
+                          <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{arquivo.name}</span>
+                          <span className="shrink-0 text-[#16456b]/60">
+                            {(arquivo.size / 1048576).toFixed(1).replace('.', ',')} MB
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setArquivo(null)}
+                            title="Tirar o arquivo"
+                            className="shrink-0 rounded-full p-0.5 hover:bg-white"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                      <input
+                        ref={seletorDeArquivo}
+                        type="file"
+                        accept="application/pdf,image/jpeg,image/png,.doc,.docx,.xls,.xlsx,.txt"
+                        className="hidden"
+                        onChange={(e) => {
+                          setArquivo(e.target.files?.[0] ?? null)
+                          e.target.value = ''
+                        }}
+                      />
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                         <p className="text-[9px] font-semibold text-slate-400">
                           Enter envia · Shift+Enter quebra linha
@@ -1904,7 +1942,17 @@ export default function Conversations({
                         </button>
                         <button
                           type="button"
-                          disabled={enviando || !resposta.trim()}
+                          disabled={enviando}
+                          onClick={() => seletorDeArquivo.current?.click()}
+                          title="Anexar receita, pedido de exame, recibo ou foto (PDF, JPG, PNG, Word, Excel)"
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-white px-3 py-2 text-[10px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c] disabled:opacity-40"
+                        >
+                          <Paperclip className="h-3.5 w-3.5" />
+                          Arquivo
+                        </button>
+                        <button
+                          type="button"
+                          disabled={enviando || (!resposta.trim() && !arquivo)}
                           onClick={() => void enviarResposta()}
                           className="inline-flex items-center gap-1.5 rounded-xl bg-[#081b2c] px-4 py-2 text-[10px] font-extrabold text-white transition hover:bg-[#102d47] disabled:cursor-not-allowed disabled:opacity-40"
                         >

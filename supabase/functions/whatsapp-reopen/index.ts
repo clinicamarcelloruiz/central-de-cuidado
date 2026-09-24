@@ -241,6 +241,10 @@ Deno.serve(async (req) => {
       // Retomar o atendimento tira a conversa de "Concluida" (23/09/2026).
       .update({
         needs_attention: false,
+        // O motivo sai junto (24/09/2026). Ficando, ele "ressuscitava": semanas
+        // depois o robo acendia a conversa com o motivo velho ("Enviou um
+        // arquivo") para quem so escreveu "boa tarde".
+        attention_reason: null,
         last_message_at: agora,
         ...(visivel.status === 'resolved' ? { status: 'open' } : {}),
       })
