@@ -783,7 +783,15 @@ export default function Conversations({
       setConversations((current) =>
         current.map((item) =>
           item.id === conversationId
-            ? { ...item, status: 'resolved', needsAttention: false, attentionReason: null, unreadCount: 0 }
+            ? {
+                ...item,
+                status: 'resolved',
+                needsAttention: false,
+                attentionReason: null,
+                unreadCount: 0,
+                // Concluir solta o robo (ver resolveConversation).
+                bookingState: null,
+              }
             : item,
         ),
       )

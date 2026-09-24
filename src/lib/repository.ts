@@ -1828,8 +1828,20 @@ export async function sendConversationReply(
   }
 }
 
-/** Marca a conversa como resolvida sem apagar o historico. */
+/**
+ * Marca a conversa como resolvida sem apagar o historico.
+ *
+ * Solta o robo junto. Ate 23/09/2026 concluir so mudava o status, e uma
+ * conversa com o robo parado no meio de uma etapa ("aguardando_convenio",
+ * depois que o Trasmontano saiu) continuava com o cartao aberto e o botao
+ * Destravar - a tela nao encolhe conversa com robo preso, de proposito. Quem
+ * conclui esta dizendo que nada ali espera a clinica; o rascunho do
+ * agendamento vai junto, e a proxima mensagem da familia comeca do menu.
+ */
 export async function resolveConversation(conversationId: string) {
+  // Primeiro o robo: se isto falhar, a conversa nao fica "concluida" com o
+  // robo ainda preso, que e o estado que gerou a pergunta.
+  await resetConversationBot(conversationId)
   const { error } = await supabase
     .from('whatsapp_conversations')
     .update({ status: 'resolved', needs_attention: false, attention_reason: null, unread_count: 0 })
