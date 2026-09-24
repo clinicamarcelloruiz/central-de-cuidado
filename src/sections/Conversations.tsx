@@ -1790,6 +1790,14 @@ export default function Conversations({
                         Fora delas você tem dois caminhos: responder agora dentro de um modelo
                         aprovado, ou convidar a família a escrever para a conversa reabrir.
                       </p>
+                      {/* Perguntado em 23/09/2026: "por que o menu do robo nao
+                          fica disponivel?". O menu tem botoes, e mensagem com
+                          botao a Meta so aceita com a janela aberta. Dizer aqui
+                          evita a equipe achar que o botao sumiu por defeito. */}
+                      <p className="mt-1 text-[10px] font-semibold text-[#16456b]/80">
+                        O menu do robô só pode ser enviado com a janela aberta. Quando a família
+                        responder o convite, a janela reabre e o botão "Enviar menu de opções" volta.
+                      </p>
 
                       {/* Caminho 1: a resposta sai agora, dentro do modelo. */}
                       <textarea

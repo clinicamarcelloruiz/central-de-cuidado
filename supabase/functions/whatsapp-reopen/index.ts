@@ -1,5 +1,6 @@
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
 import { textoDoModelo } from '../_shared/modelos.ts'
+import { primeiroNomeUtil } from '../_shared/nome.ts'
 
 /**
  * Falar com alguem cuja janela de 24 horas ja fechou.
@@ -128,16 +129,20 @@ Deno.serve(async (req) => {
     // O nome de quem recebe. Sem cadastro, vale o nome do perfil do WhatsApp; e
     // sem nenhum dos dois, um tratamento neutro - a Meta recusa a mensagem
     // inteira se a variavel vier vazia.
-    let nome = (visivel.profile_name ?? '').trim()
+    //
+    // Nome de perfil passa por primeiroNomeUtil: "tudo bem", emoji ou "Mae do
+    // Joao" nao viram nome. Sem nome util, o modelo recebe "tudo bem" (vira
+    // "Ola, tudo bem!") e o historico diz so "retomar o atendimento".
+    let nomeUtil = primeiroNomeUtil(visivel.profile_name)
     if (visivel.patient_id) {
       const { data: paciente } = await admin
         .from('patients')
         .select('name')
         .eq('id', visivel.patient_id)
         .maybeSingle()
-      if (paciente?.name) nome = paciente.name
+      if (paciente?.name) nomeUtil = primeiroNomeUtil(paciente.name, true)
     }
-    const primeiroNome = (nome.split(/\s+/)[0] || 'tudo bem').slice(0, 60)
+    const primeiroNome = nomeUtil ?? 'tudo bem'
 
     // Dois modelos, um caminho de codigo. O que muda e o nome e os parametros:
     // o convite leva so o nome; a resposta leva o nome e o texto da equipe.
@@ -178,7 +183,9 @@ Deno.serve(async (req) => {
       ? textoDoModelo(templateName, parametros) ?? mensagem
       // ATENCAO: listConversations (repository.ts) reconhece o convite pelo
       // comeco deste texto para nao conta-lo como resposta. Mudou aqui, muda la.
-      : `Mensagem enviada para retomar o atendimento com ${primeiroNome}.`
+      : nomeUtil
+        ? `Mensagem enviada para retomar o atendimento com ${nomeUtil}.`
+        : 'Mensagem enviada para retomar o atendimento.'
 
     if (!resposta.ok) {
       const motivo = corpo?.error?.message || 'Meta recusou o envio.'
