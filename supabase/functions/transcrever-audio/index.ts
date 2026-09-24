@@ -1,4 +1,5 @@
 import { corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
+import { clinicaDeQuemAtende } from '../_shared/papel.ts'
 
 /**
  * Transcricao de audio do prontuario.
@@ -30,13 +31,11 @@ Deno.serve(async (req) => {
     // Confirma que quem pede e membro ativo de alguma clinica. Sem isso,
     // qualquer usuario autenticado poderia consumir a cota da chave.
     const scoped = userClient(authorization)
-    const { data: membership, error: membershipError } = await scoped
-      .from('clinic_memberships')
-      .select('clinic_id')
-      .limit(1)
-      .maybeSingle()
-    if (membershipError || !membership) {
-      return json({ error: 'Seu usuário não está vinculado a uma clínica.', code: 'NO_MEMBERSHIP' }, 403)
+    // So quem atende (24/09/2026): o audio e a consulta falada, dado de saude
+    // de crianca, e sai para um servico fora do pais. Antes qualquer membro
+    // da clinica podia mandar.
+    if (!(await clinicaDeQuemAtende(scoped))) {
+      return json({ error: 'A transcrição é só para o médico.', code: 'SEM_PERMISSAO' }, 403)
     }
 
     const apiKey = Deno.env.get('GROQ_API_KEY')?.trim()

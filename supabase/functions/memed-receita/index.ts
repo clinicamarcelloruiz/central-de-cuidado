@@ -1,4 +1,5 @@
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
+import { clinicaDeQuemAtende } from '../_shared/papel.ts'
 
 /**
  * Guarda no prontuario a receita que a Memed acabou de emitir.
@@ -77,6 +78,9 @@ Deno.serve(async (req) => {
     // prontuario sem explicacao parece defeito do sistema; marcado, a tela
     // sabe dizer que o proprio medico removeu.
     if (corpo.excluir) {
+      if (!(await clinicaDeQuemAtende(escopo))) {
+        return json({ error: 'Só o médico pode excluir receita.', code: 'SEM_PERMISSAO' }, 403)
+      }
       const { data: existente } = await escopo
         .from('prescriptions')
         .select('id')
@@ -106,6 +110,26 @@ Deno.serve(async (req) => {
       .maybeSingle()
 
     if (!paciente) return json({ error: 'Paciente não encontrado.', code: 'NOT_VISIBLE' }, 403)
+
+    // Receita so de quem prescreve, e so na consulta deste paciente
+    // (24/09/2026). Antes qualquer membro gravava, e o consultationId vindo do
+    // navegador entrava sem conferencia - dava para pendurar a receita no
+    // atendimento de outra crianca.
+    if (!(await clinicaDeQuemAtende(escopo, paciente.clinic_id))) {
+      return json({ error: 'Só o médico pode registrar receita.', code: 'SEM_PERMISSAO' }, 403)
+    }
+    if (corpo.consultationId) {
+      const { data: daConsulta } = await admin
+        .from('consultations')
+        .select('id')
+        .eq('id', corpo.consultationId)
+        .eq('patient_id', paciente.id)
+        .eq('clinic_id', paciente.clinic_id)
+        .maybeSingle()
+      if (!daConsulta) {
+        return json({ error: 'Esta consulta não é deste paciente.', code: 'CONSULTA_DE_OUTRO' }, 400)
+      }
+    }
 
     const { data: usuario } = await escopo.auth.getUser()
 

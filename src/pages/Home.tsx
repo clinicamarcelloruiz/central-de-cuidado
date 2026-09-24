@@ -259,7 +259,13 @@ export default function Home() {
   const esperaLonga = espera.longa
 
   const meta = PAGE_META[tab]
-  const tabs = role === 'owner' ? TABS : TABS.filter((item) => item.key !== 'admin')
+  // Acessos e Preferencias so para administrador (24/09/2026). Preferencias
+  // tem os textos do robo, os dados da clinica e o "apagar tudo": a recepcao
+  // nao precisa disso para trabalhar, e um clique errado ali muda o que o
+  // robo diz para todas as familias.
+  const tabs = role === 'owner'
+    ? TABS
+    : TABS.filter((item) => item.key !== 'admin' && item.key !== 'config')
 
   /**
    * Aquece a Memed no login, e nao no prontuario.
@@ -649,7 +655,7 @@ export default function Home() {
                 }}
               />
             )}
-            {tab === 'config' && (
+            {tab === 'config' && role === 'owner' && (
               <Settings db={db} setTemplates={setTemplates} importDb={importDb} clearAll={clearAll} />
             )}
             {tab === 'admin' && role === 'owner' && <AccessAdmin />}

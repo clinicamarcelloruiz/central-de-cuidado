@@ -2064,6 +2064,11 @@ export default function PatientRecord({
   // Os modelos sao da clinica, entao sao carregados uma vez por abertura do
   // prontuario e compartilhados por todos os campos - e nao um pedido por campo.
   const [clinicId, setClinicId] = useState<string | null>(null)
+  // Prontuario e do medico (24/09/2026). A recepcao chega aqui pela lista de
+  // pacientes, e o banco ja nao lhe entrega nenhuma consulta - sem este aviso
+  // a tela abria vazia, como se o paciente nunca tivesse sido atendido.
+  // Comeca verdadeiro para quem atende nao ver o aviso piscar ao abrir.
+  const [podeVerProntuario, setPodeVerProntuario] = useState(true)
   const [modelos, setModelos] = useState<NoteTemplate[]>([])
   const [integridade, setIntegridade] = useState<Integridade | null>(null)
   const [conferindo, setConferindo] = useState(false)
@@ -2119,6 +2124,7 @@ export default function PatientRecord({
         const membership = await getCurrentMembership()
         if (!membership || !vivo) return
         setClinicId(membership.clinicId)
+        setPodeVerProntuario(membership.role === 'owner' || membership.role === 'clinician')
         const lista = await listNoteTemplates(membership.clinicId)
         if (vivo) setModelos(lista)
         // A integridade e carregada junto porque o documento impresso leva o
@@ -2770,6 +2776,24 @@ export default function PatientRecord({
               <UserRound className="mx-auto h-8 w-8 text-slate-300" />
               <p className="mt-3 text-sm font-extrabold text-[#081b2c]">Nenhum paciente selecionado</p>
               <p className="mt-1 text-xs text-slate-400">Feche este painel e escolha um paciente.</p>
+            </div>
+          </div>
+        ) : !podeVerProntuario ? (
+          <div className="flex flex-1 items-center justify-center px-6 text-center">
+            <div className="max-w-sm">
+              <ShieldCheck className="mx-auto h-8 w-8 text-slate-300" />
+              <p className="mt-3 text-sm font-extrabold text-[#081b2c]">O prontuário é visível só para o médico</p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                Consultas, receitas e documentos assinados ficam restritos a quem atende. Os dados de
+                cadastro você edita pelo botão abaixo.
+              </p>
+              <button
+                type="button"
+                onClick={() => onEditRegistration(patient)}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 bg-white px-3 py-2 text-[10px] font-extrabold text-slate-600 transition hover:border-[#1f4f78]/30 hover:text-[#1f4f78]"
+              >
+                <Edit3 className="h-3.5 w-3.5" /> Editar dados cadastrais
+              </button>
             </div>
           </div>
         ) : mode === 'history' ? (

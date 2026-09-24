@@ -1,4 +1,5 @@
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
+import { clinicaDeQuemAtende } from '../_shared/papel.ts'
 
 /**
  * Devolve o token do medico na Memed para a tela abrir a prescricao.
@@ -235,6 +236,12 @@ Deno.serve(async (req) => {
       .maybeSingle()
 
     if (!ajustes) return json({ error: 'Clínica não encontrada.', code: 'SEM_CLINICA' }, 403)
+
+    // So quem atende recebe o acesso de prescritor (24/09/2026). Antes bastava
+    // ser membro: a recepcao conseguia emitir receita no nome do medico.
+    if (!(await clinicaDeQuemAtende(escopo, ajustes.clinic_id))) {
+      return json({ error: 'Só o médico pode prescrever.', code: 'SEM_PERMISSAO' }, 403)
+    }
 
     const env = ambiente()
     const credenciais = chaves()

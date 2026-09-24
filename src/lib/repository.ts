@@ -317,6 +317,9 @@ export async function getCurrentMembership(): Promise<CurrentMembership | null> 
   const { data: membership, error: membershipError } = await supabase
     .from('clinic_memberships')
     .select('clinic_id,role')
+    // Suspenso nao entra (24/09/2026): sem este filtro a tela abria como se o
+    // acesso existisse e cada consulta voltava vazia, sem explicar por que.
+    .eq('status', 'active')
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle()
@@ -358,6 +361,68 @@ export async function approveAccessRequest(requestId: string, role: Exclude<Clin
   const { error } = await supabase.rpc('approve_access_request', {
     request_id: requestId,
     assigned_role: role,
+  })
+  if (error) fail(error)
+}
+
+export interface AcessoDaClinica {
+  userId: string
+  nome: string
+  email: string
+  papel: ClinicRole
+  situacao: 'active' | 'suspended'
+  desde: string
+  /** Responsavel pelo sistema: ninguem altera este acesso pela tela. */
+  protegido: boolean
+}
+
+/** Quem tem vinculo com a clinica. So o dono enxerga (ver migration 20260924150000). */
+export async function listarAcessos(clinicId: string): Promise<AcessoDaClinica[]> {
+  const { data, error } = await (supabase.rpc as unknown as (
+    nome: string,
+    args: Record<string, unknown>,
+  ) => PromiseLike<{ data: unknown; error: { message: string } | null }>)('listar_acessos_da_clinica', {
+    p_clinic: clinicId,
+  })
+  if (error) fail(error)
+  type Linha = {
+    user_id: string
+    nome: string
+    email: string
+    papel: ClinicRole
+    situacao: 'active' | 'suspended'
+    desde: string
+    protegido?: boolean
+  }
+  return ((data ?? []) as Linha[]).map((l) => ({
+    userId: l.user_id,
+    nome: l.nome,
+    email: l.email,
+    papel: l.papel,
+    situacao: l.situacao,
+    desde: l.desde,
+    protegido: Boolean(l.protegido),
+  }))
+}
+
+/**
+ * Muda perfil e/ou suspende. O banco recusa mexer no proprio acesso, no do
+ * responsavel pelo sistema, e so deixa o responsavel promover administrador.
+ */
+export async function alterarAcesso(
+  clinicId: string,
+  userId: string,
+  papel: ClinicRole,
+  situacao: 'active' | 'suspended',
+) {
+  const { error } = await (supabase.rpc as unknown as (
+    nome: string,
+    args: Record<string, unknown>,
+  ) => PromiseLike<{ error: { message: string } | null }>)('alterar_acesso', {
+    p_clinic: clinicId,
+    p_user: userId,
+    p_papel: papel,
+    p_situacao: situacao,
   })
   if (error) fail(error)
 }

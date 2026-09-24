@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useDialogos } from '@/components/dialogos-contexto'
+import { useAuth } from '@/auth/AuthProvider'
 import { Check, Clock3, RefreshCw, ShieldCheck, UserRoundCheck, X } from 'lucide-react'
 import {
+  alterarAcesso,
   approveAccessRequest,
   getCurrentMembership,
+  listarAcessos,
+  type AcessoDaClinica,
   listPendingAccessRequests,
   rejectAccessRequest,
   type AccessRequest,
@@ -32,6 +36,15 @@ export default function AccessAdmin() {
   const [workingId, setWorkingId] = useState<string | null>(null)
   const { perguntar } = useDialogos()
   const [error, setError] = useState('')
+  // Quem ja tem acesso (24/09/2026). Antes a tela so tratava pedidos novos, e
+  // nao havia como tirar o acesso de quem saiu da clinica.
+  const [acessos, setAcessos] = useState<AcessoDaClinica[]>([])
+  const [clinicId, setClinicId] = useState<string | null>(null)
+  const { user } = useAuth()
+  // Qualquer administrador promove a administrador; alterar um administrador
+  // que ja existe, so o responsavel pelo sistema (migration 20260924160000).
+  // O banco confere de novo; a tela so esconde.
+  const souResponsavel = acessos.some((a) => a.userId === user?.id && a.protegido)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -41,7 +54,17 @@ export default function AccessAdmin() {
       if (!membership || membership.role !== 'owner') {
         throw new Error('Somente o administrador da clínica pode ver os pedidos de acesso.')
       }
-      const pending = await listPendingAccessRequests(membership.clinicId)
+      setClinicId(membership.clinicId)
+      const [pending, vinculos] = await Promise.all([
+        listPendingAccessRequests(membership.clinicId),
+        // Se a funcao nova ainda nao existe no banco, a lista de pedidos
+        // continua funcionando; so a secao de acessos fica vazia.
+        listarAcessos(membership.clinicId).catch((erro) => {
+          console.warn('Nao consegui listar os acessos', erro)
+          return [] as AcessoDaClinica[]
+        }),
+      ])
+      setAcessos(vinculos)
       setRequests(pending)
       setRoles((current) => {
         const next = { ...current }
@@ -67,6 +90,47 @@ export default function AccessAdmin() {
       setRequests((current) => current.filter((item) => item.id !== request.id))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Não foi possível aprovar este acesso.')
+    } finally {
+      setWorkingId(null)
+    }
+  }
+
+  async function mudarAcesso(
+    acesso: AcessoDaClinica,
+    papel: ClinicRole,
+    situacao: 'active' | 'suspended',
+  ) {
+    if (!clinicId) return
+    if (papel === 'owner' && acesso.papel !== 'owner') {
+      const certeza = await perguntar({
+        titulo: `Promover ${acesso.nome || acesso.email} a administrador?`,
+        detalhe:
+          'Poderá ver tudo, aprovar e suspender a equipe e mudar configurações. ' +
+          'Não poderá alterar o acesso do responsável pelo sistema.',
+        confirmar: 'Promover',
+      })
+      if (!certeza) return
+    }
+    if (situacao === 'suspended' && acesso.situacao === 'active') {
+      const certeza = await perguntar({
+        titulo: `Suspender o acesso de ${acesso.nome || acesso.email}?`,
+        detalhe:
+          'A pessoa deixa de ver qualquer dado da clínica na hora, mesmo que esteja com o sistema aberto. ' +
+          'Você pode reativar depois.',
+        confirmar: 'Suspender',
+        perigo: true,
+      })
+      if (!certeza) return
+    }
+    setWorkingId(acesso.userId)
+    setError('')
+    try {
+      await alterarAcesso(clinicId, acesso.userId, papel, situacao)
+      setAcessos((atual) =>
+        atual.map((a) => (a.userId === acesso.userId ? { ...a, papel, situacao } : a)),
+      )
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível alterar este acesso.')
     } finally {
       setWorkingId(null)
     }
@@ -184,6 +248,73 @@ export default function AccessAdmin() {
               </article>
             )
           })}
+        </div>
+      )}
+
+      {acessos.length > 0 && (
+        <div className="surface-card rounded-[26px] p-5 sm:p-6">
+          <h2 className="text-sm font-extrabold text-[#081b2c]">Quem tem acesso</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Troque o perfil ou suspenda quem não trabalha mais na clínica. O acesso do responsável pelo sistema não muda por aqui.
+          </p>
+          <div className="mt-4 divide-y divide-[#081b2c]/[0.06]">
+            {acessos.map((acesso) => {
+              const dono = acesso.papel === 'owner'
+              // Travado: o proprio acesso, o do responsavel, e o de outro
+              // administrador para quem nao e o responsavel.
+              const eu = acesso.userId === user?.id
+              const travado = eu || acesso.protegido || (dono && !souResponsavel)
+              const suspenso = acesso.situacao === 'suspended'
+              const working = workingId === acesso.userId
+              return (
+                <div key={acesso.userId} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className={`truncate text-sm font-extrabold ${suspenso ? 'text-slate-400 line-through' : 'text-[#081b2c]'}`}>
+                      {acesso.nome || acesso.email || 'Sem nome'}
+                    </p>
+                    <p className="truncate text-xs text-slate-500">
+                      {acesso.email}
+                      {suspenso ? ' · suspenso' : ''}
+                    </p>
+                  </div>
+                  {travado ? (
+                    <span className="text-xs font-bold text-[#1f4f78]">
+                      {acesso.protegido ? 'Responsável pelo sistema' : dono ? 'Administrador' : ROLE_LABEL[acesso.papel as AssignableRole]}
+                      {eu ? ' (você)' : ''}
+                    </span>
+                  ) : (
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <select
+                        value={acesso.papel}
+                        disabled={working || suspenso}
+                        onChange={(e) => void mudarAcesso(acesso, e.target.value as ClinicRole, acesso.situacao)}
+                        className="min-w-[190px] rounded-2xl border border-[#081b2c]/10 bg-[#fafaf8] px-3 py-2 text-xs font-bold text-[#385a70] outline-none focus:border-[#2f7fc1] disabled:opacity-60"
+                      >
+                        <option value="owner">Administrador</option>
+                        {(Object.keys(ROLE_LABEL) as AssignableRole[]).map((value) => (
+                          <option key={value} value={value}>{ROLE_LABEL[value]}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={working}
+                        onClick={() =>
+                          void mudarAcesso(acesso, acesso.papel, suspenso ? 'active' : 'suspended')
+                        }
+                        className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-xs font-extrabold transition disabled:opacity-60 ${
+                          suspenso
+                            ? 'bg-[#0e3d42] text-white hover:bg-[#14545a]'
+                            : 'border border-red-100 bg-red-50 text-red-600 hover:bg-red-100'
+                        }`}
+                      >
+                        {suspenso ? 'Reativar' : 'Suspender'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
     </section>

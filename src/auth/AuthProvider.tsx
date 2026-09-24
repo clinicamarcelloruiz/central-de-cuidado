@@ -80,6 +80,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearAuthError = useCallback(() => setAuthError(null), [])
 
+  /**
+   * Sai sozinho depois de uma hora sem uso (24/09/2026).
+   *
+   * A sessao era salva e renovada sem limite: o computador da recepcao aberto
+   * durante o almoco era acesso livre ao prontuario de todos os pacientes. Uma
+   * hora e folga para quem esta atendendo (digitar, clicar e rolar contam como
+   * uso) e fecha a porta de quem levantou e esqueceu.
+   *
+   * A ultima atividade fica no localStorage para valer entre abas: quem usa a
+   * Agenda numa aba nao e derrubado por causa da outra, parada. Cinco minutos
+   * antes, um aviso na tela; qualquer clique ou tecla continua a sessao.
+   */
+  const [minutosParaSair, setMinutosParaSair] = useState<number | null>(null)
+  useEffect(() => {
+    if (!session) return
+    const CHAVE = 'central.ultimaAtividade'
+    const LIMITE = 60 * 60_000
+    const AVISO = 5 * 60_000
+    const ler = () => {
+      try {
+        return Number(window.localStorage.getItem(CHAVE)) || Date.now()
+      } catch {
+        return Date.now()
+      }
+    }
+    let ultimaGravacao = 0
+    const marcar = () => {
+      const agora = Date.now()
+      if (agora - ultimaGravacao < 15_000) return
+      ultimaGravacao = agora
+      try {
+        window.localStorage.setItem(CHAVE, String(agora))
+      } catch {
+        // Sem armazenamento, a sessao nunca expira por inatividade: melhor
+        // que derrubar quem esta trabalhando.
+      }
+      setMinutosParaSair(null)
+    }
+    marcar()
+    const eventos = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const
+    for (const e of eventos) window.addEventListener(e, marcar, { passive: true })
+    const relogio = window.setInterval(() => {
+      const parado = Date.now() - ler()
+      if (parado >= LIMITE) {
+        void supabase.auth.signOut({ scope: 'local' }).then(() => {
+          setSession(null)
+          setMinutosParaSair(null)
+          setAuthError('Por segurança, o sistema saiu sozinho depois de uma hora sem uso. Entre de novo.')
+        })
+      } else if (parado >= LIMITE - AVISO) {
+        setMinutosParaSair(Math.max(1, Math.ceil((LIMITE - parado) / 60_000)))
+      } else {
+        setMinutosParaSair(null)
+      }
+    }, 30_000)
+    return () => {
+      for (const e of eventos) window.removeEventListener(e, marcar)
+      window.clearInterval(relogio)
+    }
+  }, [session])
+
   const signIn = useCallback(async (email: string, password: string): Promise<AuthActionResult> => {
     if (!isSupabaseConfigured) {
       const message = supabaseConfigurationError ?? 'O Supabase não está configurado.'
@@ -204,7 +265,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [authError, clearAuthError, loading, requestAccess, session, signIn, signOut, sendPasswordReset, recovering, updatePassword],
   )
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      {session && minutosParaSair !== null && (
+        <div
+          role="alert"
+          className="fixed bottom-4 left-1/2 z-[100] w-[calc(100%-32px)] max-w-md -translate-x-1/2 rounded-2xl bg-[#081b2c] px-4 py-3 text-center text-xs font-bold text-white shadow-xl"
+        >
+          Sem uso há quase uma hora: por segurança, o sistema sai sozinho em {minutosParaSair}{' '}
+          {minutosParaSair === 1 ? 'minuto' : 'minutos'}. Clique em qualquer lugar para continuar.
+        </div>
+      )}
+    </AuthContext.Provider>
+  )
 }
 
 // O provider e seu hook formam uma única API pública de autenticação.
