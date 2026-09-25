@@ -3,6 +3,8 @@ import { adminClient, digits, sha256HmacHex, safeEqual } from '../_shared/whatsa
 import { colherEventos, type Estado, type Toque, tratarConversa } from '../_shared/atendimento.ts'
 import { montarConteudo } from '../_shared/conteudo.ts'
 import { RegistroDeEventos } from '../_shared/eventos-do-webhook.ts'
+import { variantesDoTelefone } from '../_shared/telefone-br.ts'
+import { textoDaLocalizacao, textoDosContatos } from '../_shared/mensagem-recebida.ts'
 import {
   avisoDaResposta,
   respostaAoAcompanhamento,
@@ -35,6 +37,11 @@ type WebhookMessage = {
   }
   /** Em qual mensagem nossa estava o botao tocado. */
   context?: { id?: string; from?: string }
+  location?: { latitude?: number; longitude?: number; name?: string; address?: string; url?: string }
+  contacts?: {
+    name?: { formatted_name?: string; first_name?: string }
+    phones?: { phone?: string; wa_id?: string }[]
+  }[]
 }
 
 type DeliveryError = { title?: string; message?: string }
@@ -68,7 +75,12 @@ function idDoToque(message: WebhookMessage): string {
  * bastante para nao valer regra propria hoje.
  */
 function ehAnexo(message: WebhookMessage) {
-  return ['image', 'document', 'audio', 'video', 'sticker', 'voice'].includes(String(message.type))
+  // Localizacao e contato entram aqui desde 25/09/2026: nao sao pergunta, e o
+  // robo nao tem o que fazer com eles - quem precisa ver e a equipe. Antes
+  // caiam como "[location]" e recebiam o menu inteiro.
+  return ['image', 'document', 'audio', 'video', 'sticker', 'voice', 'location', 'contacts'].includes(
+    String(message.type),
+  )
 }
 
 /** O bloco de midia da mensagem, qualquer que seja o tipo dela. */
@@ -146,6 +158,11 @@ function messageBody(message: WebhookMessage) {
   if (message.type === 'interactive') {
     return message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? ''
   }
+  // Localizacao e contato viram texto legivel no historico (25/09/2026), em
+  // vez de "[location]" e "[contacts]" - a equipe precisa do endereco e do
+  // telefone, nao do nome do tipo.
+  if (message.type === 'location') return textoDaLocalizacao(message.location)
+  if (message.type === 'contacts') return textoDosContatos(message.contacts)
   // A legenda da foto e a mensagem de verdade: "olha o exame dele" diz mais
   // do que "[image]", e antes ela era jogada fora.
   const midia = midiaDaMensagem(message)
@@ -265,7 +282,39 @@ Deno.serve(async (req) => {
           }
 
           const waId = digits(String(message.from ?? ''))
-          const localDigits = waId.startsWith('55') ? waId.slice(2) : waId
+          // Com e sem o nono digito (ver telefone-br.ts): numero antigo chega
+          // da Meta sem o 9, e o cadastro guarda com ele.
+          const grafias = variantesDoTelefone(waId)
+
+          // Conversa aberta por um envio nosso com a outra grafia do numero
+          // (lembrete ou acompanhamento para "13991234567", resposta chegando
+          // de "551391234567"). Sem isto a pessoa ficava com duas conversas, e
+          // a resposta caia na que nao tinha o lembrete. A grafia da Meta e a
+          // verdadeira: a conversa antiga passa a usa-la.
+          try {
+            const { data: exata } = await admin
+              .from('whatsapp_conversations')
+              .select('id')
+              .eq('clinic_id', clinicId)
+              .eq('wa_id', waId)
+              .maybeSingle()
+            if (!exata) {
+              const { data: outra } = await admin
+                .from('whatsapp_conversations')
+                .select('id,wa_id')
+                .eq('clinic_id', clinicId)
+                .in('wa_id', grafias.filter((g) => g !== waId))
+                .order('last_message_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+              if (outra) {
+                await admin.from('whatsapp_conversations').update({ wa_id: waId }).eq('id', outra.id)
+                console.warn(`Conversa ${outra.id} passou de ${outra.wa_id} para ${waId} (nono digito)`)
+              }
+            }
+          } catch (causa) {
+            console.warn('Nao consegui juntar a conversa das duas grafias do numero', causa)
+          }
           // Todos os pacientes deste telefone, e nao o primeiro que aparecer.
           // Numa gastropediatria a mae cadastra os dois filhos com o proprio
           // celular; escolher sozinho marcava consulta no nome do irmao errado.
@@ -274,7 +323,7 @@ Deno.serve(async (req) => {
             .select('id,name,birth_date,guardian_name,cpf,email')
             .eq('clinic_id', clinicId)
             .is('archived_at', null)
-            .or(`phone_digits.eq.${waId},phone_digits.eq.${localDigits}`)
+            .in('phone_digits', grafias)
             .order('name')
 
           const pacientes = (patientRows ?? []).map((p) => {
@@ -301,7 +350,9 @@ Deno.serve(async (req) => {
             .eq('clinic_id', clinicId)
             .eq('status', 'scheduled')
             .gte('starts_at', new Date().toISOString())
-            .or(`contact_phone.eq.${waId},contact_phone.eq.${localDigits}`)
+            // contact_phone e gravado so com digitos (createAppointment), entao
+            // as grafias do numero servem direto.
+            .in('contact_phone', grafias)
             .order('starts_at')
 
           const idsUnidades = [...new Set((futurasRows ?? []).map((a) => a.unit_id))]

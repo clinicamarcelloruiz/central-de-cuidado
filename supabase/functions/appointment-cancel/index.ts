@@ -1,4 +1,5 @@
 import { adminClient, corsHeaders, json, toBrazilE164, userClient } from '../_shared/whatsapp.ts'
+import { variantesDoTelefone } from '../_shared/telefone-br.ts'
 
 /**
  * Cancela uma consulta e avisa o paciente pelo WhatsApp.
@@ -201,7 +202,8 @@ Deno.serve(async (req) => {
           .from('whatsapp_conversations')
           .select('id,wa_id,status,profile_name')
           .eq('clinic_id', consulta.clinic_id)
-          .eq('wa_id', toBrazilE164(telefone))
+          // Todas as grafias do numero: com e sem o nono digito.
+          .in('wa_id', variantesDoTelefone(telefone))
           .order('last_message_at', { ascending: false })
           .limit(1)
           .maybeSingle()

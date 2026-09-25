@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { invokeWithFormData, supabase } from '@/lib/supabase'
 import type {
   Consultation,
@@ -500,6 +501,8 @@ export interface Appointment {
   rescheduleRequestedAt: string | null
   /** Quando o lembrete da vespera saiu. Nulo enquanto nao foi enviado. */
   reminderSentAt: string | null
+  /** Falta marcada pelo sistema de madrugada, e nao pela equipe. */
+  faltaAutomatica?: boolean
   /**
    * Quando a Meta recusou o lembrete, e por que.
    *
@@ -932,9 +935,13 @@ export async function listAppointmentHistory(
   const nameById = new Map((patients ?? []).map((p) => [p.id, p.name]))
   // Só pelo convênio: o histórico não mostra ficha, mas a recepção precisa
   // saber pelo que aquela consulta foi faturada.
-  const fichas = await fichasDasConsultas(clinicId, unitId)
+  const [fichas, automaticas] = await Promise.all([
+    fichasDasConsultas(clinicId, unitId),
+    faltasAutomaticas(clinicId, unitId),
+  ])
 
   return rows.map((row) => ({
+    faltaAutomatica: automaticas.has(row.id),
     id: row.id,
     unitId: row.unit_id,
     patientId: row.patient_id,
@@ -984,6 +991,38 @@ export async function marcarPresenca(
     .update({ status: presenca })
     .eq('id', appointmentId)
   if (error) fail(error)
+  // Clique da equipe manda: a marca de falta automatica sai. Pedido a parte
+  // porque a coluna e mais nova que os tipos - e se ainda nao existir, o
+  // clique continua valendo.
+  try {
+    await semTipo.from('appointments').update({ no_show_automatico_em: null }).eq('id', appointmentId)
+  } catch {
+    // sem a coluna, nada a limpar
+  }
+}
+
+/** Cliente sem tipo, para colunas mais novas que os tipos gerados. */
+const semTipo = supabase as unknown as SupabaseClient
+
+/**
+ * Quais consultas do historico levaram falta automatica (dia seguinte sem
+ * prontuario, ver a migration faltou_automatico). Consulta a parte e em
+ * try/catch: sem a coluna, o historico abre igual, so sem a etiqueta.
+ */
+async function faltasAutomaticas(clinicId: string, unitId: string): Promise<Set<string>> {
+  try {
+    const { data, error } = await semTipo
+      .from('appointments')
+      .select('id')
+      .eq('clinic_id', clinicId)
+      .eq('unit_id', unitId)
+      .eq('status', 'no_show')
+      .not('no_show_automatico_em', 'is', null)
+    if (error) return new Set()
+    return new Set((data ?? []).map((linha) => linha.id as string))
+  } catch {
+    return new Set()
+  }
 }
 
 /**
@@ -1058,12 +1097,40 @@ async function marcarPresencaPeloProntuario(
     const peloTelefone = semFicha.filter(mesmoTelefone)
     if (peloTelefone.length === 1) ids.add(peloTelefone[0].id)
 
-    if (ids.size === 0) return
-    await supabase
+    if (ids.size > 0) {
+      await supabase
+        .from('appointments')
+        .update({ status: 'attended' })
+        .in('id', [...ids])
+        .eq('status', 'scheduled')
+    }
+
+    // Falta que o sistema marcou sozinho de madrugada (25/09/2026): o medico
+    // escreveu o prontuario so depois, entao a pessoa veio. Vale a mesma
+    // regra de casamento de cima. Falta marcada pela equipe nao entra aqui -
+    // o filtro pela marca automatica garante.
+    const { data: faltas } = await semTipo
       .from('appointments')
-      .update({ status: 'attended' })
-      .in('id', [...ids])
-      .eq('status', 'scheduled')
+      .select('id,patient_id,contact_name,contact_phone')
+      .eq('clinic_id', clinicId)
+      .eq('status', 'no_show')
+      .not('no_show_automatico_em', 'is', null)
+      .gte('starts_at', inicio.toISOString())
+      .lte('starts_at', fim.toISOString())
+    const listaDeFaltas = (faltas ?? []) as { id: string; patient_id: string | null; contact_name: string | null; contact_phone: string | null }[]
+    const desfazer = new Set<string>()
+    for (const a of listaDeFaltas) if (a.patient_id === patientId) desfazer.add(a.id)
+    const faltasSemFicha = listaDeFaltas.filter((a) => !a.patient_id)
+    for (const a of faltasSemFicha) if (mesmoNome(a)) desfazer.add(a.id)
+    const faltaPeloTelefone = faltasSemFicha.filter(mesmoTelefone)
+    if (faltaPeloTelefone.length === 1) desfazer.add(faltaPeloTelefone[0].id)
+    if (desfazer.size > 0) {
+      await semTipo
+        .from('appointments')
+        .update({ status: 'attended', no_show_automatico_em: null })
+        .in('id', [...desfazer])
+        .not('no_show_automatico_em', 'is', null)
+    }
   } catch (causa) {
     console.warn('Não consegui marcar presença a partir do prontuário', causa)
   }
@@ -1631,9 +1698,86 @@ export interface ConversationMessage {
   anexoUrl: string | null
   /** Tipo do arquivo, para a tela decidir entre imagem, audio ou link. */
   anexoMime: string | null
+  /** Caminho no acervo, para gerar um link novo na hora de abrir. */
+  anexoPath: string | null
 }
 
+/**
+ * A lista de conversas, resumida no banco (25/09/2026).
+ *
+ * Ver a migration resumo_das_conversas: em vez de baixar todas as mensagens
+ * para achar a ultima de cada conversa, o banco devolve uma linha por
+ * conversa. Se a funcao ainda nao existir (migration nao rodou), cai no
+ * caminho antigo e avisa no console - a lista nunca deixa de abrir.
+ */
 export async function listConversations(clinicId: string): Promise<Conversation[]> {
+  try {
+    const { data, error } = await buscarTodas((de, ate) =>
+      (supabase as unknown as SupabaseClient).rpc('resumo_das_conversas', { p_clinic: clinicId }).range(de, ate),
+    )
+    if (error) throw error
+    type Linha = {
+      id: string
+      patient_id: string | null
+      display_phone: string | null
+      wa_id: string | null
+      profile_name: string | null
+      status: string
+      needs_attention: boolean
+      attention_reason: string | null
+      booking_state: string | null
+      unread_count: number
+      last_message_at: string | null
+      ultima_mensagem: string | null
+      respondida: boolean
+    }
+    const vistas = new Set<string>()
+    const linhas = (data as Linha[]).filter((l) => !vistas.has(l.id) && vistas.add(l.id))
+    const patientIds = [...new Set(linhas.map((l) => l.patient_id).filter(Boolean))] as string[]
+    const { data: pacientes } = patientIds.length
+      ? await supabase.from('patients').select('id,name').in('id', patientIds)
+      : { data: [] as { id: string; name: string }[] }
+    const nomePorId = new Map((pacientes ?? []).map((p) => [p.id, p.name]))
+    return linhas.map((row) => ({
+      id: row.id,
+      patientId: row.patient_id,
+      patientName: (row.patient_id && nomePorId.get(row.patient_id)) || 'Contato sem cadastro',
+      profileName: row.profile_name ?? '',
+      phone: formatarTelefone(row.display_phone || row.wa_id || ''),
+      phoneDigits: (row.display_phone || row.wa_id || '').replace(/\D/g, ''),
+      status: row.status as Conversation['status'],
+      needsAttention: row.needs_attention,
+      attentionReason: (row.attention_reason ?? null) as Conversation['attentionReason'],
+      bookingState: row.booking_state ?? null,
+      unreadCount: row.unread_count,
+      lastMessageAt: row.last_message_at,
+      lastMessage: row.ultima_mensagem ?? '',
+      // A busca no texto agora e feita no banco (buscarNasConversas).
+      textoBusca: '',
+      respondidaPelaEquipe: row.respondida,
+    })) as Conversation[]
+  } catch (causa) {
+    console.warn('Resumo das conversas indisponível; usando o caminho antigo (baixa todas as mensagens)', causa)
+    return listConversationsAntigo(clinicId)
+  }
+}
+
+/** Conversas cujo texto contem o termo, procuradas no banco. null = busca indisponivel. */
+export async function buscarNasConversas(clinicId: string, termo: string): Promise<Set<string> | null> {
+  try {
+    const { data, error } = await (supabase as unknown as SupabaseClient).rpc('buscar_nas_conversas', {
+      p_clinic: clinicId,
+      p_termo: termo,
+    })
+    if (error) throw error
+    return new Set(((data ?? []) as { conversation_id: string }[]).map((l) => l.conversation_id))
+  } catch (causa) {
+    console.warn('Busca no texto das conversas indisponível', causa)
+    return null
+  }
+}
+
+async function listConversationsAntigo(clinicId: string): Promise<Conversation[]> {
   // Paginado, e nao uma consulta so: ver paginar.ts - o corte de 1.000 linhas
   // fez conversas antigas "abrirem sozinhas" em 24/09/2026.
   const { data, error } = await buscarTodas((de, ate) =>
@@ -1802,6 +1946,7 @@ export async function listConversationMessages(conversationId: string): Promise<
     failureReason: row.failure_reason,
     anexoUrl: anexos.get(row.id)?.url ?? null,
     anexoMime: anexos.get(row.id)?.mime ?? null,
+    anexoPath: anexos.get(row.id)?.path ?? null,
   }))
 }
 
@@ -1817,7 +1962,7 @@ export async function listConversationMessages(conversationId: string): Promise<
  * lesao, de crianca - link permanente seria prontuario circulando solto.
  */
 async function anexosDasMensagens(conversationId: string) {
-  const vazio = new Map<string, { url: string; mime: string | null }>()
+  const vazio = new Map<string, { url: string; mime: string | null; path: string }>()
   try {
     // O encadeamento cru termina num order() para virar promessa; a ordem
     // nao importa aqui, so o fato de a consulta ser executada.
@@ -1838,12 +1983,25 @@ async function anexosDasMensagens(conversationId: string) {
     const porCaminho = new Map((links ?? []).map((l) => [l.path ?? '', l.signedUrl]))
     for (const linha of comArquivo) {
       const url = porCaminho.get(linha.media_path as string)
-      if (url) vazio.set(linha.id, { url, mime: linha.media_mime ?? null })
+      if (url) vazio.set(linha.id, { url, mime: linha.media_mime ?? null, path: linha.media_path as string })
     }
   } catch {
     // Antes da migration rodar nao ha coluna nem acervo. A conversa segue.
   }
   return vazio
+}
+
+/**
+ * Link novo, de cinco minutos, para abrir um anexo agora (25/09/2026).
+ *
+ * O link que vem com a conversa nasce quando ela abre; quem deixava a tela
+ * aberta e clicava num anexo meia hora depois recebia "link expirado". Agora o
+ * clique pede um link na hora - e ele continua valendo so cinco minutos.
+ */
+export async function linkDoAnexo(caminho: string): Promise<string> {
+  const { data, error } = await supabase.storage.from('whatsapp-anexos').createSignedUrl(caminho, 300)
+  if (error || !data?.signedUrl) throw new Error('Não consegui abrir o anexo. Tente de novo.')
+  return data.signedUrl
 }
 
 /**

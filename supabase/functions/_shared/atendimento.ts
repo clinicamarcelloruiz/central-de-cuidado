@@ -2761,6 +2761,20 @@ export async function tratarConversa(opcoes: {
   // derrubar o que ja foi respondido. Cada etapa trata a sua, mais abaixo.
   const noPedidoDeDocumento = Boolean(estadoAtual?.startsWith('documento_'))
 
+  // Arquivo no meio de um fluxo (25/09/2026): a etapa continua de pe. A mae
+  // que manda a foto da carteirinha enquanto o robo pergunta o nome da crianca
+  // perdia o agendamento inteiro - a regra geral zerava tudo e a mandava para
+  // a fila. Agora a equipe e avisada do arquivo e a pergunta segue esperando.
+  const emFluxo = Boolean(estadoAtual) && estadoAtual !== 'menu' && estadoAtual !== 'atendente'
+  if (opcoes.anexo && !noPedidoDeDocumento && emFluxo) {
+    return {
+      resposta:
+        '📎 Recebi o que você enviou e já avisei a nossa equipe.\n\n' +
+        'Para continuar de onde paramos, é só responder a pergunta acima 👆',
+      atencao: 'anexo',
+    }
+  }
+
   if (opcoes.anexo && !noPedidoDeDocumento) {
     if (estadoAtual === 'atendente') return null
     await salvarEstado(admin, conversationId, {

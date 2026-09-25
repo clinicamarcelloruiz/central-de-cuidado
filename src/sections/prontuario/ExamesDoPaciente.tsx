@@ -9,6 +9,7 @@ import {
   type Exame,
 } from '@/lib/prontuario-extra'
 import { fmtBR, todayISO } from '@/lib/followup'
+import { VisualizadorDeArquivo, type ArquivoAberto } from '@/components/VisualizadorDeArquivo'
 
 /**
  * Exames do paciente, dentro do prontuario (25/09/2026).
@@ -39,6 +40,7 @@ export function ExamesDoPaciente({ clinicId, patientId }: { clinicId: string | n
   const [dataExame, setDataExame] = useState(todayISO())
   const [enviando, setEnviando] = useState(false)
   const [abrindo, setAbrindo] = useState<string | null>(null)
+  const [aberto, setAberto] = useState<ArquivoAberto | null>(null)
   const seletor = useRef<HTMLInputElement>(null)
 
   async function carregar() {
@@ -90,17 +92,12 @@ export function ExamesDoPaciente({ clinicId, patientId }: { clinicId: string | n
     }
   }
 
+  // Abre por cima do prontuario, sem aba nova: o medico continua na consulta.
   async function abrir(exame: Exame) {
-    // A aba abre no clique (antes do await), senao o navegador trata como
-    // pop-up e bloqueia.
-    const aba = window.open('', '_blank')
     setAbrindo(exame.id)
     try {
-      const link = await linkDoExame(exame.caminho)
-      if (aba) aba.location.href = link
-      else window.location.href = link
+      setAberto({ url: await linkDoExame(exame.caminho), mime: exame.mime, titulo: exame.titulo })
     } catch (causa) {
-      aba?.close()
       setErro(causa instanceof Error ? causa.message : 'Não consegui abrir o exame.')
     } finally {
       setAbrindo(null)
@@ -212,7 +209,7 @@ export function ExamesDoPaciente({ clinicId, patientId }: { clinicId: string | n
                   type="button"
                   onClick={() => void abrir(exame)}
                   className="min-w-0 flex-1 text-left"
-                  title="Abrir o exame em outra aba"
+                  title="Ver o exame"
                 >
                   <span className="block truncate text-[12px] font-extrabold text-[#081b2c] hover:underline">
                     {exame.titulo}
@@ -236,6 +233,7 @@ export function ExamesDoPaciente({ clinicId, patientId }: { clinicId: string | n
           })}
         </ul>
       )}
+      <VisualizadorDeArquivo arquivo={aberto} onFechar={() => setAberto(null)} />
     </div>
   )
 }

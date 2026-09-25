@@ -1,5 +1,6 @@
 import { adminClient, formatDateBR, toBrazilE164 } from './whatsapp.ts'
 import { textoDoModelo } from './modelos.ts'
+import { variantesDoTelefone } from './telefone-br.ts'
 
 /**
  * Envio de um acompanhamento pelo WhatsApp.
@@ -125,7 +126,18 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
       .eq('id', patient.id)
   }
 
-  const waId = toBrazilE164(patient.phone)
+  // A conversa que ja existe, em qualquer grafia do numero (nono digito, ver
+  // telefone-br.ts): o acompanhamento vai para o numero que o WhatsApp da
+  // pessoa usa e cai na mesma conversa, em vez de abrir outra.
+  const { data: existente } = await admin
+    .from('whatsapp_conversations')
+    .select('wa_id')
+    .eq('clinic_id', followup.clinic_id)
+    .in('wa_id', variantesDoTelefone(patient.phone))
+    .order('last_message_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const waId = (existente?.wa_id as string | undefined) ?? toBrazilE164(patient.phone)
   const now = new Date().toISOString()
 
   const { data: conversation, error: conversationError } = await admin
@@ -136,7 +148,9 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
         patient_id: patient.id,
         wa_id: waId,
         display_phone: patient.phone,
-        status: 'open',
+        // status fica de fora (25/09/2026): 'open' forcado aqui reabria toda
+        // conversa ja concluida quando o acompanhamento saia. Conversa nova
+        // nasce 'open' pelo padrao da coluna.
         last_message_at: now,
       },
       { onConflict: 'clinic_id,wa_id' },

@@ -2,6 +2,7 @@ import { adminClient, corsHeaders, json, toBrazilE164 } from '../_shared/whatsap
 import { textoDoModelo } from '../_shared/modelos.ts'
 import { cadastrarDaFicha } from '../_shared/cadastro.ts'
 import { janelaDeLembrete } from '../_shared/lembrete.ts'
+import { variantesDoTelefone } from '../_shared/telefone-br.ts'
 
 /**
  * Lembrete automatico de consulta.
@@ -182,18 +183,25 @@ Deno.serve(async (req) => {
           continue
         }
 
-        const waId = toBrazilE164(telefone)
         const agora = new Date().toISOString()
 
         // Quem nao tem cadastro tambem pode ter pedido para sair - nesse caso o
         // "sair" fica gravado na conversa, e nao no paciente. Sem esta checagem
         // o lembrete furaria justamente quem pediu silencio.
+        //
+        // Procurada em todas as grafias do numero (nono digito, ver
+        // telefone-br.ts). Achando, o lembrete vai para o numero que o
+        // WhatsApp da pessoa usa de fato e cai na MESMA conversa - antes abria
+        // uma segunda, e a resposta da familia chegava na outra.
         const { data: conversaAtual } = await admin
           .from('whatsapp_conversations')
-          .select('status')
+          .select('status,wa_id')
           .eq('clinic_id', clinica.clinic_id)
-          .eq('wa_id', waId)
+          .in('wa_id', variantesDoTelefone(telefone))
+          .order('last_message_at', { ascending: false })
+          .limit(1)
           .maybeSingle()
+        const waId = (conversaAtual?.wa_id as string | undefined) ?? toBrazilE164(telefone)
 
         if (conversaAtual?.status === 'opted_out') {
           resumo.pulados += 1

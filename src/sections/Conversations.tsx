@@ -21,12 +21,18 @@ import {
   X,
   ClipboardList,
   List as ListIcon,
+  Lock,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { criarNota, listarNotas, type NotaDaConversa } from '@/lib/notas-da-conversa'
+import { linhaDoTempo } from '@/lib/linha-do-tempo'
+import { VisualizadorDeArquivo, type ArquivoAberto } from '@/components/VisualizadorDeArquivo'
 import {
   getAutoReply,
   getCurrentMembership,
   listConversationMessages,
+  linkDoAnexo,
+  buscarNasConversas,
   listRespostasProntas,
   sendConversationFile,
   type RespostaPronta,
@@ -285,19 +291,59 @@ const FUNDO_WHATSAPP = {
  * É foto de exame, de lesão, de criança: um endereço permanente seria
  * prontuário circulando solto.
  */
-function Anexo({ url, mime }: { url: string; mime: string | null }) {
+/**
+ * Anexo dentro do balao da conversa.
+ *
+ * Clicar abre o arquivo POR CIMA da tela (VisualizadorDeArquivo), e nao numa
+ * aba nova: a recepcao perdia a conversa de vista para conferir um comprovante
+ * (25/09/2026). E o link e pedido na hora do clique - o que veio com a conversa
+ * vale so cinco minutos, e quem deixava a tela aberta recebia "expirado".
+ */
+function Anexo({
+  url,
+  mime,
+  caminho,
+  onAbrir,
+}: {
+  url: string
+  mime: string | null
+  caminho: string | null
+  onAbrir: (arquivo: ArquivoAberto) => void
+}) {
   const tipo = mime ?? ''
+  const [previa, setPrevia] = useState(url)
+  const [erro, setErro] = useState('')
+
+  async function linkNovo() {
+    if (!caminho) return url
+    return linkDoAnexo(caminho)
+  }
+
+  async function abrir() {
+    setErro('')
+    try {
+      onAbrir({ url: await linkNovo(), mime, titulo: tipo.startsWith('image/') ? 'Foto enviada' : 'Documento enviado' })
+    } catch (causa) {
+      setErro(causa instanceof Error ? causa.message : 'Não consegui abrir o anexo.')
+    }
+  }
 
   if (tipo.startsWith('image/')) {
     return (
-      <a href={url} target="_blank" rel="noreferrer" className="block">
+      <button type="button" onClick={() => void abrir()} className="block w-full" title="Ver a foto">
         <img
-          src={url}
+          src={previa}
           alt="Anexo enviado pelo paciente"
           className="mb-1 max-h-[320px] w-full rounded-[6px] object-cover"
           loading="lazy"
+          // Previa com link vencido: pede outro, uma vez.
+          onError={() => {
+            if (!caminho || previa !== url) return
+            void linkNovo().then(setPrevia).catch(() => undefined)
+          }}
         />
-      </a>
+        {erro && <span className="block text-[11px] font-bold text-[#b42318]">{erro}</span>}
+      </button>
     )
   }
 
@@ -312,15 +358,35 @@ function Anexo({ url, mime }: { url: string; mime: string | null }) {
   }
 
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      className="mb-1 flex items-center gap-2 rounded-[6px] bg-black/5 px-2 py-1.5 text-[12px] font-bold text-[#111b21] transition hover:bg-black/10"
-    >
-      <Paperclip className="h-3.5 w-3.5 shrink-0" />
-      Abrir documento
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={() => void abrir()}
+        className="mb-1 flex items-center gap-2 rounded-[6px] bg-black/5 px-2 py-1.5 text-[12px] font-bold text-[#111b21] transition hover:bg-black/10"
+      >
+        <Paperclip className="h-3.5 w-3.5 shrink-0" />
+        Abrir documento
+      </button>
+      {erro && <span className="block text-[11px] font-bold text-[#b42318]">{erro}</span>}
+    </>
+  )
+}
+
+/**
+ * Endereco da web vira link clicavel no balao (25/09/2026): a localizacao que
+ * a familia compartilha chega como link de mapa, e copiar e colar um endereco
+ * comprido era o caminho ate aqui.
+ */
+function comLinks(texto: string) {
+  const partes = texto.split(/(https?:\/\/[^\s]+)/g)
+  return partes.map((parte, i) =>
+    /^https?:\/\//.test(parte) ? (
+      <a key={i} href={parte} target="_blank" rel="noreferrer" className="break-all text-[#027eb5] underline">
+        {parte}
+      </a>
+    ) : (
+      parte
+    ),
   )
 }
 
@@ -382,6 +448,10 @@ export default function Conversations({
 }) {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [busca, setBusca] = useState('')
+  // Conversas cujo TEXTO contem a busca, vindas do banco (25/09/2026). null
+  // enquanto nao ha busca, ou quando o banco nao respondeu (ai vale o texto
+  // que a lista antiga trazia).
+  const [idsPelaBusca, setIdsPelaBusca] = useState<Set<string> | null>(null)
   const [de, setDe] = useState('')
   const [ate, setAte] = useState('')
   // Comeca desligado: quem abre a tela espera ver a conversa inteira da
@@ -404,6 +474,15 @@ export default function Conversations({
     })
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
+  // Notas internas da conversa aberta (25/09/2026): so a equipe ve.
+  const [notas, setNotas] = useState<NotaDaConversa[]>([])
+  const [erroDasNotas, setErroDasNotas] = useState('')
+  const [escrevendoNota, setEscrevendoNota] = useState(false)
+  const [textoDaNota, setTextoDaNota] = useState('')
+  const [salvandoNota, setSalvandoNota] = useState(false)
+  // Foto ou documento aberto por cima da conversa.
+  const [arquivoAberto, setArquivoAberto] = useState<ArquivoAberto | null>(null)
+  const fecharArquivo = useCallback(() => setArquivoAberto(null), [])
   const [loading, setLoading] = useState(true)
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [error, setError] = useState('')
@@ -634,6 +713,40 @@ export default function Conversations({
     void load()
   }, [load])
 
+  // As notas vem a parte das mensagens: falhar aqui nao pode esconder a
+  // conversa, so avisar que as notas nao carregaram.
+  const carregarNotas = useCallback(async (conversationId: string) => {
+    try {
+      const lista = await listarNotas(conversationId)
+      if (selectedIdRef.current === conversationId) {
+        setNotas(lista)
+        setErroDasNotas('')
+      }
+    } catch (causa) {
+      if (selectedIdRef.current === conversationId) {
+        setNotas([])
+        setErroDasNotas(causa instanceof Error ? causa.message : 'Notas internas indisponíveis.')
+      }
+    }
+  }, [])
+
+  async function salvarNota() {
+    if (!selectedId || !clinicId || !textoDaNota.trim() || salvandoNota) return
+    setSalvandoNota(true)
+    setErroDasNotas('')
+    try {
+      await criarNota(clinicId, selectedId, textoDaNota)
+      setTextoDaNota('')
+      setEscrevendoNota(false)
+      acabamosDeEnviar.current = true
+      await carregarNotas(selectedId)
+    } catch (causa) {
+      setErroDasNotas(causa instanceof Error ? causa.message : 'A nota não foi salva.')
+    } finally {
+      setSalvandoNota(false)
+    }
+  }
+
   /**
    * Quando a tela e aberta pelo botao "Conversa" do acompanhamento, ja abre a
    * conversa daquele paciente. Sem isso a equipe cairia na lista e teria de
@@ -655,43 +768,76 @@ export default function Conversations({
   useEffect(() => {
     if (!clinicId) return
 
+    // Recargas agrupadas (25/09/2026). Cada "entregue" e "lida" da Meta e um
+    // evento, e cada evento recarregava a lista inteira e a conversa aberta:
+    // um lote de dez confirmacoes virava vinte downloads. Agora varios eventos
+    // em sequencia viram uma recarga so, e confirmacao de entrega nao mexe na
+    // lista - so no tiquinho da conversa que esta aberta.
+    let esperaDaLista: number | null = null
+    let esperaDaConversa: number | null = null
+    const recarregarLista = () => {
+      if (esperaDaLista) window.clearTimeout(esperaDaLista)
+      esperaDaLista = window.setTimeout(() => void load(true), 1200)
+    }
+    const recarregarConversa = (conversa: string) => {
+      if (esperaDaConversa) window.clearTimeout(esperaDaConversa)
+      esperaDaConversa = window.setTimeout(() => {
+        if (selectedIdRef.current !== conversa) return
+        void listConversationMessages(conversa).then(setMessages).catch(() => {})
+        // Se quem escreveu foi o paciente, a janela de 24h reabriu: sem isto
+        // a caixa continuaria bloqueada ate alguem trocar de conversa.
+        void getReplyWindow(conversa).then(setJanelaAte).catch(() => {})
+      }, 500)
+    }
+
     const canal = supabase
       .channel(`conversas-${clinicId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'whatsapp_messages', filter: `clinic_id=eq.${clinicId}` },
-        () => {
-          // Recarrega o historico da conversa aberta em qualquer evento. Nao da
-          // para olhar so o registro novo: em exclusao o Supabase manda apenas o
-          // registro antigo, e a tela ficaria mostrando algo que ja nao existe.
+        (evento) => {
+          const linha = (evento.new ?? evento.old ?? {}) as { conversation_id?: string }
           const aberta = selectedIdRef.current
-          if (aberta) {
-            void listConversationMessages(aberta).then(setMessages).catch(() => {})
-            // Se quem escreveu foi o paciente, a janela de 24h reabriu: sem
-            // isto a caixa continuaria bloqueada ate alguem trocar de conversa.
-            void getReplyWindow(aberta).then(setJanelaAte).catch(() => {})
-          }
-          // A lista lateral sempre reflete a ultima mensagem e o contador.
-          void load(true)
+          // Em exclusao o Supabase manda so o registro antigo, as vezes sem a
+          // conversa: na duvida, recarrega a aberta.
+          if (aberta && (!linha.conversation_id || linha.conversation_id === aberta)) recarregarConversa(aberta)
+          // Mudanca de status (entregue, lida) nao muda a lista.
+          if (evento.eventType !== 'UPDATE') recarregarLista()
         },
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'whatsapp_conversations', filter: `clinic_id=eq.${clinicId}` },
-        () => void load(true),
+        () => recarregarLista(),
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'conversation_notes', filter: `clinic_id=eq.${clinicId}` },
+        (evento) => {
+          const conversa = (evento.new as { conversation_id?: string } | null)?.conversation_id
+          if (conversa && conversa === selectedIdRef.current) void carregarNotas(conversa)
+        },
       )
       .subscribe((status) => setAoVivo(status === 'SUBSCRIBED'))
 
     return () => {
+      if (esperaDaLista) window.clearTimeout(esperaDaLista)
+      if (esperaDaConversa) window.clearTimeout(esperaDaConversa)
       void supabase.removeChannel(canal)
     }
-  }, [clinicId, load])
+  }, [clinicId, load, carregarNotas])
 
 
   async function openConversation(conversation: Conversation) {
     setSelectedId(conversation.id)
-    // Arquivo escolhido numa conversa nao pode ir parar em outra.
+    selectedIdRef.current = conversation.id
+    // Arquivo escolhido numa conversa nao pode ir parar em outra - nem a nota.
     setArquivo(null)
+    setNotas([])
+    setErroDasNotas('')
+    setEscrevendoNota(false)
+    setTextoDaNota('')
+    void carregarNotas(conversation.id)
     setLoadingMessages(true)
     setResposta('')
     setJanelaAte(null)
@@ -899,6 +1045,7 @@ export default function Conversations({
       if (item.patientName.toLowerCase().includes(termo)) return true
       if (item.profileName.toLowerCase().includes(termo)) return true
       if (digitosBusca && item.phoneDigits.includes(digitosBusca)) return true
+      if (idsPelaBusca) return idsPelaBusca.has(item.id)
       return item.textoBusca.includes(termo)
     })
 
@@ -909,7 +1056,27 @@ export default function Conversations({
     // mostrar o que falta fazer. O sort do JS e estavel, entao a ordem por
     // horario dentro de cada grupo se mantem.
     return [...filtradas].sort((a, b) => Number(estaConcluida(a)) - Number(estaConcluida(b)))
-  }, [conversations, busca, de, ate, esconderConcluidas, recorte, selectedId])
+  }, [conversations, busca, de, ate, esconderConcluidas, recorte, selectedId, idsPelaBusca])
+
+  // A busca no texto vai ao banco com um respiro de 400 ms: digitar "refluxo"
+  // nao pode virar sete consultas.
+  useEffect(() => {
+    const termo = busca.trim()
+    if (!clinicId || termo.length < 2) {
+      setIdsPelaBusca(null)
+      return
+    }
+    let vivo = true
+    const espera = window.setTimeout(() => {
+      void buscarNasConversas(clinicId, termo).then((ids) => {
+        if (vivo) setIdsPelaBusca(ids)
+      })
+    }, 400)
+    return () => {
+      vivo = false
+      window.clearTimeout(espera)
+    }
+  }, [busca, clinicId])
 
   const concluidas = useMemo(() => conversations.filter(estaConcluida).length, [conversations])
 
@@ -1778,7 +1945,29 @@ export default function Conversations({
                     )}
                     <div className="space-y-2">
                       <div ref={inicioDasMensagens} />
-                      {messages.map((message) => {
+                      {linhaDoTempo(messages, notas).map((entrada) => {
+                        // Nota interna: amarela, centralizada e com cadeado,
+                        // para nunca ser confundida com algo que a familia leu.
+                        if (entrada.tipo === 'nota') {
+                          const nota = entrada.item
+                          return (
+                            <div key={`nota-${nota.id}`} className="flex justify-center">
+                              <div className="max-w-[85%] rounded-[8px] border border-[#e8c96a] bg-[#fff6d6] px-3 py-2 shadow-[0_1px_0.5px_rgba(11,20,26,.1)]">
+                                <p className="flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wide text-[#8a6a10]">
+                                  <Lock className="h-3 w-3" /> Nota interna
+                                  {nota.autorNome ? ` · ${nota.autorNome}` : ''}
+                                </p>
+                                <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-[18px] text-[#3d3208]">
+                                  {nota.texto}
+                                </p>
+                                <span className="mt-0.5 block text-right text-[10px] text-[#8a6a10]/80">
+                                  {formatWhen(nota.criadoEm)} · a família não vê
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        }
+                        const message = entrada.item
                         const outbound = message.direction === 'outbound'
                         return (
                           <div
@@ -1790,12 +1979,19 @@ export default function Conversations({
                                 outbound ? 'bg-[#d9fdd3]' : 'bg-white'
                               }`}
                             >
-                              {message.anexoUrl && <Anexo url={message.anexoUrl} mime={message.anexoMime} />}
+                              {message.anexoUrl && (
+                                <Anexo
+                                  url={message.anexoUrl}
+                                  mime={message.anexoMime}
+                                  caminho={message.anexoPath}
+                                  onAbrir={setArquivoAberto}
+                                />
+                              )}
                               {/* Sem texto e com arquivo, a linha de "[image]"
                                   vira ruído embaixo da própria foto. */}
                               {(!message.anexoUrl || !/^\[/.test(message.body)) && (
                                 <p className="whitespace-pre-wrap break-words text-[13.5px] leading-[19px] text-[#111b21]">
-                                  {message.body ||
+                                  {(message.body && comLinks(message.body)) ||
                                     (message.templateName
                                       ? `[modelo: ${message.templateName}]`
                                       : '[sem conteúdo]')}
@@ -1824,6 +2020,58 @@ export default function Conversations({
                     vista e a caixa se desliga sozinha quando fecha - senao a
                     equipe digita, envia e a mensagem falha sem explicacao. */}
                 <div className="mt-4 border-t border-[#081b2c]/[0.07] pt-3">
+                  {/* Nota interna: funciona com a janela aberta ou fechada,
+                      porque nao passa pela Meta. */}
+                  <div className="mb-3">
+                    {escrevendoNota ? (
+                      <div className="rounded-[14px] border border-[#e8c96a] bg-[#fffaf0] p-3">
+                        <p className="flex items-center gap-1.5 text-[10px] font-extrabold text-[#8a6a10]">
+                          <Lock className="h-3.5 w-3.5" /> Nota interna · só a equipe vê, a família não recebe
+                        </p>
+                        <textarea
+                          value={textoDaNota}
+                          onChange={(e) => setTextoDaNota(e.target.value)}
+                          rows={2}
+                          maxLength={4000}
+                          autoFocus
+                          placeholder="Ex.: Liguei às 15h, não atendeu. / Dr. autorizou atender particular."
+                          className="mt-2 w-full resize-y rounded-xl border border-[#e8c96a] bg-white p-2.5 text-[12px] outline-none focus:border-[#b8932a]"
+                        />
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            disabled={salvandoNota || !textoDaNota.trim()}
+                            onClick={() => void salvarNota()}
+                            className="rounded-xl bg-[#8a6a10] px-3.5 py-2 text-[10px] font-extrabold text-white disabled:opacity-40"
+                          >
+                            {salvandoNota ? 'Salvando...' : 'Salvar nota'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEscrevendoNota(false)
+                              setTextoDaNota('')
+                            }}
+                            className="rounded-xl border border-[#081b2c]/10 bg-white px-3.5 py-2 text-[10px] font-bold text-slate-500"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setEscrevendoNota(true)}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-[#e8c96a] bg-[#fffaf0] px-3 py-1.5 text-[10px] font-extrabold text-[#8a6a10] transition hover:bg-[#fff3d6]"
+                        title="Recado para a equipe, dentro desta conversa. A família não recebe."
+                      >
+                        <Lock className="h-3.5 w-3.5" /> Nota interna
+                      </button>
+                    )}
+                    {erroDasNotas && (
+                      <p className="mt-1.5 text-[10px] font-bold text-[#b42318]">{erroDasNotas}</p>
+                    )}
+                  </div>
                   {janelaAberta ? (
                     <>
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2034,6 +2282,7 @@ export default function Conversations({
           </div>
         </div>
       )}
+      <VisualizadorDeArquivo arquivo={arquivoAberto} onFechar={fecharArquivo} />
     </div>
   )
 }

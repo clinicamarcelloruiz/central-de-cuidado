@@ -17,6 +17,7 @@ import type { PendingRequest } from '@/lib/repository'
 import { dueCount, idadeAnos, pendingFollowups } from '@/lib/followup'
 import { nomeDoCid } from '@/lib/cid'
 import NumerosDoWhatsApp from '@/sections/NumerosDoWhatsApp'
+import { SaudeDosEnvios } from '@/components/SaudeDosEnvios'
 
 const NAVY = '#081b2c'
 // Azul de destaque do sistema (proposta 3, aprovada em 08/09/2026). O nome
@@ -367,6 +368,9 @@ export default function Dashboard({
   return (
     <div className="space-y-5">
       <AvisoSolicitacoes solicitacoes={solicitacoes} onAbrirAgenda={onAbrirAgenda} />
+      {/* Primeira coisa da Visao geral (25/09/2026): se o lembrete ou o
+          acompanhamento parou, quem abre o sistema de manha fica sabendo. */}
+      <SaudeDosEnvios />
 
       {/* Duas leituras que não se misturam (21/09/2026).
           Na primeira versão os números do WhatsApp entraram empilhados no meio

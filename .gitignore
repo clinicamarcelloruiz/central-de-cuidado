@@ -52,3 +52,8 @@ tests/continuidade-da-consulta.build.mjs
 tests/retorno.build.mjs
 tests/curvas.build.mjs
 tests/followup.build.mjs
+tests/telefone-br.build.mjs
+tests/mensagem-recebida.build.mjs
+tests/linha-do-tempo.build.mjs
+tests/saude-dos-envios.build.mjs
+tests/bloqueio-de-dia.build.mjs

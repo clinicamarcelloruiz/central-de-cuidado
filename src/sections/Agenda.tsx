@@ -53,6 +53,8 @@ import {
   type SchedulePreferences,
   type Unit,
 } from '@/lib/repository'
+import { useDialogos } from '@/components/dialogos-contexto'
+import { avisoDoBloqueio, consultasDeUmDia } from '@/lib/bloqueio-de-dia'
 import {
   Sheet,
   SheetContent,
@@ -241,6 +243,9 @@ function HistoricoDaAgenda({
                   >
                     {item.source === 'whatsapp' ? 'marcado pelo paciente no WhatsApp' : 'marcado pela equipe'}
                     {item.contactPhone ? ` · ${item.contactPhone}` : ''}
+                    {/* Falta que o sistema marcou sozinho: a equipe precisa
+                        saber que ninguem conferiu, e pode corrigir no clique. */}
+                    {item.status === 'no_show' && item.faltaAutomatica ? ' · falta automática (sem prontuário no dia)' : ''}
                   </p>
                 </div>
 
@@ -595,6 +600,15 @@ export default function Agenda({
   const [novaConsulta, setNovaConsulta] = useState({ patientId: '', nome: '', telefone: '' })
   // Dia que o usuario mandou bloquear e ainda espera o motivo.
   const [bloqueandoDia, setBloqueandoDia] = useState<{ dia: string; motivo: string } | null>(null)
+  const { perguntar } = useDialogos()
+
+  // Dia com consulta marcada pede confirmacao antes de bloquear (ver
+  // bloqueio-de-dia.ts): bloquear nao cancela nem avisa ninguem.
+  async function podeBloquear(dia: string) {
+    const doDia = consultasDeUmDia(appointments, dia)
+    if (doDia.length === 0) return true
+    return perguntar({ ...avisoDoBloqueio(doDia), confirmar: 'Bloquear mesmo assim', cancelar: 'Voltar', perigo: true })
+  }
 
   // Formularios
   const [novaUnidade, setNovaUnidade] = useState({ nome: '', endereco: '' })
@@ -1117,11 +1131,14 @@ export default function Agenda({
                           type="button"
                           onClick={() => {
                             const motivo = bloqueandoDia.motivo
-                            setBloqueandoDia(null)
-                            void acao(
-                              () => createScheduleException(clinicId!, dia, motivo, unitId),
-                              'Dia bloqueado. Ele não é mais oferecido no WhatsApp.',
-                            )
+                            void (async () => {
+                              if (!(await podeBloquear(dia))) return
+                              setBloqueandoDia(null)
+                              void acao(
+                                () => createScheduleException(clinicId!, dia, motivo, unitId),
+                                'Dia bloqueado. Ele não é mais oferecido no WhatsApp.',
+                              )
+                            })()
                           }}
                           className="rounded-lg bg-[#1f4f78] px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-[#183f61]"
                         >
@@ -1578,6 +1595,7 @@ export default function Agenda({
                     onClick={() =>
                       void acao(async () => {
                         if (!clinicId) return
+                        if (!(await podeBloquear(novoBloqueio.data))) return
                         await createScheduleException(
                           clinicId,
                           novoBloqueio.data,

@@ -1870,6 +1870,23 @@ await caso('"Tem vaga?" abre o agendamento', [
 
 // Com o cadastro completo o nome nao e ficha - e, desde 25/09/2026, frase de
 // tres palavras que o robo nao entende vai para a equipe.
+// 25/09/2026: foto mandada no meio do cadastro não derruba a etapa. A regra
+// geral mandava para a fila e zerava o agendamento que estava pela metade.
+await caso('Anexo no meio do cadastro avisa a equipe e mantém a pergunta', [
+  ['Oi', 'Aqui é o consultório'],
+  ['2', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['1', ['está guardado', 'nome completo do paciente']],
+  ['[ANEXO]', ['avisei a nossa equipe', 'pergunta acima']],
+  ['Helena Souza Lima', 'data de nascimento'],
+], {
+  verificar: ({ conversa, titulo }) => {
+    if (conversa.booking_state !== 'atendente') passou++
+    else falhas.push(`${titulo}: o anexo mandou a conversa para a fila`)
+  },
+})
+
 // 24/09/2026: duas famílias tocaram em "Voltar ao menu" logo na pergunta do
 // nome, com o horário já guardado, e a consulta ficou no nome da mãe.
 await caso('Ficha depois do agendamento não oferece "Voltar ao menu"', [
