@@ -75,6 +75,10 @@ function confere(nome, cond, detalhe) {
   const parado = avaliarSaude({ robos: [{ nome: 'lembretes-consulta', ultimo_inicio: '2026-09-25T09:20:00Z', status: 'succeeded' }] }, agora)
   confere('robo de hora em hora parado ha 6h e erro', parado.problemas.some((p) => p.nivel === 'erro' && /não roda há/.test(p.texto)), JSON.stringify(parado))
 
+  // Robo recem-criado, que ainda nao teve a primeira hora dele, nao e alarme.
+  const novo = avaliarSaude({ robos: [{ nome: 'fechar-presencas', ultimo_inicio: null, status: null }] }, agora)
+  confere('robo que ainda nao rodou nao grita', novo.problemas.length === 0, JSON.stringify(novo))
+
   const atrasado = avaliarSaude({ lembretes_atrasados: 3 }, agora)
   confere('lembrete atrasado e erro', atrasado.problemas.some((p) => p.nivel === 'erro' && /3 consultas/.test(p.texto)))
   confere('lembrete desligado nao acusa atraso', avaliarSaude({ lembretes_atrasados: 3, lembrete_ligado: false }, agora).problemas.length === 0)

@@ -70,9 +70,12 @@ export function avaliarSaude(dados: DadosDaSaude, agora: Date = new Date()): { p
     // Folga: o dobro do intervalo, mais meia hora. Um atraso de minutos nao e
     // alarme; um robo que pulou uma rodada inteira e.
     const limite = (conhecido.minutos * 2 + 30) * 60000
-    if (!robo.ultimo_inicio) {
-      problemas.push({ nivel: 'erro', texto: `${rotulo}: nunca rodou.` })
-    } else if (agora.getTime() - Date.parse(robo.ultimo_inicio) > limite) {
+    // Robo que ainda nao rodou nenhuma vez e robo recem-criado (25/09/2026):
+    // o "Faltou automatico" nasceu as 14h e so roda as 3h, e o cartao ficou
+    // vermelho a tarde inteira dizendo "nunca rodou". O que interessa e o robo
+    // que rodava e PAROU - esse o limite abaixo pega.
+    if (!robo.ultimo_inicio) continue
+    if (agora.getTime() - Date.parse(robo.ultimo_inicio) > limite) {
       problemas.push({ nivel: 'erro', texto: `${rotulo}: não roda há ${haQuanto(robo.ultimo_inicio, agora)}.` })
     }
   }
