@@ -242,12 +242,47 @@ export function pediuAgendamento(texto: string) {
   // pergunta de preco, e abriria a escolha de unidade sem ninguem pedir.
   if (/\b(marcar|marcacao|agendar|agendamento|horarios?)\b/.test(t)) return true
 
+  // Verbo conjugado (25/09/2026): "Marca consulta pra minha filha de dois
+  // anos" nao tinha "marcar" e ficou so com a resposta de valores. Remarcar e
+  // desmarcar ja sairam no primeiro teste desta funcao.
+  // "marco" fica de fora ("nasceu em marco", sem cedilha), e "marca de" e
+  // "marca da" tambem ("qual marca de formula?").
+  if (/\b(marque|marcamos|agende|agendo|agenda|agendamos)\b/.test(t)) return true
+  if (/\bmarca\b(?!\s+d[aeo]s?\b)/.test(t)) return true
+
   // Pedido de vaga sem o verbo (24/09/2026): "Consigo para amanha com o dr
   // Marcelo" recebeu "Nao entendi". Vaga e dia pedidos juntos sao agendamento.
   return (
     /\b(tem|teria|ha|existe)\s+(uma\s+)?vagas?\b/.test(t) ||
     /\bconsigo\b.*\b(amanha|hoje|semana|segunda|terca|quarta|quinta|sexta|sabado|dia|consulta)\b/.test(t)
   )
+}
+
+/**
+ * A frase tem cara de pergunta: ponto de interrogacao, ou uma palavra de
+ * pergunta. Serve para a fila da equipe nao responder recado ("Aguardo
+ * retorno") como se fosse duvida.
+ */
+export function parecePergunta(texto: string): boolean {
+  if (texto.includes('?')) return true
+  const t = normalizar(texto)
+  return /\b(qual|quais|quanto|quanta|quantos|como|onde|quando|aceita|aceitam|atende|atendem|tem|teria|pode|posso|faz|fazem|precisa|preciso de|e particular)\b/.test(t)
+}
+
+/**
+ * So agradecimento ou "ok" - nao e pedido, e nao merece "Nao entendi" nem
+ * fila da equipe. Toda palavra da frase precisa ser de cortesia.
+ */
+export function soAgradecimento(texto: string): boolean {
+  const t = normalizar(texto).replace(/[^a-z\s]/g, ' ').trim()
+  if (!t) return /^(?:\s|👍|🙏|😊|🙂|❤️|💙|👏|✅|!|\.)+$/u.test(texto.trim())
+  const cortesia = new Set([
+    'ok', 'okay', 'okk', 'blz', 'beleza', 'obrigado', 'obrigada', 'obg', 'brigado', 'brigada', 'valeu',
+    'grato', 'grata', 'certo', 'combinado', 'perfeito', 'entendi', 'ta', 'bom', 'otimo', 'muito',
+    'pela', 'atencao', 'sim', 'tudo', 'bem', 'ate', 'mais', 'amanha', 'boa', 'noite', 'tarde', 'dia',
+    'deus', 'abencoe', 'e', 'o', 'a', 'de', 'nada', 'show', 'maravilha', 'agradeco', 'mt', 'mto', 'td',
+  ])
+  return t.split(/\s+/).every((palavra) => cortesia.has(palavra))
 }
 
 /** A saida de emergencia. Vale em qualquer etapa, inclusive com a equipe. */
@@ -2267,11 +2302,12 @@ async function perguntarDados(
   /**
    * Questionario disparado pela equipe, e nao pelo fim de um agendamento.
    *
-   * Muda os botoes: sem "Voltar ao menu". No agendamento ele faz sentido - a
-   * pessoa estava num fluxo e pode querer sair dele. Aqui ela nao estava em
-   * fluxo nenhum: a clinica pediu quatro dados, e oferecer "voltar ao menu"
-   * transforma um pedido curto numa porta de saida para o menu inteiro.
-   * Quem quiser sair mesmo assim digita MENU ou 0, como em qualquer etapa.
+   * Ja nao muda os botoes (25/09/2026): a ficha nunca mostra "Voltar ao
+   * menu", nem a que vem depois do agendamento. Em 24/09 duas familias
+   * tocaram nele logo na pergunta do nome da crianca - o horario ja estava
+   * guardado, o botao parecia o proximo passo, e a consulta ficou no nome da
+   * mae, com o lembrete chegando para "Yasmin" e nao para a crianca. Quem
+   * quiser sair mesmo assim digita MENU ou 0, como em qualquer etapa.
    */
   manual = false,
 ): Promise<Resultado> {
@@ -2293,16 +2329,7 @@ async function perguntarDados(
       (pergunta.obrigatoria || pergunta.jaExplicaOPular
         ? ''
         : '\n\n_Se preferir não responder agora, digite PULAR._'),
-    botoes: pergunta.obrigatoria
-      ? manual
-        ? undefined
-        : [{ id: 'MENU', titulo: 'Voltar ao menu' }]
-      : manual
-        ? [{ id: 'PULAR', titulo: 'Pular' }]
-        : [
-            { id: 'PULAR', titulo: 'Pular' },
-            { id: 'MENU', titulo: 'Voltar ao menu' },
-          ],
+    botoes: pergunta.obrigatoria ? undefined : [{ id: 'PULAR', titulo: 'Pular' }],
   }
 }
 
@@ -2782,6 +2809,35 @@ export async function tratarConversa(opcoes: {
     // pergunta (AMIL, valor, formas de pagamento) ficou sem resposta. O peso do
     // casamento resolve os dois casos sem precisar adivinhar a intencao.
     const jaRespondidas = opcoes.respostasNaEspera ?? 0
+
+    // Quer marcar, estando na fila (25/09/2026). Em 24/09 a atendente
+    // respondeu "basta escolher a opcao 2"; a mae digitou "Pode agendar", "2",
+    // e o robo, calado na fila, nao fez nada - 35 minutos ate ela escrever
+    // "nao estou conseguindo marcar". O robo nao abre a agenda sozinho (pode
+    // haver conversa humana em andamento); ele OFERECE um botao. Tocar nele
+    // manda "Marcar uma consulta", que o bloco acima ja atende.
+    //
+    // Vale mesmo com gente conversando: e so um botao, e em geral e a propria
+    // atendente que mandou a familia marcar pelo menu. O limite de respostas na
+    // espera continua valendo, para nao virar eco.
+    const querMarcar = pediuAgendamento(texto) || texto.trim() === '2'
+    if (querMarcar && jaRespondidas < LIMITE_NA_ESPERA) {
+      const lista = await carregarRespostas(admin, clinicId)
+      // "Marca consulta pra minha filha, e valor da consulta": as duas coisas.
+      const junto = acharResposta(texto, lista, 2)
+      await admin
+        .from('whatsapp_conversations')
+        .update({ auto_replies_while_waiting: jaRespondidas + 1 })
+        .eq('id', conversationId)
+      return {
+        resposta:
+          (junto ? `${junto.resposta}\n\n` : '') +
+          '📅 Para ver os horários livres e marcar agora, toque em *Marcar uma consulta*. ' +
+          'Sua conversa continua na fila da equipe.',
+        botoes: [{ id: '2', titulo: 'Marcar uma consulta' }],
+      }
+    }
+
     if (opcoes.podeIniciarMenu && jaRespondidas < LIMITE_NA_ESPERA) {
       const lista = await carregarRespostas(admin, clinicId)
       // Casamento forte (duas palavras do assunto) responde sempre, mesmo que a
@@ -2793,9 +2849,13 @@ export async function tratarConversa(opcoes: {
       // Anthony" casava com "retorno" e recebia a lista de documentos. Mas
       // "convenio?" solto, que tambem casa com uma palavra e e pergunta de
       // verdade, continua respondido.
+      //
+      // E casamento fraco so em frase com cara de pergunta (25/09/2026):
+      // "Aguardo retorno" casou com "retorno" e recebeu a lista de documentos
+      // para levar a consulta. "Convenio?" e "Valores ?" continuam respondidos.
       const achada =
         acharResposta(texto, lista, 2) ??
-        (pediuAgendamento(texto) ? null : acharResposta(texto, lista, 1))
+        (pediuAgendamento(texto) || !parecePergunta(texto) ? null : acharResposta(texto, lista, 1))
       // Sem perguntar a unidade: a pergunta "para qual atendimento?" mudaria a
       // etapa da conversa e tiraria a pessoa da fila sem ela pedir. Vale o
       // texto curto da propria resposta, que ja cobre os tres lugares.
@@ -2955,7 +3015,6 @@ export async function tratarConversa(opcoes: {
           'Aqui não dá para voltar uma pergunta - mas o que já foi respondido está guardado, ' +
           'e o Dr. Marcello confere tudo na consulta.\n\n' +
           perguntaAtual.texto,
-        botoes: manual ? undefined : [{ id: 'MENU', titulo: 'Voltar ao menu' }],
       }
     }
 
@@ -2972,7 +3031,6 @@ export async function tratarConversa(opcoes: {
             'Esse dado o Dr. Marcello precisa ter no cadastro. Pode responder aqui, ' +
             'mesmo que não seja exato?\n\n' +
             perguntaAtual.texto,
-          botoes: manual ? undefined : [{ id: 'MENU', titulo: 'Voltar ao menu' }],
         }
       }
       return restantes.length
@@ -3000,16 +3058,7 @@ export async function tratarConversa(opcoes: {
         resposta:
           perguntaAtual.erro +
           (perguntaAtual.obrigatoria ? '' : '\n\n_Ou digite PULAR para seguir sem esse dado._'),
-        botoes: perguntaAtual.obrigatoria
-          ? manual
-            ? undefined
-            : [{ id: 'MENU', titulo: 'Voltar ao menu' }]
-          : manual
-            ? [{ id: 'PULAR', titulo: 'Pular' }]
-            : [
-                { id: 'PULAR', titulo: 'Pular' },
-                { id: 'MENU', titulo: 'Voltar ao menu' },
-              ],
+        botoes: perguntaAtual.obrigatoria ? undefined : [{ id: 'PULAR', titulo: 'Pular' }],
       }
     }
 
@@ -3114,6 +3163,29 @@ export async function tratarConversa(opcoes: {
     // Antes do "nao entendi": o cadastro da consulta ficou pela metade?
     const retomada = await tentarFichaPendente(admin, clinicId, conversationId, texto, opcoes.consultas)
     if (retomada) return retomada
+
+    // "Ok, obrigada" nao e pedido: responder com o menu inteiro e "Nao
+    // entendi" corrigia uma mae que so estava sendo educada.
+    if (soAgradecimento(texto)) {
+      return { resposta: '😊 Por nada! Se precisar de algo, é só escrever *0* para ver as opções.' }
+    }
+
+    // Frase de verdade que o robo nao entendeu vai para a equipe (25/09/2026).
+    // Em 24/09, "Dr está ciente." (a mae explicando que o medico ja sabia do
+    // convenio dela) e o nome da crianca escrito solto receberam "Nao
+    // entendi. Responda com o numero" - e a familia teve de achar sozinha o
+    // "falar com a equipe". Tres palavras ou mais ja e recado para gente, nao
+    // erro de digitacao. Numero, letra solta e palavra curta continuam
+    // recebendo o menu, que e o que resolve nesses casos.
+    const palavras = normalizar(texto).replace(/[^a-z\s]/g, ' ').trim().split(/\s+/).filter((p) => p.length > 1)
+    if (palavras.length >= 3) {
+      registrar('nao_entendi', 'equipe')
+      const chamada = await chamarEquipe(admin, conversationId)
+      return {
+        ...chamada,
+        resposta: 'Não consegui entender por aqui, então passei sua mensagem para a nossa equipe.\n\n' + chamada.resposta,
+      }
+    }
 
     registrar('nao_entendi')
     return await mostrarMenu(
