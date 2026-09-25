@@ -1753,6 +1753,34 @@ export async function vincularContatoAoPaciente(patientId: string) {
   }
 }
 
+/**
+ * O que o WhatsApp disse das mensagens de cada acompanhamento: lida,
+ * entregue, enviada ou falhou (25/09/2026). A fila de acompanhamentos usa
+ * para mostrar "Lida" em vez de um generico "enviado", e para devolver aos
+ * atrasados o que falhou - enviado que nao chegou nao e enviado.
+ */
+export async function situacaoDosAcompanhamentos(followupIds: string[]): Promise<Map<string, string[]>> {
+  const porAcompanhamento = new Map<string, string[]>()
+  if (!followupIds.length) return porAcompanhamento
+  // Em lotes: centenas de ids numa URL so estouram o limite do PostgREST.
+  for (let i = 0; i < followupIds.length; i += 150) {
+    const lote = followupIds.slice(i, i + 150)
+    const { data, error } = await supabase
+      .from('whatsapp_messages')
+      .select('followup_id,status')
+      .in('followup_id', lote)
+      .eq('direction', 'outbound')
+    if (error) fail(error)
+    for (const linha of data ?? []) {
+      if (!linha.followup_id) continue
+      const lista = porAcompanhamento.get(linha.followup_id)
+      if (lista) lista.push(linha.status)
+      else porAcompanhamento.set(linha.followup_id, [linha.status])
+    }
+  }
+  return porAcompanhamento
+}
+
 export async function listConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
   const { data, error } = await supabase
     .from('whatsapp_messages')

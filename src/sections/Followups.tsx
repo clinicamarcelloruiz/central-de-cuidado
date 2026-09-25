@@ -12,15 +12,18 @@ import {
   Sparkles,
   Stethoscope,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useDialogos } from '@/components/dialogos-contexto'
 import type { FollowupKey, FollowupStatus, Patient } from '@/types/patient'
 import {
   fmtBR,
   pendingFollowups,
+  situacaoDoEnvio,
   type FollowupItem,
+  type SituacaoDoEnvio,
 } from '@/lib/followup'
 import { supabase } from '@/lib/supabase'
+import { situacaoDosAcompanhamentos } from '@/lib/repository'
 
 const NAVY = '#081b2c'
 const AZUL = '#2f7fc1'
@@ -35,13 +38,22 @@ interface Props {
   onAbrirConversa: (patientId: string) => void
 }
 
-type Accent = 'danger' | 'today' | 'upcoming' | 'scheduled'
+type Accent = 'danger' | 'today' | 'upcoming' | 'scheduled' | 'sent'
 
 const GROUP_STYLE: Record<Accent, { text: string; bg: string; icon: typeof AlertCircle }> = {
   danger: { text: 'text-[#c64d4a]', bg: 'bg-[#c64d4a]', icon: AlertCircle },
   today: { text: 'text-[#1f4f78]', bg: 'bg-[#2f7fc1]', icon: Sparkles },
   upcoming: { text: 'text-[#557f75]', bg: 'bg-[#6f9d91]', icon: CalendarClock },
   scheduled: { text: 'text-slate-500', bg: 'bg-slate-400', icon: Clock3 },
+  sent: { text: 'text-[#47766b]', bg: 'bg-[#6f9d91]', icon: Send },
+}
+
+/** Etiqueta do que ja saiu: o que o WhatsApp confirmou, com a data do envio. */
+const ETIQUETA_DO_ENVIO: Record<SituacaoDoEnvio, { texto: string; classe: string }> = {
+  lida: { texto: 'Lida', classe: 'bg-[#e8f5ec] text-[#1c6b3a]' },
+  entregue: { texto: 'Entregue', classe: 'bg-[#e9f4f1] text-[#47766b]' },
+  enviada: { texto: 'Enviada', classe: 'bg-[#e9f4f1] text-[#47766b]' },
+  falhou: { texto: 'Envio falhou', classe: 'bg-[#fceceb] text-[#b42318]' },
 }
 
 function initials(name: string) {
@@ -124,11 +136,54 @@ function Group({
 export default function Followups({ patients, setFollowup, onAbrirConversa }: Props) {
   const [sending, setSending] = useState<string | null>(null)
   const { avisar, perguntar } = useDialogos()
+  const [situacoes, setSituacoes] = useState<Map<string, SituacaoDoEnvio | null>>(new Map())
   const items = pendingFollowups(patients)
-  const overdue = items.filter((item) => item.urgencia === 'atrasado')
-  const today = items.filter((item) => item.urgencia === 'hoje')
-  const upcoming = items.filter((item) => item.urgencia === 'proximo')
-  const scheduled = items.filter((item) => item.urgencia === 'futuro')
+
+  // Ids dos que ja sairam, numa string so: muda quando um novo e enviado, e
+  // nao a cada renderizacao (a lista de pacientes e recriada a cada carga).
+  const idsEnviados = items
+    .filter((item) => item.urgencia === 'aguardando')
+    .map((item) => item.patient.followups[item.key].id)
+    .filter((id): id is string => Boolean(id))
+    .sort()
+    .join(',')
+
+  useEffect(() => {
+    if (!idsEnviados) return
+    let vivo = true
+    situacaoDosAcompanhamentos(idsEnviados.split(','))
+      .then((mapa) => {
+        if (!vivo) return
+        const novo = new Map<string, SituacaoDoEnvio | null>()
+        for (const [id, statuses] of mapa) novo.set(id, situacaoDoEnvio(statuses))
+        setSituacoes(novo)
+      })
+      .catch((erro) => {
+        // Sem a situacao, a etiqueta fica "Enviada" - nao inventa leitura.
+        console.warn('Nao consegui ler a situacao dos envios', erro)
+      })
+    return () => {
+      vivo = false
+    }
+  }, [idsEnviados])
+
+  const situacaoDe = (item: FollowupItem) => situacoes.get(item.patient.followups[item.key].id ?? '') ?? null
+
+  // Enviado que falhou nao e "aguardando": volta para o grupo da data, que e
+  // onde a equipe procura o que precisa de acao.
+  const grupoDe = useMemo(
+    () => (item: FollowupItem) => {
+      if (item.urgencia !== 'aguardando') return item.urgencia
+      if (situacoes.get(item.patient.followups[item.key].id ?? '') !== 'falhou') return 'aguardando'
+      return item.dias > 0 ? 'atrasado' : item.dias === 0 ? 'hoje' : item.dias >= -7 ? 'proximo' : 'futuro'
+    },
+    [situacoes],
+  )
+  const overdue = items.filter((item) => grupoDe(item) === 'atrasado')
+  const today = items.filter((item) => grupoDe(item) === 'hoje')
+  const upcoming = items.filter((item) => grupoDe(item) === 'proximo')
+  const scheduled = items.filter((item) => grupoDe(item) === 'futuro')
+  const aguardando = items.filter((item) => grupoDe(item) === 'aguardando')
   const completed = patients
     .flatMap((patient) => [patient.followups.d15, patient.followups.d30, patient.followups.m90])
     .filter((followup) => followup.status === 'concluido').length
@@ -191,8 +246,11 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
     const wasSent = patient.followups[item.key].status === 'enviado'
     const sendingKey = `${patient.id}-${item.key}`
     const isSending = sending === sendingKey
-    const isOverdue = item.urgencia === 'atrasado'
-    const isToday = item.urgencia === 'hoje'
+    const grupo = grupoDe(item)
+    const isOverdue = grupo === 'atrasado'
+    const isToday = grupo === 'hoje'
+    const situacao = wasSent ? (situacaoDe(item) ?? 'enviada') : null
+    const enviadoEm = patient.followups[item.key].enviadoEm
     const accent = isOverdue ? '#c94f4c' : isToday ? AZUL : COR_DA_ETAPA[item.key]
 
     return (
@@ -219,10 +277,16 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
                 >
                   {item.label}
                 </span>
-                {wasSent && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-[#e9f4f1] px-2 py-1 text-[8px] font-extrabold uppercase tracking-[0.1em] text-[#47766b]">
+                {/* Ate 25/09/2026 dizia "mensagem aberta" para todo enviado, e a
+                    equipe entendia que a familia tinha aberto. Agora diz o que
+                    o WhatsApp confirmou, e quando saiu. */}
+                {situacao && (
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[8px] font-extrabold uppercase tracking-[0.1em] ${ETIQUETA_DO_ENVIO[situacao].classe}`}
+                  >
                     <Check className="h-2.5 w-2.5" strokeWidth={3} />
-                    mensagem aberta
+                    {ETIQUETA_DO_ENVIO[situacao].texto}
+                    {enviadoEm ? ` · ${fmtBR(enviadoEm.slice(0, 10))}` : ''}
                   </span>
                 )}
                 {/* Sem isto a equipe olha a fila e acha que precisa clicar em
@@ -240,7 +304,7 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-semibold text-slate-400">
                 <span className="inline-flex items-center gap-1.5" style={{ color: isOverdue || isToday ? accent : undefined }}>
                   <Clock3 className="h-3.5 w-3.5" />
-                  {dueLabel(item)} · {fmtBR(item.due)}
+                  {grupo === 'aguardando' ? `Previsto para ${fmtBR(item.due)}` : `${dueLabel(item)} · ${fmtBR(item.due)}`}
                 </span>
                 <span className="hidden text-slate-300 sm:inline">•</span>
                 <span>Consulta em {fmtBR(patient.dataConsulta)}</span>
@@ -356,6 +420,14 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
             <Group title="Para hoje" hint="Contatos que vencem agora" items={today} accent="today">{card}</Group>
             <Group title="Próximos 7 dias" hint="Organize a semana com antecedência" items={upcoming} accent="upcoming">{card}</Group>
             <Group title="Agendados" hint="Jornadas futuras já programadas" items={scheduled} accent="scheduled">{card}</Group>
+            <Group
+              title="Enviados, aguardando"
+              hint="A mensagem já saiu. Conclua quando a família responder ou não precisar de mais nada"
+              items={aguardando}
+              accent="sent"
+            >
+              {card}
+            </Group>
           </div>
         )}
       </div>

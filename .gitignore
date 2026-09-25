@@ -51,3 +51,4 @@ tests/dados-para-memed.build.mjs
 tests/continuidade-da-consulta.build.mjs
 tests/retorno.build.mjs
 tests/curvas.build.mjs
+tests/followup.build.mjs

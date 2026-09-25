@@ -87,7 +87,32 @@ export function waLink(telefone: string, mensagem: string): string {
   return `https://wa.me/${withCountry}?text=${encodeURIComponent(mensagem)}`
 }
 
-export type FollowupUrgencia = 'atrasado' | 'hoje' | 'proximo' | 'futuro'
+/**
+ * 'aguardando' (25/09/2026): a mensagem ja saiu e falta a equipe concluir.
+ * Antes o grupo vinha so da data prevista, e acompanhamento ENVIADO no dia
+ * certo aparecia em "Atrasados" no dia seguinte - a equipe lia "nao saiu"
+ * quando o que faltava era so clicar em Concluir.
+ */
+export type FollowupUrgencia = 'atrasado' | 'hoje' | 'proximo' | 'futuro' | 'aguardando'
+
+/** O que o WhatsApp informou sobre a mensagem do acompanhamento. */
+export type SituacaoDoEnvio = 'lida' | 'entregue' | 'enviada' | 'falhou'
+
+const PESO_DA_SITUACAO: Record<string, number> = { read: 4, delivered: 3, sent: 2, accepted: 1, queued: 1 }
+
+/**
+ * A melhor noticia entre as mensagens do acompanhamento: lida vence entregue,
+ * que vence enviada. "Falhou" so quando nenhuma chegou - uma reenviada com
+ * sucesso depois de uma falha nao pode continuar marcada como falha.
+ */
+export function situacaoDoEnvio(statuses: string[]): SituacaoDoEnvio | null {
+  if (!statuses.length) return null
+  const melhor = Math.max(0, ...statuses.map((s) => PESO_DA_SITUACAO[s] ?? 0))
+  if (melhor >= 4) return 'lida'
+  if (melhor === 3) return 'entregue'
+  if (melhor >= 1) return 'enviada'
+  return statuses.includes('failed') ? 'falhou' : null
+}
 
 export interface FollowupItem {
   patient: Patient
@@ -108,7 +133,8 @@ export function pendingFollowups(patients: Patient[]): FollowupItem[] {
       const due = dueDate(p, key)
       const dias = daysFromToday(due)
       let urgencia: FollowupUrgencia = 'futuro'
-      if (dias > 0) urgencia = 'atrasado'
+      if (st.status === 'enviado') urgencia = 'aguardando'
+      else if (dias > 0) urgencia = 'atrasado'
       else if (dias === 0) urgencia = 'hoje'
       else if (dias >= -7) urgencia = 'proximo'
       items.push({ patient: p, key, label: FOLLOWUP_LABEL[key], due, dias, urgencia })

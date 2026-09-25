@@ -361,7 +361,8 @@ export default function Dashboard({
   }
   const maxMonth = Math.max(...months.map((month) => month.value), 1)
   const pending = pendingFollowups(patients)
-  const nextWeek = pending.filter((item) => item.dias >= -7).length
+  // Ja enviados nao contam: nao ha o que fazer por eles nesta semana.
+  const nextWeek = pending.filter((item) => item.dias >= -7 && item.urgencia !== 'aguardando').length
 
   return (
     <div className="space-y-5">
