@@ -282,7 +282,31 @@ export function soAgradecimento(texto: string): boolean {
     'pela', 'atencao', 'sim', 'tudo', 'bem', 'ate', 'mais', 'amanha', 'boa', 'noite', 'tarde', 'dia',
     'deus', 'abencoe', 'e', 'o', 'a', 'de', 'nada', 'show', 'maravilha', 'agradeco', 'mt', 'mto', 'td',
   ])
-  return t.split(/\s+/).every((palavra) => cortesia.has(palavra))
+  const palavras = t.split(/\s+/)
+  // Precisa de UM agradecimento ou "ok" de verdade (25/09/2026): so com a
+  // lista de cortesia, "Bom dia" (duas palavras dela) virava "Por nada!".
+  const agradece = palavras.some((palavra) => AGRADECIMENTO.has(palavra))
+  return agradece && palavras.every((palavra) => cortesia.has(palavra))
+}
+
+const AGRADECIMENTO = new Set([
+  'ok', 'okay', 'okk', 'blz', 'beleza', 'obrigado', 'obrigada', 'obg', 'brigado', 'brigada', 'valeu',
+  'grato', 'grata', 'certo', 'combinado', 'perfeito', 'entendi', 'otimo', 'show', 'maravilha', 'agradeco',
+])
+
+/**
+ * So cumprimento: "Bom dia", "Oi, tudo bem?". Com o menu ja na tela, a
+ * resposta certa e cumprimentar de volta com o menu - nem "Nao entendi", nem
+ * "Por nada".
+ */
+export function soCumprimento(texto: string): boolean {
+  const t = normalizar(texto).replace(/[^a-z\s]/g, ' ').trim()
+  if (!t) return false
+  const cumprimento = new Set([
+    'oi', 'oie', 'ola', 'opa', 'bom', 'boa', 'dia', 'tarde', 'noite', 'tudo', 'bem', 'como', 'vai',
+    'e', 'ai', 'vc', 'voce', 'voces', 'td', 'pessoal', 'doutor', 'dr', 'ate', 'amanha', 'mais', 'logo',
+  ])
+  return t.split(/\s+/).every((palavra) => cumprimento.has(palavra))
 }
 
 /** A saida de emergencia. Vale em qualquer etapa, inclusive com a equipe. */
@@ -3166,6 +3190,8 @@ export async function tratarConversa(opcoes: {
 
     // "Ok, obrigada" nao e pedido: responder com o menu inteiro e "Nao
     // entendi" corrigia uma mae que so estava sendo educada.
+    if (soCumprimento(texto)) return await mostrarMenu(admin, conversationId, saudacao)
+
     if (soAgradecimento(texto)) {
       return { resposta: '😊 Por nada! Se precisar de algo, é só escrever *0* para ver as opções.' }
     }
@@ -3183,7 +3209,9 @@ export async function tratarConversa(opcoes: {
       const chamada = await chamarEquipe(admin, conversationId)
       return {
         ...chamada,
-        resposta: 'Não consegui entender por aqui, então passei sua mensagem para a nossa equipe.\n\n' + chamada.resposta,
+        resposta:
+          'Não consegui entender por aqui, então passei sua mensagem para a nossa equipe.' +
+          (chamada?.resposta ? `\n\n${chamada.resposta}` : ''),
       }
     }
 

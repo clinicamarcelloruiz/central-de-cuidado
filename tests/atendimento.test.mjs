@@ -1839,6 +1839,22 @@ await caso('"Ok, obrigada!" no menu não é "Não entendi" nem fila', [
     else falhas.push(`${titulo}: agradecimento foi para a fila`)
   },
 })
+// A outra instalacao achou (25/09/2026): "Bom dia" com o menu na tela
+// recebia "Por nada!", porque bom e dia estavam na lista de cortesia.
+await caso('"Bom dia" com o menu na tela recebe o menu, não "Por nada"', [
+  ['Bom dia', 'Como podemos ajudar'],
+  ['Oi, tudo bem?', 'Como podemos ajudar'],
+], {
+  estadoInicial: NO_MENU,
+  verificar: ({ transcricao, titulo }) => {
+    if (transcricao.some((t) => t.includes('Por nada') || t.includes('Não entendi'))) falhas.push(`${titulo}: cumprimento tratado como agradecimento ou erro`)
+    else passou++
+  },
+})
+await caso('"Bom dia, obrigada!" continua sendo agradecimento', [
+  ['Bom dia, obrigada!', 'Por nada'],
+], { estadoInicial: NO_MENU })
+
 await caso('Palavra solta no menu continua recebendo o menu', [
   ['blablabla', 'Não entendi'],
 ], { estadoInicial: NO_MENU })
