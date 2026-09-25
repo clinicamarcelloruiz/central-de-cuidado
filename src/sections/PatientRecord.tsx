@@ -122,7 +122,8 @@ import type {
   Patient,
 } from '@/types/patient'
 import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
-import { abrirPrescricao, faltaParaPrescrever, guardarReceita, marcarReceitaExcluida, prepararPrescricao, ultimoCadastro, type LocalDeAtendimento } from '@/lib/memed'
+import { abrirPrescricao, alergiasParaMemed, faltaParaPrescrever, guardarReceita, marcarReceitaExcluida, prepararPrescricao, ultimoCadastro, type LocalDeAtendimento } from '@/lib/memed'
+import { avisoDoQueFoiParaMemed, dadosParaMemed, hojeEmSaoPaulo } from '@/lib/dados-para-memed'
 
 interface PatientRecordProps {
   patient: Patient | null
@@ -2008,7 +2009,7 @@ function EsperaDaAssinatura({ espera, onDesistir }: EsperaDaAssinaturaProps) {
 }
 
 type AvisoDoProntuarioProps = {
-  aviso: { tipo: 'ok' | 'erro'; texto: string }
+  aviso: { tipo: 'ok' | 'erro' | 'info'; texto: string }
   onFechar: () => void
 }
 
@@ -2028,7 +2029,11 @@ function AvisoDoProntuario({ aviso, onFechar }: AvisoDoProntuarioProps) {
       className={`mb-3 flex items-start gap-2 rounded-[14px] border px-4 py-3 text-[12px] font-bold ${
         aviso.tipo === 'ok'
           ? 'border-[#1c6b3a]/25 bg-[#eef7f1] text-[#1c6b3a]'
-          : 'border-[#b42318]/25 bg-[#fceceb] text-[#b42318]'
+          : aviso.tipo === 'info'
+            ? // Amarelo: nao e erro, mas pede um olhar do medico (alergia fora
+              // da lista da Memed, peso de outra consulta).
+              'border-[#b54708]/25 bg-[#fef6e7] text-[#93370d]'
+            : 'border-[#b42318]/25 bg-[#fceceb] text-[#b42318]'
       }`}
     >
       {aviso.tipo === 'ok' ? (
@@ -2100,7 +2105,7 @@ export default function PatientRecord({
   // do formulario, porque a barra e os campos sao irmaos na arvore.
   const [campoAtivo, setCampoAtivo] = useState<ControleDeCampo | null>(null)
   const [aviso, setAviso] = useState<
-    { tipo: 'ok' | 'erro'; texto: string } | null
+    { tipo: 'ok' | 'erro' | 'info'; texto: string } | null
   >(null)
   const unidadesDaClinica = useUnidades()
 
@@ -2304,7 +2309,15 @@ export default function PatientRecord({
       // preferencias. Faltando, para aqui com a instrucao de onde preencher,
       // em vez de deixar a Memed imprimir um cabecalho em branco.
       if (!clinicId) throw new Error('Clínica não identificada.')
-      const [unidades, dadosDaClinica] = await Promise.all([listUnits(clinicId), getDadosDaClinica(clinicId)])
+      // Alergia, peso e altura podem vir de consulta anterior (ver
+      // dados-para-memed.ts). A traducao das alergias vai junto com as outras
+      // buscas, para nao somar espera ao clique.
+      const dados = dadosParaMemed(consultation, consultations, hojeEmSaoPaulo())
+      const [unidades, dadosDaClinica, alergias] = await Promise.all([
+        listUnits(clinicId),
+        getDadosDaClinica(clinicId),
+        alergiasParaMemed(dados.alergias?.valor ?? ''),
+      ])
       const nome = (consultation?.unidade ?? patient.unidade ?? '').trim().toLowerCase()
       const unidade =
         unidades.find((u) => u.name.trim().toLowerCase() === nome) ??
@@ -2327,7 +2340,7 @@ export default function PatientRecord({
         // e recusava tanto os dois juntos quanto o fixo de 10 digitos.
         telefone: telefoneValidavel(dadosDaClinica.telefone, dadosDaClinica.telefone2),
       }
-      await abrirPrescricao(patient, consultation, {
+      const { alergiasEnviadas } = await abrirPrescricao(patient, consultation, {
         onReceita: (dados) => {
           void (async () => {
             try {
@@ -2348,11 +2361,21 @@ export default function PatientRecord({
           })()
         },
         onExcluida: (id) => void marcarReceitaExcluida(id),
-      }, local)
+      }, local, {
+        peso: dados.peso?.valor ?? '',
+        altura: dados.altura?.valor ?? '',
+        alergiaIds: [...new Set(alergias.reconhecidas.map((a) => a.id))],
+      })
       // Diagnostico do cadastro do medico na Memed, enquanto a liberacao de
       // producao esta em andamento. Some sozinho quando estiver completo.
       if (ultimoCadastro && !ultimoCadastro.feito) {
         setAviso({ tipo: 'erro', texto: `Cadastro do médico na Memed não foi completado: ${ultimoCadastro.detalhe ?? 'sem detalhe'}` })
+      } else {
+        // O medico ve o que foi para a Memed e o que ficou de fora. Sem este
+        // aviso, uma alergia nao reconhecida sumiria calada - e ele acharia
+        // que o alerta esta cobrindo.
+        const avisoDosDados = avisoDoQueFoiParaMemed(dados, alergias, alergiasEnviadas)
+        if (avisoDosDados) setAviso(avisoDosDados)
       }
     } catch (causa) {
       setAviso({

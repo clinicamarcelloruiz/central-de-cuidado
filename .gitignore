@@ -45,3 +45,6 @@ tests/mascaras.build.mjs
 tests/eventos-do-webhook.build.mjs
 tests/expediente.build.mjs
 tests/papel.build.mjs
+tests/paginar.build.mjs
+tests/alergias.build.mjs
+tests/dados-para-memed.build.mjs

@@ -1,5 +1,6 @@
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
 import { clinicaDeQuemAtende } from '../_shared/papel.ts'
+import { escolherIngredientes, lerIngredientes, primeiraPalavra, termosDeAlergia } from '../_shared/alergias.ts'
 
 /**
  * Devolve o token do medico na Memed para a tela abrir a prescricao.
@@ -218,6 +219,57 @@ async function relacionamentosDoCadastro(api: string, credenciais: string, ajust
   return Object.keys(relationships).length ? { relationships } : {}
 }
 
+/** Principios ativos da Memed que respondem por este nome. */
+async function buscarIngredientes(api: string, credenciais: string, termo: string) {
+  const resposta = await fetch(
+    `${api}/drugs/ingredients?${credenciais}&terms=${encodeURIComponent(termo)}&limit=20`,
+    { headers: CABECALHOS },
+  )
+  if (!resposta.ok) throw new Error(`busca de "${termo}" recusada (${resposta.status})`)
+  return lerIngredientes(await resposta.json())
+}
+
+/**
+ * As alergias escritas no prontuario, traduzidas para ids da Memed.
+ *
+ * Devolve tambem o que NAO casou, para a tela mostrar ao medico: alergia que
+ * some no caminho sem ninguem saber e exatamente o que este recurso existe para
+ * evitar. Se a busca falhar, diz que falhou - a receita abre do mesmo jeito,
+ * mas o medico fica sabendo que o alerta nao esta ligado.
+ */
+async function alergiasNaMemed(api: string, credenciais: string, texto: string) {
+  const { termos, semAlergia } = termosDeAlergia(texto)
+  const reconhecidas: { termo: string; id: number; nome: string }[] = []
+  const naoReconhecidas: string[] = []
+  const falhas: string[] = []
+
+  await Promise.all(
+    termos.map(async (termo) => {
+      try {
+        let achados = escolherIngredientes(termo, await buscarIngredientes(api, credenciais, termo))
+        const primeira = achados.length ? null : primeiraPalavra(termo)
+        if (primeira) {
+          achados = escolherIngredientes(primeira, await buscarIngredientes(api, credenciais, primeira))
+        }
+        if (achados.length) achados.forEach((c) => reconhecidas.push({ termo, id: c.id, nome: c.nome }))
+        else naoReconhecidas.push(termo)
+      } catch (causa) {
+        console.warn('Memed: busca de principio ativo falhou', causa)
+        falhas.push(termo)
+      }
+    }),
+  )
+
+  // Promise.all termina fora de ordem; a tela mostra na ordem em que o medico
+  // escreveu.
+  const ordem = (t: string) => termos.indexOf(t)
+  reconhecidas.sort((a, b) => ordem(a.termo) - ordem(b.termo))
+  naoReconhecidas.sort((a, b) => ordem(a) - ordem(b))
+  falhas.sort((a, b) => ordem(a) - ordem(b))
+
+  return { semAlergia, reconhecidas, naoReconhecidas, falhas }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'Método não permitido.' }, 405)
@@ -245,6 +297,15 @@ Deno.serve(async (req) => {
 
     const env = ambiente()
     const credenciais = chaves()
+
+    // Segundo servico desta funcao: traduzir as alergias do prontuario para os
+    // ids da Memed. Fica aqui, e nao numa funcao nova, porque precisa das mesmas
+    // chaves e da mesma checagem de quem atende - e as chaves nao podem ir ao
+    // navegador (ver o topo do arquivo).
+    const pedido = await req.json().catch(() => ({}))
+    if (pedido?.acao === 'alergias') {
+      return json(await alergiasNaMemed(env.api, credenciais, String(pedido.texto ?? '')))
+    }
 
     const cpf = soDigitos(
       Deno.env.get('MEMED_CPF_PRESCRITOR')?.trim() ||

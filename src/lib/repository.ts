@@ -10,6 +10,7 @@ import type {
 } from '@/types/patient'
 import type { PatientDraft } from '@/lib/store'
 import type { Database } from '@/types/database'
+import { buscarTodas } from '@/lib/paginar'
 
 type PatientInsert = Database['public']['Tables']['patients']['Insert']
 type PatientUpdate = Database['public']['Tables']['patients']['Update']
@@ -1633,17 +1634,26 @@ export interface ConversationMessage {
 }
 
 export async function listConversations(clinicId: string): Promise<Conversation[]> {
-  const { data, error } = await supabase
-    .from('whatsapp_conversations')
-    // Uma linha so, por mais longa que fique: o supabase-js le esta string em
-    // tempo de compilacao para saber o tipo do resultado, e concatenar com +
-    // faz ele desistir e devolver GenericStringError em todos os campos.
-    .select('id,patient_id,display_phone,wa_id,profile_name,status,needs_attention,attention_reason,booking_state,unread_count,last_message_at')
-    .eq('clinic_id', clinicId)
-    .order('last_message_at', { ascending: false, nullsFirst: false })
+  // Paginado, e nao uma consulta so: ver paginar.ts - o corte de 1.000 linhas
+  // fez conversas antigas "abrirem sozinhas" em 24/09/2026.
+  const { data, error } = await buscarTodas((de, ate) =>
+    supabase
+      .from('whatsapp_conversations')
+      // Uma linha so, por mais longa que fique: o supabase-js le esta string em
+      // tempo de compilacao para saber o tipo do resultado, e concatenar com +
+      // faz ele desistir e devolver GenericStringError em todos os campos.
+      .select('id,patient_id,display_phone,wa_id,profile_name,status,needs_attention,attention_reason,booking_state,unread_count,last_message_at')
+      .eq('clinic_id', clinicId)
+      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .order('id')
+      .range(de, ate),
+  )
 
   if (error) fail(error)
-  const rows = data ?? []
+  // Uma conversa que muda de posicao entre uma pagina e outra pode vir duas
+  // vezes; a lista nao pode mostrar o mesmo cartao duplicado.
+  const vistas = new Set<string>()
+  const rows = data.filter((row) => !vistas.has(row.id) && vistas.add(row.id))
   if (rows.length === 0) return []
 
   // Nomes dos pacientes e ultima mensagem de cada conversa, em duas consultas
@@ -1653,11 +1663,19 @@ export async function listConversations(clinicId: string): Promise<Conversation[
     patientIds.length
       ? supabase.from('patients').select('id,name').in('id', patientIds)
       : Promise.resolve({ data: [], error: null }),
-    supabase
-      .from('whatsapp_messages')
-      .select('conversation_id,body,created_at,direction,automatic,status')
-      .eq('clinic_id', clinicId)
-      .order('created_at', { ascending: false }),
+    // Esta e a consulta que estourou: 1.672 mensagens em 24/09/2026, e so as
+    // 1.000 mais novas chegavam. Toda conversa sem mensagem depois de 15/09
+    // ficava sem "ultima mensagem" e sem resposta da equipe - e voltava a
+    // aparecer como pendente.
+    buscarTodas((de, ate) =>
+      supabase
+        .from('whatsapp_messages')
+        .select('conversation_id,body,created_at,direction,automatic,status')
+        .eq('clinic_id', clinicId)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(de, ate),
+    ),
   ])
   if (patientsResult.error) fail(patientsResult.error)
   if (messagesResult.error) fail(messagesResult.error)
@@ -2051,18 +2069,30 @@ export async function fetchDb(
   clinicId: string,
   defaults: Record<FollowupKey, string>,
 ): Promise<Db> {
+  // Pacientes e acompanhamentos paginados pelo mesmo motivo das mensagens (ver
+  // paginar.ts). Em 24/09/2026 eram 48 e 164, longe do corte - mas o corte e
+  // silencioso, e paciente sumindo da lista so seria notado por quem sentisse
+  // falta dele.
   const [patientsResult, followupsResult, settingsResult] = await Promise.all([
-    supabase
-      .from('patients')
-      .select('*')
-      .eq('clinic_id', clinicId)
-      .is('archived_at', null)
-      .order('created_at', { ascending: false }),
-    supabase
-      .from('followups')
-      .select('id,patient_id,followup_key,status,opened_at')
-      .eq('clinic_id', clinicId)
-      .is('archived_at', null),
+    buscarTodas((de, ate) =>
+      supabase
+        .from('patients')
+        .select('*')
+        .eq('clinic_id', clinicId)
+        .is('archived_at', null)
+        .order('created_at', { ascending: false })
+        .order('id')
+        .range(de, ate),
+    ),
+    buscarTodas((de, ate) =>
+      supabase
+        .from('followups')
+        .select('id,patient_id,followup_key,status,opened_at')
+        .eq('clinic_id', clinicId)
+        .is('archived_at', null)
+        .order('id')
+        .range(de, ate),
+    ),
     supabase
       .from('clinic_settings')
       .select('template_d30,template_m90,template_d15')

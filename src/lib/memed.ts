@@ -312,12 +312,61 @@ function dataBR(iso: string) {
 const SEXO: Record<string, string> = { F: 'Feminino', M: 'Masculino', O: 'Outro' }
 
 /**
- * Abre a prescricao com o paciente ja preenchido.
+ * Resultado da traducao das alergias do prontuario para a Memed.
  *
- * As alergias vao junto: o campo que o medico ja escreve no prontuario vira
- * alerta na hora de prescrever. E a parte da integracao que deixa de ser
- * conveniencia e vira seguranca.
+ * falhou = nao deu para perguntar a Memed (fora do ar, lenta). A receita abre
+ * mesmo assim, mas o medico precisa saber que o alerta de alergia NAO esta
+ * ligado desta vez.
  */
+export type AlergiasNaMemed = {
+  semAlergia: boolean
+  reconhecidas: { termo: string; id: number; nome: string }[]
+  naoReconhecidas: string[]
+  falhas: string[]
+  falhou?: boolean
+}
+
+/**
+ * Pergunta ao servidor quais principios ativos da Memed correspondem ao que
+ * esta escrito no campo de alergias. O de/para fica no servidor porque a busca
+ * usa as chaves da Memed (ver memed-prescritor).
+ *
+ * Nunca lanca e nunca demora mais de 6 segundos: alergia nao pode ser o motivo
+ * de a receita nao abrir.
+ */
+export async function alergiasParaMemed(texto: string): Promise<AlergiasNaMemed> {
+  const vazio: AlergiasNaMemed = { semAlergia: false, reconhecidas: [], naoReconhecidas: [], falhas: [] }
+  if (!texto.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').trim()) return vazio
+  try {
+    const resposta = await Promise.race([
+      supabase.functions.invoke('memed-prescritor', { body: { acao: 'alergias', texto } }),
+      new Promise<never>((_, rejeitar) => window.setTimeout(() => rejeitar(new Error('sem resposta')), 6000)),
+    ])
+    if (resposta.error || !resposta.data) throw resposta.error ?? new Error('resposta vazia')
+    const dados = resposta.data as AlergiasNaMemed
+    return {
+      semAlergia: Boolean(dados.semAlergia),
+      reconhecidas: dados.reconhecidas ?? [],
+      naoReconhecidas: dados.naoReconhecidas ?? [],
+      falhas: dados.falhas ?? [],
+    }
+  } catch (causa) {
+    console.warn('[Memed] nao consegui traduzir as alergias', causa)
+    return { ...vazio, falhou: true }
+  }
+}
+
+/**
+ * O que vai para a Memed alem do cadastro: alergias ja traduzidas em ids, e
+ * peso e altura que podem ter vindo de uma consulta anterior (ver
+ * dados-para-memed.ts). Sem isto, vale o que estiver na consulta aberta.
+ */
+export type ExtrasDaPrescricao = {
+  peso?: string
+  altura?: string
+  alergiaIds?: number[]
+}
+
 export type LocalDeAtendimento = {
   nome: string
   endereco?: string
@@ -437,12 +486,21 @@ export function prepararPrescricao() {
   return preparacao
 }
 
+/**
+ * Abre a prescricao com o paciente ja preenchido.
+ *
+ * Devolve se as alergias chegaram a Memed: null quando nao havia o que mandar,
+ * false quando o comando foi recusado. A tela avisa o medico nos dois ultimos
+ * casos que importam - alerta que ele acha que esta ligado e nao esta e pior do
+ * que alerta nenhum.
+ */
 export async function abrirPrescricao(
   patient: Patient,
   consultation: Consultation | null,
   ouvir: Ouvintes,
   local?: LocalDeAtendimento | null,
-) {
+  extras?: ExtrasDaPrescricao,
+): Promise<{ alergiasEnviadas: boolean | null }> {
   const inicioDoClique = performance.now()
 
   // Se o prontuário já preparou, isto retorna na hora.
@@ -462,7 +520,9 @@ export async function abrirPrescricao(
   // setFeatureToggle ja foi no aquecimento (prepararPrescricao). Daqui para
   // baixo so o que depende deste paciente e desta unidade.
 
-  const primeiroNome = patient.nome.trim().split(/\s+/)[0] ?? patient.nome
+  const peso = extras?.peso ?? consultation?.peso ?? ''
+  const altura = extras?.altura ?? consultation?.altura ?? ''
+  const alturaEmCm = numeroOuNada(altura)
 
   // O local de atendimento: endereco, cidade e telefone que a Memed imprime na
   // receita e cobra na tela de Identificacao desde que a Anvisa passou a exigi-los.
@@ -503,12 +563,18 @@ export async function abrirPrescricao(
     telefone: patient.telefone?.replace(/\D/g, '') || undefined,
     email: patient.email || undefined,
     nome_mae: patient.responsavel || undefined,
-    peso: consultation?.peso ? Number(consultation.peso.replace(',', '.')) : undefined,
-    altura: consultation?.altura
-      ? Number(consultation.altura.replace(',', '.')) / 100
-      : undefined,
+    peso: numeroOuNada(peso),
+    // O prontuario guarda centimetros; a Memed quer metros.
+    altura: alturaEmCm ? alturaEmCm / 100 : undefined,
     cidade: patient.cidade || undefined,
   })
+
+  // Alergias DEPOIS do paciente: o setAllergy vale para o paciente que esta
+  // definido naquele momento (e assim no exemplo da Memed). Lista vazia nao e
+  // enviada - nao sabemos se a Memed trataria como "apagar as que o medico
+  // cadastrou direto la", e na duvida o alerta que ja existe fica.
+  const ids = extras?.alergiaIds ?? []
+  const alergiasEnviadas = ids.length ? await comando(hub, 'setAllergy', ids) : null
 
   // A tela abre mesmo que algum comando acima tenha falhado: com o paciente em
   // branco o medico digita o nome e prescreve; com o botao girando, ele nao faz
@@ -520,7 +586,18 @@ export async function abrirPrescricao(
   ])
   medir('show da tela', inicioDoShow)
   medir('TOTAL do clique ao abrir', inicioDoClique)
-  return primeiroNome
+  return { alergiasEnviadas }
+}
+
+/**
+ * "7,5" -> 7.5, "12 kg" -> 12; vazio ou texto sem numero -> nada. Ate
+ * 24/09/2026 era Number(), que da NaN para "12 kg" - e NaN no setPaciente e o
+ * tipo de valor que pode fazer a Memed recusar o paciente inteiro, abrindo a
+ * receita em branco.
+ */
+function numeroOuNada(valor: string): number | undefined {
+  const numero = parseFloat(String(valor ?? '').trim().replace(',', '.'))
+  return Number.isFinite(numero) && numero > 0 ? numero : undefined
 }
 
 /** Arquiva no prontuario a receita que a Memed devolveu. */
