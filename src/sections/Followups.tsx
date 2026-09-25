@@ -24,6 +24,7 @@ import {
 } from '@/lib/followup'
 import { supabase } from '@/lib/supabase'
 import { situacaoDosAcompanhamentos } from '@/lib/repository'
+import { SaudeDosEnvios } from '@/components/SaudeDosEnvios'
 
 const NAVY = '#081b2c'
 const AZUL = '#2f7fc1'
@@ -371,6 +372,9 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
       <div className="space-y-6">
+        {/* Mora aqui, e nao na Visao geral (pedido de 25/09/2026): e nesta tela
+            que a equipe acompanha o que o sistema envia sozinho. */}
+        <SaudeDosEnvios />
         <section className="soft-grid relative overflow-hidden rounded-[28px] bg-[#081b2c] p-5 text-white shadow-[0_18px_42px_rgba(8,27,44,.15)] sm:p-7">
           <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-[#2f7fc1]/20 blur-3xl" />
           <div className="relative grid gap-6 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
