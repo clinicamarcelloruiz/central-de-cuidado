@@ -8,6 +8,8 @@ import {
   ChevronRight,
   BookmarkPlus,
   Bold,
+  CalendarPlus,
+  Undo2,
   Building2,
   CalendarDays,
   Check,
@@ -124,6 +126,26 @@ import type {
 import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
 import { abrirPrescricao, alergiasParaMemed, faltaParaPrescrever, guardarReceita, marcarReceitaExcluida, prepararPrescricao, ultimoCadastro, type LocalDeAtendimento } from '@/lib/memed'
 import { avisoDoQueFoiParaMemed, dadosParaMemed, hojeEmSaoPaulo } from '@/lib/dados-para-memed'
+import {
+  aplicarHeranca,
+  desfazerHeranca,
+  herancaDasAnteriores,
+  ROTULO_DO_CAMPO,
+  type Heranca,
+} from '@/lib/continuidade-da-consulta'
+import {
+  alvoDoRascunho,
+  apagarRascunho,
+  lerRascunho,
+  listarAdendos,
+  salvarRascunho,
+  type Adendo,
+  type Rascunho,
+} from '@/lib/prontuario-extra'
+import { CurvaDeCrescimento } from '@/sections/prontuario/CurvaDeCrescimento'
+import { ExamesDoPaciente } from '@/sections/prontuario/ExamesDoPaciente'
+import { MarcarRetorno } from '@/sections/prontuario/MarcarRetorno'
+import { AdendosDaConsulta } from '@/sections/prontuario/AdendosDaConsulta'
 
 interface PatientRecordProps {
   patient: Patient | null
@@ -615,6 +637,8 @@ async function imprimirProntuario(
    * imprimir nada. O documento e o mesmo nos dois casos.
    */
   imprimirDireto = true,
+  /** Adendos dos atendimentos impressos: saem logo abaixo do atendimento. */
+  adendos: Adendo[] = [],
 ) {
   const campos: [string, keyof Consultation][] = [
     ['Queixa principal', 'queixa'],
@@ -680,12 +704,25 @@ async function imprimirProntuario(
         )
         .join('')
 
+      // O adendo sai colado no atendimento que corrige, com data e autor, e
+      // nunca misturado ao texto original (25/09/2026).
+      const adendosDoAtendimento = adendos
+        .filter((adendo) => adendo.consultationId === consulta.id)
+        .map(
+          (adendo) =>
+            `<div class="bloco"><h3>Adendo · ${dataHoraLocal(adendo.criadoEm)}${
+              adendo.autorNome ? ` · ${escapeHtml(adendo.autorNome)}` : ''
+            }</h3><div class="txt">${escapeHtml(adendo.texto).replace(/\n/g, '<br>')}</div></div>`,
+        )
+        .join('')
+
       return `<section class="consulta">
         <h2>${consultationLabels[consulta.tipo]} · ${fmtBR(consulta.data)}</h2>
         <p class="meta">${[consulta.unidade, medidas, consulta.cid ? `CID ${consulta.cid.toUpperCase()}` : '']
           .filter(Boolean)
           .join('  ·  ')}</p>
         ${blocos}
+        ${adendosDoAtendimento}
       </section>`
     })
     .join('')
@@ -901,6 +938,29 @@ function consultationToDraft(consultation: Consultation): ConsultationDraft {
     retorno: consultation.retorno,
     observacoes: consultation.observacoes,
   }
+}
+
+/**
+ * O formulario com o que veio do rascunho por cima. So entram as chaves que o
+ * formulario conhece, e so texto: rascunho gravado por uma versao antiga da
+ * tela nao pode injetar campo estranho.
+ */
+function camposDoRascunho(conteudo: Record<string, unknown>, modelo: ConsultationDraft): ConsultationDraft {
+  const novo = { ...modelo } as Record<string, unknown>
+  for (const chave of Object.keys(modelo)) {
+    const valor = conteudo[chave]
+    if (typeof valor === 'string') novo[chave] = valor
+  }
+  return novo as unknown as ConsultationDraft
+}
+
+/** "14:32", no fuso da clinica. */
+function horaCurta(iso: string) {
+  return new Intl.DateTimeFormat('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+  }).format(new Date(iso))
 }
 
 /**
@@ -1630,6 +1690,14 @@ function ConsultationCard({
   prescrevendo,
   receitas,
   assinando,
+  clinicId,
+  adendos,
+  erroDosAdendos,
+  onAdendoRegistrado,
+  retornoAberto,
+  onAbrirRetorno,
+  onFecharRetorno,
+  onRetornoMarcado,
 }: {
   consultation: Consultation
   /** Consulta imediatamente anterior, para mostrar o que mudou. */
@@ -1645,6 +1713,17 @@ function ConsultationCard({
   receitas: Receita[]
   /** Id da consulta cuja assinatura esta em andamento, se houver. */
   assinando: string | null
+  clinicId: string | null
+  /** Adendos deste atendimento (so existem depois de assinado). */
+  adendos: Adendo[]
+  /** Por que os adendos nao carregaram, se nao carregaram. */
+  erroDosAdendos: string
+  onAdendoRegistrado: () => void
+  /** O painel de marcar retorno esta aberto neste cartao. */
+  retornoAberto: boolean
+  onAbrirRetorno: (consultation: Consultation) => void
+  onFecharRetorno: () => void
+  onRetornoMarcado: (mensagem: string) => void
 }) {
   // Os campos guardam HTML (negrito, cor). Para a linha de resumo so interessa
   // o texto: sem esta limpeza o cartao exibia a marcacao crua, tipo
@@ -1787,6 +1866,14 @@ function ConsultationCard({
                   <FileText className="h-3.5 w-3.5" /> Ver documento assinado
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => onAbrirRetorno(consultation)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#1f4f78]/20 bg-white px-3 py-2 text-[10px] font-extrabold text-[#1f4f78] transition hover:bg-[#f1f7fd]"
+                title="Procura horário livre perto do prazo de retorno e marca na Agenda"
+              >
+                <CalendarPlus className="h-3.5 w-3.5" /> Marcar retorno
+              </button>
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
@@ -1835,9 +1922,27 @@ function ConsultationCard({
                 <Printer className="h-3.5 w-3.5" />
                 Imprimir esta
               </button>
+              <button
+                type="button"
+                onClick={() => onAbrirRetorno(consultation)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#1f4f78]/20 bg-white px-3 py-2 text-[10px] font-extrabold text-[#1f4f78] transition hover:bg-[#f1f7fd]"
+                title="Procura horário livre perto do prazo de retorno e marca na Agenda"
+              >
+                <CalendarPlus className="h-3.5 w-3.5" /> Marcar retorno
+              </button>
             </div>
           )}
         </div>
+        {retornoAberto && (
+          <MarcarRetorno
+            clinicId={clinicId}
+            patientId={consultation.patientId}
+            unidadeDaConsulta={consultation.unidade}
+            textoDoRetorno={textoSimples(consultation.retorno)}
+            onFechar={onFecharRetorno}
+            onMarcado={onRetornoMarcado}
+          />
+        )}
         {mudancas.length > 0 && (
           <div className="mt-3 rounded-[14px] border border-[#2f7fc1]/30 bg-[#f0f6fd] px-4 py-3">
             <p className="text-[11px] font-extrabold text-[#16456b]">
@@ -1935,6 +2040,21 @@ function ConsultationCard({
           )}
           <Detail label="Retorno" value={consultation.retorno} />
           <Detail label="Observações clínicas" value={consultation.observacoes} />
+          {/* Adendo so em atendimento assinado: antes disso corrige-se o texto. */}
+          {consultation.assinadoEm &&
+            (erroDosAdendos ? (
+              <p className="rounded-xl bg-[#fef6e7] px-3 py-2 text-[11px] font-semibold text-[#93370d]">
+                Adendos indisponíveis agora: {erroDosAdendos}
+              </p>
+            ) : (
+              <AdendosDaConsulta
+                clinicId={clinicId}
+                patientId={consultation.patientId}
+                consultationId={consultation.id}
+                adendos={adendos}
+                onRegistrado={onAdendoRegistrado}
+              />
+            ))}
         </div>
       </AccordionContent>
     </AccordionItem>
@@ -2108,6 +2228,32 @@ export default function PatientRecord({
     { tipo: 'ok' | 'erro' | 'info'; texto: string } | null
   >(null)
   const unidadesDaClinica = useUnidades()
+  // Adendos do paciente inteiro, carregados de uma vez e repartidos por cartao.
+  const [adendos, setAdendos] = useState<Adendo[]>([])
+  const [erroDosAdendos, setErroDosAdendos] = useState('')
+  // O que a coluna da direita mostra no historico (25/09/2026).
+  const [painel, setPainel] = useState<'consultas' | 'crescimento' | 'exames'>('consultas')
+  // Cartao com o painel de marcar retorno aberto, se algum.
+  const [retornoAberto, setRetornoAberto] = useState<string | null>(null)
+
+  async function carregarAdendos(clinica: string, pacienteId: string) {
+    try {
+      setAdendos(await listarAdendos(clinica, pacienteId))
+      setErroDosAdendos('')
+    } catch (causa) {
+      // Sem os adendos, o cartao assinado diz que nao carregaram - e nao
+      // finge que nao ha nenhum.
+      setAdendos([])
+      setErroDosAdendos(causa instanceof Error ? causa.message : 'falha ao carregar')
+    }
+  }
+
+  useEffect(() => {
+    if (!open || !clinicId || !patient) return
+    void carregarAdendos(clinicId, patient.id)
+    // Depende do id, e nao do objeto (ver os efeitos abaixo).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, clinicId, patient?.id])
 
   // Aquece a Memed assim que o prontuário abre.
   //
@@ -2601,6 +2747,23 @@ export default function PatientRecord({
   })()
   const [form, setForm] = useState<ConsultationDraft>(() => emptyConsultation(patient, unidadesDaClinica[0]))
   const [editingConsultationId, setEditingConsultationId] = useState<string | null>(null)
+  // O que veio das consultas anteriores ao abrir o formulario (ver
+  // continuidade-da-consulta.ts), para a tela mostrar e poder desfazer.
+  const [heranca, setHeranca] = useState<Heranca[]>([])
+  // Rascunho guardado de uma sessao anterior, esperando o medico decidir.
+  const [rascunhoPendente, setRascunhoPendente] = useState<Rascunho | null>(null)
+  const [estadoDoRascunho, setEstadoDoRascunho] = useState<{ tipo: 'salvo' | 'erro'; texto: string } | null>(null)
+  // O formulario como abriu: so vale gravar rascunho do que mudou depois disso.
+  const baseDoFormulario = useRef('')
+  // Cada abertura do formulario ganha um numero; resposta atrasada de uma
+  // abertura antiga nao pode mexer na atual.
+  const sessaoDoFormulario = useRef(0)
+  // O ultimo salvamento de rascunho em andamento: salvar a consulta espera
+  // por ele antes de apagar o rascunho, senao ele renasceria logo depois.
+  const rascunhoEmVoo = useRef<Promise<unknown> | null>(null)
+  // Prontuario aberto direto no formulario: a heranca precisa da lista, que
+  // ainda nao chegou. O load aplica quando chegar.
+  const formNovoPendente = useRef(false)
   // Copias sempre atuais do formulario, para o evento da Memed (que guarda a
   // tela do momento em que abriu) ler o que esta na tela AGORA.
   const formRef = useRef(form)
@@ -2630,12 +2793,15 @@ export default function PatientRecord({
     try {
       const result = await listConsultations(patientId)
       if (sequence !== loadSequence.current) return
-      setConsultations(
-        [...result].sort((a, b) => {
-          const byDate = b.data.localeCompare(a.data)
-          return byDate || b.criadoEm.localeCompare(a.criadoEm)
-        }),
-      )
+      const ordenadas = [...result].sort((a, b) => {
+        const byDate = b.data.localeCompare(a.data)
+        return byDate || b.criadoEm.localeCompare(a.criadoEm)
+      })
+      setConsultations(ordenadas)
+      if (formNovoPendente.current) {
+        formNovoPendente.current = false
+        prepararFormulario(emptyConsultation(patient, unidadesDaClinica[0]), null, true, ordenadas, true)
+      }
     } catch (cause) {
       if (sequence !== loadSequence.current) return
       setLoadError(cause instanceof Error ? cause.message : 'Não foi possível carregar o prontuário.')
@@ -2650,6 +2816,12 @@ export default function PatientRecord({
     setForm(emptyConsultation(patient, unidadesDaClinica[0]))
     setEditingConsultationId(null)
     setFormError('')
+    setHeranca([])
+    setRascunhoPendente(null)
+    setEstadoDoRascunho(null)
+    setPainel('consultas')
+    setRetornoAberto(null)
+    formNovoPendente.current = startInConsultationForm
     void load(patient.id)
 
     return () => {
@@ -2663,15 +2835,67 @@ export default function PatientRecord({
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  /**
+   * Abre o formulario: aplica a heranca das consultas anteriores (quando e
+   * atendimento novo ou ainda em branco) e procura rascunho nao salvo.
+   */
+  function prepararFormulario(
+    inicial: ConsultationDraft,
+    consultaId: string | null,
+    podeHerdar: boolean,
+    lista: Consultation[],
+    comRascunho: boolean,
+  ) {
+    const sessao = ++sessaoDoFormulario.current
+    let formulario = inicial
+    let aplicada: Heranca[] = []
+    if (podeHerdar) {
+      const resultado = aplicarHeranca(inicial, herancaDasAnteriores(lista, consultaId, hojeEmSaoPaulo()))
+      formulario = resultado.formulario
+      aplicada = resultado.aplicada
+    }
+    setForm(formulario)
+    setHeranca(aplicada)
+    setRascunhoPendente(null)
+    setEstadoDoRascunho(null)
+    baseDoFormulario.current = JSON.stringify(formulario)
+
+    if (!patient || !comRascunho) return
+    void lerRascunho(patient.id, alvoDoRascunho(consultaId))
+      .then((rascunho) => {
+        if (sessao !== sessaoDoFormulario.current || !rascunho) return
+        // Rascunho igual ao que ja esta na tela nao e decisao a tomar.
+        if (JSON.stringify(camposDoRascunho(rascunho.conteudo, formulario)) === JSON.stringify(formulario)) return
+        setRascunhoPendente(rascunho)
+      })
+      .catch((causa) => {
+        if (sessao !== sessaoDoFormulario.current) return
+        setEstadoDoRascunho({
+          tipo: 'erro',
+          texto: `Rascunho automático indisponível: ${causa instanceof Error ? causa.message : 'falha'}`,
+        })
+      })
+  }
+
   function startNewConsultation() {
-    setForm(emptyConsultation(patient, unidadesDaClinica[0]))
+    prepararFormulario(emptyConsultation(patient, unidadesDaClinica[0]), null, true, consultations, true)
     setEditingConsultationId(null)
     setFormError('')
     setMode('form')
   }
 
   function startEditingConsultation(consultation: Consultation) {
-    setForm(consultationToDraft(consultation))
+    const estado = estadoDaConsulta(consultation)
+    // Heranca so no atendimento ainda em branco (marcado pela Agenda): num
+    // atendimento ja escrito, campo vazio e escolha do medico. Assinado nao tem
+    // rascunho - nao ha o que editar.
+    prepararFormulario(
+      consultationToDraft(consultation),
+      consultation.id,
+      estado === 'agendada' || estado === 'sem-registro',
+      consultations,
+      !consultation.assinadoEm,
+    )
     setEditingConsultationId(consultation.id)
     setFormError('')
     setMode('form')
@@ -2679,10 +2903,67 @@ export default function PatientRecord({
 
   function backToHistory() {
     if (saving) return
+    // O rascunho fica guardado: Cancelar sem querer nao pode custar o texto.
+    // Ele e oferecido de novo na proxima vez que esta consulta abrir.
+    sessaoDoFormulario.current += 1
     setEditingConsultationId(null)
     setFormError('')
+    setHeranca([])
+    setRascunhoPendente(null)
+    setEstadoDoRascunho(null)
     setMode('history')
   }
+
+  function recuperarRascunho() {
+    if (!rascunhoPendente) return
+    setForm((atual) => camposDoRascunho(rascunhoPendente.conteudo, atual))
+    setHeranca([])
+    setRascunhoPendente(null)
+  }
+
+  function descartarRascunho() {
+    if (!patient) return
+    const alvo = alvoDoRascunho(editingConsultationId)
+    setRascunhoPendente(null)
+    void apagarRascunho(patient.id, alvo).catch((causa) => {
+      setEstadoDoRascunho({
+        tipo: 'erro',
+        texto: `Não consegui descartar o rascunho: ${causa instanceof Error ? causa.message : 'falha'}`,
+      })
+    })
+  }
+
+  /**
+   * Rascunho automatico: 2,5 s depois da ultima tecla, grava no banco. So
+   * quando algo mudou desde que o formulario abriu, e nunca enquanto ha um
+   * rascunho antigo esperando decisao - gravar agora apagaria o antigo.
+   */
+  const pacienteDoFormulario = patient?.id ?? null
+  useEffect(() => {
+    if (mode !== 'form' || !pacienteDoFormulario || !clinicId) return
+    if (consultaEmEdicaoAssinada || rascunhoPendente) return
+    if (JSON.stringify(form) === baseDoFormulario.current) return
+    const alvo = alvoDoRascunho(editingConsultationId)
+    const clinica = clinicId
+    const sessao = sessaoDoFormulario.current
+    const temporizador = window.setTimeout(() => {
+      const envio = salvarRascunho(clinica, pacienteDoFormulario, alvo, { ...form })
+      rascunhoEmVoo.current = envio
+      envio
+        .then((hora) => {
+          if (sessao !== sessaoDoFormulario.current) return
+          setEstadoDoRascunho({ tipo: 'salvo', texto: `Rascunho salvo às ${horaCurta(hora)}` })
+        })
+        .catch((causa) => {
+          if (sessao !== sessaoDoFormulario.current) return
+          setEstadoDoRascunho({
+            tipo: 'erro',
+            texto: `Rascunho NÃO salvo: ${causa instanceof Error ? causa.message : 'falha'}. Salve a consulta assim que puder.`,
+          })
+        })
+    }, 2500)
+    return () => window.clearTimeout(temporizador)
+  }, [form, mode, pacienteDoFormulario, clinicId, editingConsultationId, consultaEmEdicaoAssinada, rascunhoPendente])
 
   async function save() {
     if (!patient) return
@@ -2708,8 +2989,19 @@ export default function PatientRecord({
       } else {
         await addConsultation(patient.id, draft)
       }
+      // Consulta salva: o rascunho perdeu a razao de existir. Espera o
+      // salvamento que estiver no ar, senao ele recriaria o rascunho depois.
+      const alvo = alvoDoRascunho(editingConsultationId)
+      sessaoDoFormulario.current += 1
+      await rascunhoEmVoo.current?.catch(() => undefined)
+      void apagarRascunho(patient.id, alvo).catch((causa) => {
+        console.warn('Consulta salva, mas o rascunho ficou para tras', causa)
+      })
       setMode('history')
       setEditingConsultationId(null)
+      setHeranca([])
+      setRascunhoPendente(null)
+      setEstadoDoRascunho(null)
       setForm(emptyConsultation(patient, unidadesDaClinica[0]))
       await load(patient.id)
     } catch (cause) {
@@ -2838,7 +3130,7 @@ export default function PatientRecord({
                         diferenca e a caixa de impressao aparecer ou nao. */}
                     <button
                       type="button"
-                      onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade, false)}
+                      onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade, false, adendos)}
                       className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/10 bg-white px-3.5 py-2.5 text-[11px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c]"
                       title="Abre o prontuário completo em outra aba, sem pedir impressão"
                     >
@@ -2846,7 +3138,7 @@ export default function PatientRecord({
                     </button>
                     <button
                       type="button"
-                      onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade)}
+                      onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade, true, adendos)}
                       className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/10 bg-white px-3.5 py-2.5 text-[11px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c]"
                       title="Abre a versão para impressão ou para salvar em PDF"
                     >
@@ -2947,7 +3239,38 @@ export default function PatientRecord({
                 </aside>
 
                 <div className="min-w-0">
-              {loading ? (
+              {/* Tres vistas do mesmo paciente (25/09/2026). As consultas
+                  continuam sendo a primeira; curva e exames ficam a um clique,
+                  sem sair do prontuario. */}
+              <div className="mb-3 flex gap-1 rounded-2xl border border-[#081b2c]/[0.08] bg-white p-1">
+                {(
+                  [
+                    ['consultas', 'Consultas'],
+                    ['crescimento', 'Crescimento'],
+                    ['exames', 'Exames'],
+                  ] as const
+                ).map(([valor, rotulo]) => (
+                  <button
+                    key={valor}
+                    type="button"
+                    onClick={() => setPainel(valor)}
+                    className={`flex-1 rounded-xl px-3 py-2 text-[11px] font-extrabold transition ${
+                      painel === valor ? 'bg-[#081b2c] text-white' : 'text-slate-500 hover:bg-[#f4f4f1] hover:text-[#081b2c]'
+                    }`}
+                  >
+                    {rotulo}
+                  </button>
+                ))}
+              </div>
+              {painel === 'crescimento' ? (
+                <CurvaDeCrescimento
+                  nascimento={patient.nascimento}
+                  sexo={patient.sexo}
+                  consultas={consultations}
+                />
+              ) : painel === 'exames' ? (
+                <ExamesDoPaciente clinicId={clinicId} patientId={patient.id} />
+              ) : loading ? (
                 <div className="flex min-h-[280px] items-center justify-center text-center">
                   <div>
                     <Loader2 className="mx-auto h-6 w-6 animate-spin text-[#1f4f78]" />
@@ -3077,10 +3400,24 @@ export default function PatientRecord({
                           onAssinar={(item) => void pedirAssinatura(item)}
                           onAbrirAssinado={(item) => void abrirAssinado(item)}
                           onPrescrever={(item) => void prescrever(item)}
-                          onImprimir={(item) => void imprimirProntuario(patient, [item], integridade)}
+                          onImprimir={(item) => void imprimirProntuario(patient, [item], integridade, true, adendos)}
                           prescrevendo={prescrevendo}
                           receitas={receitas.filter((r) => r.consultationId === consultation.id)}
                           assinando={assinando}
+                          clinicId={clinicId}
+                          adendos={adendos.filter((a) => a.consultationId === consultation.id)}
+                          erroDosAdendos={erroDosAdendos}
+                          onAdendoRegistrado={() => {
+                            if (clinicId) void carregarAdendos(clinicId, patient.id)
+                            setAviso({ tipo: 'ok', texto: 'Adendo registrado no prontuário.' })
+                          }}
+                          retornoAberto={retornoAberto === consultation.id}
+                          onAbrirRetorno={(item) => setRetornoAberto(item.id)}
+                          onFecharRetorno={() => setRetornoAberto(null)}
+                          onRetornoMarcado={(mensagem) => {
+                            setRetornoAberto(null)
+                            setAviso({ tipo: 'ok', texto: mensagem })
+                          }}
                         />
                       ))}
                     </Accordion>
@@ -3113,6 +3450,17 @@ export default function PatientRecord({
                     ? 'Atualize o registro clínico e salve as alterações.'
                     : 'Registre a evolução clínica com segurança e clareza.'}
                 </p>
+                {/* Rascunho salvo em cinza discreto; falha em vermelho, porque
+                    o medico precisa saber que o texto so existe na tela. */}
+                {estadoDoRascunho && (
+                  <p
+                    className={`mt-1 text-[10px] font-bold ${
+                      estadoDoRascunho.tipo === 'erro' ? 'text-[#b42318]' : 'text-[#557f75]'
+                    }`}
+                  >
+                    {estadoDoRascunho.texto}
+                  </p>
+                )}
               </div>
               <TamanhoDoTexto
                 escala={escalaDoTexto}
@@ -3142,13 +3490,60 @@ export default function PatientRecord({
                     <p className="font-extrabold">Este atendimento já foi assinado digitalmente.</p>
                     <p className="mt-0.5 font-semibold">
                       O conteúdo não pode mais ser alterado. Para corrigir ou acrescentar algo,
-                      registre um novo atendimento com a data de hoje explicando a correção.
+                      volte ao histórico e use "Adicionar adendo" no cartão deste atendimento.
                     </p>
                   </div>
                 </div>
               )}
               {aviso && <AvisoDoProntuario aviso={aviso} onFechar={() => setAviso(null)} />}
                   {espera && <EsperaDaAssinatura espera={espera} onDesistir={desistirDaAssinatura} />}
+              {rascunhoPendente && (
+                <div className="mb-4 rounded-[14px] border border-[#b54708]/25 bg-[#fffaf2] px-4 py-3">
+                  <p className="text-[12px] font-extrabold text-[#93370d]">
+                    Há um rascunho não salvo desta consulta, de {dataHoraLocal(rascunhoPendente.atualizadoEm)}.
+                  </p>
+                  <p className="mt-0.5 text-[11px] font-semibold text-[#93370d]/80">
+                    Ele foi guardado sozinho enquanto você escrevia. Recuperar coloca o texto dele no formulário.
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={recuperarRascunho}
+                      className="rounded-xl bg-[#93370d] px-3.5 py-2 text-[11px] font-extrabold text-white"
+                    >
+                      Recuperar rascunho
+                    </button>
+                    <button
+                      type="button"
+                      onClick={descartarRascunho}
+                      className="rounded-xl border border-[#081b2c]/10 bg-white px-3.5 py-2 text-[11px] font-bold text-slate-500"
+                    >
+                      Descartar
+                    </button>
+                  </div>
+                </div>
+              )}
+              {heranca.length > 0 && (
+                <div className="mb-4 flex items-start gap-3 rounded-[14px] border border-[#2f7fc1]/25 bg-[#f1f7fd] px-4 py-3">
+                  <div className="flex-1 text-[11px] leading-relaxed text-[#16456b]">
+                    <p className="font-extrabold">Trazido das consultas anteriores. Confira antes de salvar:</p>
+                    <p className="mt-0.5 font-semibold">
+                      {heranca.map((h) => `${ROTULO_DO_CAMPO[h.campo]} (${fmtBR(h.data)})`).join(' · ')}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForm((atual) => desfazerHeranca(atual, heranca))
+                      setHeranca([])
+                    }}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-[#1f4f78]/20 bg-white px-3 py-1.5 text-[10px] font-extrabold text-[#1f4f78]"
+                    title="Apaga o que foi trazido, nos campos que você ainda não mexeu"
+                  >
+                    <Undo2 className="h-3.5 w-3.5" /> Desfazer
+                  </button>
+                </div>
+              )}
               <div className="grid gap-4 sm:grid-cols-2">
                 <SectionTitle>Atendimento</SectionTitle>
                 {/* O recado da recepcao aparece aqui de proposito, e so para

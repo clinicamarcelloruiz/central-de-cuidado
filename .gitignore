@@ -48,3 +48,6 @@ tests/papel.build.mjs
 tests/paginar.build.mjs
 tests/alergias.build.mjs
 tests/dados-para-memed.build.mjs
+tests/continuidade-da-consulta.build.mjs
+tests/retorno.build.mjs
+tests/curvas.build.mjs
