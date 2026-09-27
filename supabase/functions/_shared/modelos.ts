@@ -33,6 +33,20 @@ const MODELOS: Record<string, { corpo: string; rodape?: string; botoes?: string[
   // pessoa digitou na tela - por isso o registro precisa deste modelo aqui:
   // sem ele, a conversa guardaria "modelo enviado" e ninguém saberia o que a
   // família leu, que é justamente o conteúdo que importa.
+  // Aviso unico da mudanca de Santos para a Livance (26/09/2026). Aprovado como
+  // Utilidade so depois de falar da consulta da familia e perder o link do
+  // Instagram - na primeira versao a Meta quis classificar como Marketing.
+  mudanca_santos_livance: {
+    corpo:
+      'Olá, {{1}}. Aqui é do consultório do Dr. Marcello Ruiz.\n\n' +
+      'Sua consulta de {{2}} às {{3}} em Santos será no novo endereço:\n' +
+      '📍 Livance, Av. Anna Costa, 228, 20º e 21º andares, Gonzaga, Santos\n\n' +
+      'Como funciona a chegada:\n' +
+      '1. Faça o check-in em um dos totens digitais, digitando o nome do paciente.\n' +
+      '2. Ainda no totem, faça o pagamento da consulta: Pix, débito ou crédito (à vista).\n' +
+      '3. O Dr. Marcello recebe o aviso e chama vocês na sala de espera assim que terminar a consulta anterior.\n\n' +
+      'Se precisar remarcar, é só responder esta mensagem.',
+  },
   resposta_da_clinica: {
     corpo:
       'Olá, {{1}}. Aqui é o consultório do Dr. Marcello Ruiz.\n\n{{2}}\n\n' +

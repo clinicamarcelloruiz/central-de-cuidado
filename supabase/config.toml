@@ -31,3 +31,8 @@ verify_jwt = false
 [functions.transcrever-audio]
 # Chamada pelo navegador com a sessao do usuario logado. Mantem o JWT.
 verify_jwt = true
+
+[functions.aviso-mudanca-santos]
+# Aviso unico da mudanca de Santos (26/09/2026), chamado a mao pelo editor SQL
+# via pg_net, sem sessao de usuario. Exige x-cron-secret, como o lembrete.
+verify_jwt = false
