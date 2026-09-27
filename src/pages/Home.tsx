@@ -37,6 +37,7 @@ import AccessAdmin from '@/sections/AccessAdmin'
 import logo from '@/assets/logo.webp'
 import gastroWatermark from '@/assets/sidebar-gastro-full.jpg'
 import { useAuth } from '@/auth/AuthProvider'
+import { useDialogos } from '@/components/dialogos-contexto'
 import { parametrosDoEndereco } from '@/lib/endereco'
 
 type Tab = 'dashboard' | 'agenda' | 'followups' | 'conversas' | 'pacientes' | 'config' | 'admin'
@@ -257,6 +258,17 @@ export default function Home() {
     document.title = espera.total > 0 ? `(${espera.total}) ${TITULO_DA_ABA}` : TITULO_DA_ABA
   }, [espera.total])
   const esperaLonga = espera.longa
+
+  // O sino do celular (ver o cabecalho mais abaixo).
+  const [avisosAbertos, setAvisosAbertos] = useState(false)
+  const totalDeAvisos = espera.total + solicitacoes.length + pendentes
+  const { perguntar } = useDialogos()
+  // Pergunta antes: no celular o botao fica ao lado do sino, e um toque
+  // errado derrubava a sessao no meio do atendimento.
+  const sairDoSistema = async () => {
+    const sair = await perguntar({ titulo: 'Sair do sistema?', confirmar: 'Sair', cancelar: 'Continuar' })
+    if (sair) await signOut()
+  }
 
   const meta = PAGE_META[tab]
   // Acessos e Preferencias so para administrador (24/09/2026). Preferencias
@@ -536,22 +548,114 @@ export default function Home() {
         </div>
       </aside>
 
+      {/* Cabecalho do celular.
+          Ate 27/09/2026 o sino so levava para Acompanhamentos - e quem ja
+          estava la tocava e nada acontecia, parecia quebrado. E o numero dele
+          contava so acompanhamento, deixando de fora justamente o que tem
+          pressa: familia esperando resposta e pedido de horario. Agora ele abre
+          a lista do que pede atencao, cada linha levando para a tela certa.
+          O botao de sair nao existia no celular: o do rodape do menu lateral
+          so aparece no computador. */}
       <header className="sticky top-0 z-30 border-b border-white/10 bg-[#081b2c]/95 px-4 py-3 text-white backdrop-blur-xl lg:hidden">
-        <div className="mx-auto flex max-w-2xl items-center justify-between">
+        <div className="relative mx-auto flex max-w-2xl items-center justify-between">
           <img src={logo} alt="Dr. Marcello Ruiz" className="h-8 w-auto max-w-[150px] brightness-0 invert" />
-          <button
-            type="button"
-            onClick={() => setTab('followups')}
-            aria-label={`${pendentes} acompanhamentos pendentes`}
-            className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.07]"
-          >
-            <Bell className="h-[18px] w-[18px] text-white/75" />
-            {pendentes > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#4a94cf] px-1 text-[9px] font-extrabold text-white ring-2 ring-[#081b2c]">
-                {pendentes}
-              </span>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAvisosAbertos((aberto) => !aberto)}
+              aria-expanded={avisosAbertos}
+              aria-label={totalDeAvisos > 0 ? `${totalDeAvisos} ${totalDeAvisos === 1 ? 'item pede' : 'itens pedem'} atenção` : 'Nada pedindo atenção'}
+              className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.07]"
+            >
+              <Bell className="h-[18px] w-[18px] text-white/75" />
+              {totalDeAvisos > 0 && (
+                <span
+                  className={`absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[9px] font-extrabold ring-2 ring-[#081b2c] ${
+                    esperaLonga || solicitacoes.length > 0 ? 'bg-red-500 text-white' : 'bg-[#4a94cf] text-white'
+                  }`}
+                >
+                  {totalDeAvisos}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => void sairDoSistema()}
+              aria-label="Sair do sistema"
+              title="Sair do sistema"
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] text-white/60"
+            >
+              <LogOut className="h-[18px] w-[18px]" />
+            </button>
+          </div>
+
+          {avisosAbertos && (
+            <>
+              {/* Toque fora fecha. */}
+              <button
+                type="button"
+                aria-label="Fechar avisos"
+                onClick={() => setAvisosAbertos(false)}
+                className="fixed inset-0 z-40 cursor-default"
+              />
+              <div className="absolute right-0 top-12 z-50 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-[#081b2c]/10 bg-white text-[#081b2c] shadow-[0_18px_42px_rgba(8,27,44,.25)]">
+                <p className="border-b border-[#081b2c]/[0.07] px-4 py-3 text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#1f4f78]">
+                  Pede atenção
+                </p>
+                {totalDeAvisos === 0 ? (
+                  <p className="px-4 py-5 text-xs text-slate-500">Nada esperando agora. Tudo em dia.</p>
+                ) : (
+                  <ul className="divide-y divide-[#081b2c]/[0.06]">
+                    {[
+                      {
+                        chave: 'conversas' as Tab,
+                        n: espera.total,
+                        titulo: espera.total === 1 ? 'família esperando resposta' : 'famílias esperando resposta',
+                        detalhe: espera.total > 0 ? `A mais antiga: ${espera.ha}` : '',
+                        cor: esperaLonga ? 'bg-red-500' : 'bg-[#e0a33a]',
+                      },
+                      {
+                        chave: 'agenda' as Tab,
+                        n: solicitacoes.length,
+                        titulo: solicitacoes.length === 1 ? 'pedido de horário para confirmar' : 'pedidos de horário para confirmar',
+                        detalhe: 'A vaga fica reservada por 24h',
+                        cor: 'bg-red-500',
+                      },
+                      {
+                        chave: 'followups' as Tab,
+                        n: pendentes,
+                        titulo: pendentes === 1 ? 'acompanhamento para hoje ou atrasado' : 'acompanhamentos para hoje ou atrasados',
+                        detalhe: 'Saem sozinhos às 9h; aqui dá para antecipar',
+                        cor: 'bg-[#4a94cf]',
+                      },
+                    ]
+                      .filter((aviso) => aviso.n > 0)
+                      .map((aviso) => (
+                        <li key={aviso.chave}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAvisosAbertos(false)
+                              setTab(aviso.chave)
+                            }}
+                            className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[#f4f8f7]"
+                          >
+                            <span className={`flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-[11px] font-extrabold text-white ${aviso.cor}`}>
+                              {aviso.n}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-bold">{aviso.titulo}</span>
+                              {aviso.detalhe && <span className="mt-0.5 block text-[10px] text-slate-400">{aviso.detalhe}</span>}
+                            </span>
+                            <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+                          </button>
+                        </li>
+                      ))}
+                  </ul>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </header>
 
