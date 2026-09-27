@@ -1,6 +1,7 @@
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
 import { textoDoModelo } from '../_shared/modelos.ts'
 import { primeiroNomeUtil } from '../_shared/nome.ts'
+import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 
 /**
  * Falar com alguem cuja janela de 24 horas ja fechou.
@@ -123,7 +124,7 @@ Deno.serve(async (req) => {
       return json({ error: 'Configuração do WhatsApp incompleta.', code: 'INCOMPLETE' }, 409)
     }
 
-    const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
+    const token = chaveDoWhatsApp(settings.whatsapp_phone_number_id)
     if (!token) return json({ error: 'Token do WhatsApp não configurado.', code: 'NO_TOKEN' }, 503)
 
     // O nome de quem recebe. Sem cadastro, vale o nome do perfil do WhatsApp; e

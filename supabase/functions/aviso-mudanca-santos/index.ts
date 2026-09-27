@@ -1,6 +1,7 @@
 import { adminClient, corsHeaders, json, toBrazilE164 } from '../_shared/whatsapp.ts'
 import { textoDoModelo } from '../_shared/modelos.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
+import { chaveDoWhatsApp, listaDeTeste } from '../_shared/whatsapp-teste.ts'
 import {
   MODELO_DO_AVISO,
   VIRADA,
@@ -62,8 +63,7 @@ Deno.serve(async (req) => {
   // envio para familias de verdade.
   const simular = pedido?.simular !== false
 
-  const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
-  if (!simular && !token) return json({ error: 'Token do WhatsApp não configurado.' }, 503)
+  if (!simular && !chaveDoWhatsApp(null)) return json({ error: 'Token do WhatsApp não configurado.' }, 503)
 
   try {
     const admin = adminClient()
@@ -79,6 +79,12 @@ Deno.serve(async (req) => {
     const linhas: Linha[] = []
 
     for (const clinica of clinicas ?? []) {
+      // Aviso da mudanca de Santos e da clinica real. A clinica de teste
+      // (27/09/2026) tambem tem unidade "Livance Santos" e, com o numero de
+      // teste ligado, entraria aqui - com um modelo que nem existe na conta de
+      // teste da Meta.
+      if ((await listaDeTeste(admin, clinica.clinic_id)) !== null) continue
+      const token = chaveDoWhatsApp(clinica.whatsapp_phone_number_id)
       const timezone = (clinica.clinics as { timezone?: string } | null)?.timezone || 'America/Sao_Paulo'
       const idioma = clinica.whatsapp_template_language || 'pt_BR'
 

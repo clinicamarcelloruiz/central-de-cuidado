@@ -3,6 +3,7 @@ import { textoDoModelo } from '../_shared/modelos.ts'
 import { cadastrarDaFicha } from '../_shared/cadastro.ts'
 import { janelaDeLembrete } from '../_shared/lembrete.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
+import { chaveDoWhatsApp, foraDaListaDeTeste, listaDeTeste } from '../_shared/whatsapp-teste.ts'
 
 /**
  * Lembrete automatico de consulta.
@@ -67,8 +68,9 @@ Deno.serve(async (req) => {
   if (!expected) return json({ error: 'CRON_SECRET não configurado no servidor.' }, 503)
   if (req.headers.get('x-cron-secret')?.trim() !== expected) return json({ error: 'Não autorizado.' }, 401)
 
-  const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
-  if (!token) return json({ error: 'Token do WhatsApp não configurado.' }, 503)
+  // A chave e por numero desde 27/09/2026 (ver whatsapp-teste.ts). Sem nem a
+  // chave geral, nenhuma clinica envia: responde erro para o painel acusar.
+  if (!chaveDoWhatsApp(null)) return json({ error: 'Token do WhatsApp não configurado.' }, 503)
 
   try {
     const admin = adminClient()
@@ -110,6 +112,8 @@ Deno.serve(async (req) => {
       }
 
       const { inicio, fim } = janelaDeLembrete(new Date(), clinica.reminderDays, clinica.timezone)
+      const token = chaveDoWhatsApp(clinica.phoneNumberId) as string
+      const listaTeste = await listaDeTeste(admin, clinica.clinic_id)
 
       const { data: consultas, error: consultasError } = await admin
         .from('appointments')
@@ -180,6 +184,15 @@ Deno.serve(async (req) => {
         if (!telefone) {
           resumo.pulados += 1
           detalhes.push({ appointmentId: consulta.id, resultado: 'sem telefone' })
+          continue
+        }
+
+        // Clinica de teste: so os celulares cadastrados no numero de teste da
+        // Meta recebem. O resto e paciente ficticio - tentar seria so uma
+        // recusa da Meta por dia em cada um.
+        if (foraDaListaDeTeste(listaTeste, telefone)) {
+          resumo.pulados += 1
+          detalhes.push({ appointmentId: consulta.id, resultado: 'fora da lista de teste' })
           continue
         }
 

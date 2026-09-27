@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
       } else if (result.ok) {
         resumo.pulados += 1
         detalhes.push({ followupId: followup.id, resultado: 'ja enviado' })
-      } else if (result.code === 'CONSENT_MISSING' || result.code === 'OPTED_OUT' || result.code === 'INCOMPLETE') {
+      } else if (result.code === 'CONSENT_MISSING' || result.code === 'OPTED_OUT' || result.code === 'INCOMPLETE' || result.code === 'TEST_LIST') {
         resumo.pulados += 1
         detalhes.push({ followupId: followup.id, resultado: result.code })
       } else {

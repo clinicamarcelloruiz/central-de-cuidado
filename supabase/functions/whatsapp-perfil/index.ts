@@ -1,4 +1,5 @@
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
+import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 
 /**
  * Troca a foto de perfil do WhatsApp Business pela API.
@@ -91,7 +92,7 @@ Deno.serve(async (req) => {
       return json({ error: 'WhatsApp não configurado para esta clínica.' }, 409)
     }
 
-    const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
+    const token = chaveDoWhatsApp(ajustes.whatsapp_phone_number_id)
     const appId = Deno.env.get('META_APP_ID')?.trim()
     if (!token) return json({ error: 'Token do WhatsApp não configurado.' }, 503)
     if (!appId) return json({ error: 'META_APP_ID não configurado.' }, 503)

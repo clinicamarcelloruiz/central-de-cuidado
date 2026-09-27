@@ -1,6 +1,7 @@
 import { adminClient, formatDateBR, toBrazilE164 } from './whatsapp.ts'
 import { textoDoModelo } from './modelos.ts'
 import { variantesDoTelefone } from './telefone-br.ts'
+import { chaveDoWhatsApp, foraDaListaDeTeste, listaDeTeste } from './whatsapp-teste.ts'
 
 /**
  * Envio de um acompanhamento pelo WhatsApp.
@@ -105,6 +106,17 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
   if (patient.whatsapp_opt_out_at) {
     return { ok: false, status: 409, error: 'Este contato pediu para não receber mensagens.', code: 'OPTED_OUT' }
   }
+  // Clinica de teste (27/09/2026): fora dos celulares cadastrados no numero de
+  // teste da Meta, nao tenta. Volta como TEST_LIST, que o disparo conta como
+  // "pulado" e nao como falha.
+  if (foraDaListaDeTeste(await listaDeTeste(admin, followup.clinic_id), patient.phone)) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'Clínica em modo teste: este telefone não está na lista de teste do WhatsApp.',
+      code: 'TEST_LIST',
+    }
+  }
   if (!patient.whatsapp_opt_in_at) {
     if (options.requireExistingConsent) {
       return { ok: false, status: 409, error: 'Paciente ainda sem consentimento registrado.', code: 'CONSENT_MISSING' }
@@ -168,7 +180,7 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
     }
   }
 
-  const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
+  const token = chaveDoWhatsApp(settings.whatsapp_phone_number_id)
   if (!token) {
     return { ok: false, status: 503, error: 'Token do WhatsApp ainda não foi configurado no servidor.', code: 'NO_TOKEN' }
   }

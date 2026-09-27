@@ -30,6 +30,18 @@ export type DadosDaSaude = {
   acompanhamentos_falhos_7d?: number
   mensagens_falhas_24h?: number
   ultima_recebida?: string | null
+  // 27/09/2026: clinica sem numero nao tem envio automatico; clinica em modo
+  // teste so envia para os celulares da lista (ver whatsapp-teste.ts).
+  whatsapp_conectado?: boolean
+  modo_teste?: boolean
+  telefones_teste?: number
+}
+
+export type Avaliacao = {
+  problemas: Problema[]
+  resumo: string
+  /** 'desligado' = clinica sem WhatsApp: cartao cinza, sem cobrar atraso. */
+  situacao: 'normal' | 'desligado'
 }
 
 export type Problema = { nivel: 'erro' | 'aviso'; texto: string }
@@ -55,8 +67,23 @@ function plural(n: number, um: string, varios: string) {
   return `${n} ${n === 1 ? um : varios}`
 }
 
-export function avaliarSaude(dados: DadosDaSaude, agora: Date = new Date()): { problemas: Problema[]; resumo: string } {
+export function avaliarSaude(dados: DadosDaSaude, agora: Date = new Date()): Avaliacao {
+  // Sem numero conectado nao ha robo enviando nada para esta clinica. Ate
+  // 27/09/2026 o cartao contava as consultas de amanha como "lembrete
+  // atrasado" e ficava vermelho na clinica de teste - alarme falso ensina a
+  // ignorar o alarme verdadeiro.
+  if (dados.whatsapp_conectado === false) {
+    return { problemas: [], resumo: 'WhatsApp não conectado nesta clínica', situacao: 'desligado' }
+  }
+
   const problemas: Problema[] = []
+
+  if (dados.modo_teste && (dados.telefones_teste ?? 0) === 0) {
+    problemas.push({
+      nivel: 'aviso',
+      texto: 'Modo teste sem nenhum celular cadastrado: nenhum envio automático vai sair até a lista ser preenchida.',
+    })
+  }
 
   if (dados.robos_erro) problemas.push({ nivel: 'aviso', texto: `Não consegui ler os robôs agendados (${dados.robos_erro}).` })
   for (const robo of dados.robos ?? []) {
@@ -126,6 +153,7 @@ export function avaliarSaude(dados: DadosDaSaude, agora: Date = new Date()): { p
 
   const resumo =
     `${plural(dados.lembretes_enviados_24h ?? 0, 'lembrete enviado', 'lembretes enviados')} nas últimas 24h · ` +
-    `${plural(dados.acompanhamentos_enviados_7d ?? 0, 'acompanhamento', 'acompanhamentos')} em 7 dias`
-  return { problemas, resumo }
+    `${plural(dados.acompanhamentos_enviados_7d ?? 0, 'acompanhamento', 'acompanhamentos')} em 7 dias` +
+    (dados.modo_teste ? ` · modo teste (${plural(dados.telefones_teste ?? 0, 'celular', 'celulares')})` : '')
+  return { problemas, resumo, situacao: 'normal' }
 }

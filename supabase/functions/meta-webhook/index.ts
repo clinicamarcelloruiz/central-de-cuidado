@@ -5,6 +5,7 @@ import { montarConteudo } from '../_shared/conteudo.ts'
 import { RegistroDeEventos } from '../_shared/eventos-do-webhook.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
 import { textoDaLocalizacao, textoDosContatos } from '../_shared/mensagem-recebida.ts'
+import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 import {
   avisoDaResposta,
   respostaAoAcompanhamento,
@@ -112,8 +113,9 @@ async function guardarAnexo(
   clinicId: string,
   messageId: string,
   midia: Midia,
+  phoneNumberId: string,
 ): Promise<{ path: string; mime: string } | null> {
-  const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
+  const token = chaveDoWhatsApp(phoneNumberId)
   if (!token || !midia.id) return null
   const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
 
@@ -583,7 +585,7 @@ Deno.serve(async (req) => {
           // poucos minutos, e se a gravacao demorasse ela ja teria expirado.
           const midia = midiaDaMensagem(message)
           const anexo = midia && externalId
-            ? await guardarAnexo(admin, clinicId, externalId, midia)
+            ? await guardarAnexo(admin, clinicId, externalId, midia, phoneNumberId)
             : null
 
           const { error: messageError } = await admin.from('whatsapp_messages').insert({
@@ -625,7 +627,7 @@ Deno.serve(async (req) => {
             appointmentId: string | null = null,
             toques?: { botoes?: Toque[]; lista?: { rotulo: string; linhas: Toque[] } },
           ) {
-            const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
+            const token = chaveDoWhatsApp(phoneNumberId)
             if (!token || !texto.trim()) return false
             const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
             const enviadoEm = new Date().toISOString()

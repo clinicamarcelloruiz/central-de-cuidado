@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Activity, AlertTriangle, CheckCircle2, ChevronDown, Loader2 } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, ChevronDown, Loader2, PlugZap } from 'lucide-react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { getCurrentMembership } from '@/lib/repository'
-import { avaliarSaude, type DadosDaSaude, type Problema } from '@/lib/saude-dos-envios'
+import { avaliarSaude, type Avaliacao, type DadosDaSaude } from '@/lib/saude-dos-envios'
 
 /**
  * Cartao "os envios automaticos estao saindo?" (25/09/2026).
@@ -16,7 +16,7 @@ import { avaliarSaude, type DadosDaSaude, type Problema } from '@/lib/saude-dos-
 const db = supabase as unknown as SupabaseClient
 
 export function SaudeDosEnvios() {
-  const [estado, setEstado] = useState<{ problemas: Problema[]; resumo: string } | null>(null)
+  const [estado, setEstado] = useState<Avaliacao | null>(null)
   const [erro, setErro] = useState('')
   const [aberto, setAberto] = useState(false)
 
@@ -56,6 +56,16 @@ export function SaudeDosEnvios() {
     return (
       <div className="flex items-center gap-2 px-1 text-[11px] font-semibold text-slate-400">
         <Loader2 className="h-3.5 w-3.5 animate-spin" /> Conferindo os envios automáticos...
+      </div>
+    )
+  }
+
+  if (estado.situacao === 'desligado') {
+    return (
+      <div className="flex items-center gap-2 rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-[12px] font-extrabold text-slate-500">
+        <PlugZap className="h-4 w-4 shrink-0" />
+        {estado.resumo}
+        <span className="font-semibold opacity-80">· envios automáticos desligados</span>
       </div>
     )
   }

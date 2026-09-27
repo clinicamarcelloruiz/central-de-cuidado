@@ -2,6 +2,7 @@ import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.
 import { iniciarQuestionario, mostrarMenu } from '../_shared/atendimento.ts'
 import { montarConteudo } from '../_shared/conteudo.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
+import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 
 /**
  * Resposta livre da equipe para um paciente, a partir da tela de Conversas.
@@ -270,7 +271,7 @@ Deno.serve(async (req) => {
       return json({ error: 'Configuração do WhatsApp incompleta.', code: 'INCOMPLETE' }, 409)
     }
 
-    const token = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
+    const token = chaveDoWhatsApp(settings.whatsapp_phone_number_id)
     if (!token) return json({ error: 'Token do WhatsApp não configurado.', code: 'NO_TOKEN' }, 503)
 
     const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
