@@ -13,7 +13,19 @@ import logoCentral from '@/assets/logo-central-de-cuidado.webp'
  * Os dois arquivos sao desenhados em uma cor so: o menu pinta de branco
  * (brightness-0 invert), entao qualquer cor vira silhueta branca.
  */
-export type Marca = { src: string; nome: string; mostraEtiquetaDoProduto: boolean }
+export type Marca = {
+  src: string
+  nome: string
+  mostraEtiquetaDoProduto: boolean
+  /** Titulo da aba do navegador. */
+  titulo: string
+  /**
+   * Nome no rodape do menu, ao lado do botao de sair. Nulo = nome de quem
+   * entrou. Ate 27/09/2026 era "Dr. Marcello Ruiz" fixo, e aparecia assim na
+   * conta de teste mostrada a outros medicos.
+   */
+  nomeNoRodape: string | null
+}
 
 const DR_MARCELLO: Marca = {
   src: logoDrMarcello,
@@ -21,9 +33,17 @@ const DR_MARCELLO: Marca = {
   // A etiqueta "Central de cuidado" embaixo do logo diz de que sistema se
   // trata. Com o logo do produto, ela so repetiria o nome.
   mostraEtiquetaDoProduto: true,
+  titulo: 'Central de Cuidado | Dr. Marcello Ruiz',
+  nomeNoRodape: 'Dr. Marcello Ruiz',
 }
 
-const CENTRAL: Marca = { src: logoCentral, nome: 'Central de Cuidado', mostraEtiquetaDoProduto: false }
+const CENTRAL: Marca = {
+  src: logoCentral,
+  nome: 'Central de Cuidado',
+  mostraEtiquetaDoProduto: false,
+  titulo: 'Central de Cuidado',
+  nomeNoRodape: null,
+}
 
 const CLINICAS_COM_MARCA_PROPRIA: Record<string, Marca> = {
   '1ffde840-a905-4300-b4fd-51571fcefdc0': DR_MARCELLO, // Clinica Dr. Marcelo

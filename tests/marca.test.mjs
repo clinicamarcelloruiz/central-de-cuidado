@@ -19,6 +19,9 @@ confere('clinica de teste mostra Central de Cuidado', marcaDaClinica(TESTE).nome
 confere('clinica nova entra com a marca do produto', marcaDaClinica('00000000-0000-0000-0000-000000000000').nome === 'Central de Cuidado')
 confere('logo do produto nao repete a etiqueta', marcaDaClinica(TESTE).mostraEtiquetaDoProduto === false)
 confere('logo do Dr. Marcello mantem a etiqueta', marcaDaClinica(REAL).mostraEtiquetaDoProduto === true)
+confere('conta de teste nao leva o nome do Dr. Marcello no rodape', marcaDaClinica(TESTE).nomeNoRodape === null)
+confere('conta de teste nao leva o nome do Dr. Marcello na aba', !/Marcello/.test(marcaDaClinica(TESTE).titulo))
+confere('clinica real mantem rodape e aba', marcaDaClinica(REAL).nomeNoRodape === 'Dr. Marcello Ruiz' && /Marcello/.test(marcaDaClinica(REAL).titulo))
 // Sem window/localStorage (como no node): o login e a impressao ficam no logo de sempre.
 confere('sem clinica conhecida, login e impressao ficam no logo de sempre', marcaSemClinicaConhecida(null).nome === 'Dr. Marcello Ruiz')
 confere('impressao da clinica de teste sai com Central de Cuidado', marcaSemClinicaConhecida(TESTE).nome === 'Central de Cuidado')

@@ -130,8 +130,6 @@ function preferenciaDeTopo(): boolean | null {
   return null
 }
 
-/** Titulo original da aba, do index.html. */
-const TITULO_DA_ABA = 'Central de Cuidado | Dr. Marcello Ruiz'
 
 /** Meia hora: a partir disso a espera deixa de ser "chegou agora". */
 const ESPERA_LONGA_MS = 30 * 60 * 1000
@@ -200,6 +198,9 @@ export default function Home() {
   // vista neste navegador para o menu nao piscar a cada recarga.
   const [clinicaId, setClinicaId] = useState<string | null>(ultimaClinicaVista)
   const marca = clinicaId ? marcaDaClinica(clinicaId) : null
+  const nomeNoRodape =
+    marca?.nomeNoRodape ??
+    (String((user?.user_metadata as { full_name?: unknown } | undefined)?.full_name ?? '').trim() || 'Equipe clínica')
   // Conversas esperando alguem da equipe (22/09/2026). Ver o bloco do
   // contador, mais abaixo, para o porque.
   const [espera, setEspera] = useState<EsperaDaEquipe & { longa: boolean; ha: string }>({
@@ -260,9 +261,12 @@ export default function Home() {
    * outra aba do navegador ve que tem gente esperando. E o mesmo recurso que o
    * WhatsApp Web usa, e por isso a recepcao ja sabe ler.
    */
+  // O titulo base vem da marca da clinica (lib/marca.ts): a conta de teste
+  // nao leva o nome do Dr. Marcello na aba.
+  const tituloDaAba = marca?.titulo ?? 'Central de Cuidado'
   useEffect(() => {
-    document.title = espera.total > 0 ? `(${espera.total}) ${TITULO_DA_ABA}` : TITULO_DA_ABA
-  }, [espera.total])
+    document.title = espera.total > 0 ? `(${espera.total}) ${tituloDaAba}` : tituloDaAba
+  }, [espera.total, tituloDaAba])
   const esperaLonga = espera.longa
 
   // O sino do celular (ver o cabecalho mais abaixo).
@@ -544,7 +548,7 @@ export default function Home() {
               <CircleUserRound className="h-5 w-5 text-white/60" />
             </span>
             <div className="min-w-0">
-              <p className="truncate text-xs font-bold text-white/90">Dr. Marcello Ruiz</p>
+              <p className="truncate text-xs font-bold text-white/90">{nomeNoRodape}</p>
               <p className="mt-0.5 truncate text-[10px] text-white/40">{user?.email ?? 'Equipe clínica'}</p>
             </div>
             <button
