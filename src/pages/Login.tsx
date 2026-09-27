@@ -12,13 +12,16 @@ import {
   UserRoundPlus,
 } from 'lucide-react'
 import { useAuth } from '@/auth/AuthProvider'
-import logo from '@/assets/logo.webp'
+import { marcaSemClinicaConhecida } from '@/lib/marca'
 import gastroWatermark from '@/assets/sidebar-gastro-full.jpg'
 
 const inputClass =
   'w-full rounded-2xl border border-[#081b2c]/10 bg-[#fafaf8] py-3.5 pl-11 pr-4 text-sm font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#2f7fc1] focus:bg-white focus:ring-4 focus:ring-[#2f7fc1]/10 disabled:cursor-not-allowed disabled:opacity-60'
 
 export default function Login() {
+  // Antes do login nao se sabe a clinica: vale a ultima vista neste navegador
+  // (ver lib/marca.ts). A clinica de teste mostra a marca do produto.
+  const marca = marcaSemClinicaConhecida()
   const { signIn, requestAccess, sendPasswordReset, authError, configurationError, clearAuthError } = useAuth()
   const [mode, setMode] = useState<'login' | 'request' | 'reset'>('login')
   const [resetSent, setResetSent] = useState(false)
@@ -118,8 +121,8 @@ export default function Login() {
 
           <div className="relative">
             <img
-              src={logo}
-              alt="Dr. Marcello Ruiz"
+              src={marca.src}
+              alt={marca.nome}
               className="h-14 w-auto max-w-[220px] brightness-0 invert"
             />
             <div className="mt-6 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.24em] text-white/45">
@@ -164,8 +167,8 @@ export default function Login() {
             <div className="mb-8 flex justify-center lg:hidden">
               <div className="rounded-[22px] bg-[#081b2c] px-6 py-4 shadow-[0_18px_40px_rgba(8,27,44,.18)]">
                 <img
-                  src={logo}
-                  alt="Dr. Marcello Ruiz"
+                  src={marca.src}
+                  alt={marca.nome}
                   className="h-10 w-auto max-w-[180px] brightness-0 invert"
                 />
               </div>

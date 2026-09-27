@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { ArrowRight, Eye, EyeOff, KeyRound } from 'lucide-react'
 import { useAuth } from '@/auth/AuthProvider'
-import logo from '@/assets/logo.webp'
+import { marcaSemClinicaConhecida } from '@/lib/marca'
 
 const inputClass =
   'w-full rounded-2xl border border-[#081b2c]/10 bg-[#fafaf8] py-3.5 pl-11 pr-12 text-sm font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#2f7fc1] focus:bg-white focus:ring-4 focus:ring-[#2f7fc1]/10 disabled:cursor-not-allowed disabled:opacity-60'
@@ -14,6 +14,9 @@ const inputClass =
  * opcao na tela so confundiria.
  */
 export default function NovaSenha() {
+  // Antes do login nao se sabe a clinica: vale a ultima vista neste navegador
+  // (ver lib/marca.ts). A clinica de teste mostra a marca do produto.
+  const marca = marcaSemClinicaConhecida()
   const { updatePassword, authError, signOut } = useAuth()
   const [senha, setSenha] = useState('')
   const [confirmacao, setConfirmacao] = useState('')
@@ -39,7 +42,7 @@ export default function NovaSenha() {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-[#f7f5f1] px-4 text-[#081b2c]">
       <div className="w-full max-w-md rounded-[28px] bg-white p-8 shadow-[0_24px_60px_rgba(8,27,44,.08)]">
-        <img src={logo} alt="Dr. Marcello Ruiz" className="h-10 w-auto" />
+        <img src={marca.src} alt={marca.nome} className="h-10 w-auto" />
         <div className="mt-6 flex items-center gap-3">
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#eaf3fd] text-[#1f4f78]">
             <KeyRound className="h-5 w-5" />

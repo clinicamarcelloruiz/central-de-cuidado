@@ -58,7 +58,7 @@ import { fmtBR, idade, todayISO } from '@/lib/followup'
 import { acrescentarReceitas, dataDaReceita } from '@/lib/receita-no-texto'
 // O build inlina a imagem como data: URL, e e isso que faz o logo aparecer na
 // janela de impressao (about:blank, sem acesso a arquivos do site).
-import logoDaClinica from '@/assets/logo.webp'
+import { marcaSemClinicaConhecida } from '@/lib/marca'
 import {
   categoriaDaReceita,
   ORDEM_DAS_CATEGORIAS,
@@ -639,7 +639,10 @@ async function imprimirProntuario(
   imprimirDireto = true,
   /** Adendos dos atendimentos impressos: saem logo abaixo do atendimento. */
   adendos: Adendo[] = [],
+  /** Clinica do prontuario, para o logo do cabecalho (ver lib/marca.ts). */
+  clinicId: string | null = null,
 ) {
+  const marcaImpressa = marcaSemClinicaConhecida(clinicId)
   const campos: [string, keyof Consultation][] = [
     ['Queixa principal', 'queixa'],
     ['História / evolução', 'historiaEvolucao'],
@@ -845,7 +848,7 @@ async function imprimirProntuario(
       @page { margin: 16mm; }
     </style></head><body>
     <header>
-      <img src="${logoDaClinica}" alt="Dr. Marcello Ruiz, gastroenterologista pediátrico">
+      <img src="${marcaImpressa.src}" alt="${marcaImpressa.nome}">
       <div class="doc">
         <p class="t">Prontuário clínico</p>
         <p class="s">Documento sigiloso</p>
@@ -3130,7 +3133,7 @@ export default function PatientRecord({
                         diferenca e a caixa de impressao aparecer ou nao. */}
                     <button
                       type="button"
-                      onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade, false, adendos)}
+                      onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade, false, adendos, clinicId)}
                       className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/10 bg-white px-3.5 py-2.5 text-[11px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c]"
                       title="Abre o prontuário completo em outra aba, sem pedir impressão"
                     >
@@ -3138,7 +3141,7 @@ export default function PatientRecord({
                     </button>
                     <button
                       type="button"
-                      onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade, true, adendos)}
+                      onClick={() => void imprimirProntuario(patient, consultasFiltradas, integridade, true, adendos, clinicId)}
                       className="flex items-center justify-center gap-2 rounded-[14px] border border-[#081b2c]/10 bg-white px-3.5 py-2.5 text-[11px] font-extrabold text-slate-600 transition hover:border-[#081b2c]/25 hover:text-[#081b2c]"
                       title="Abre a versão para impressão ou para salvar em PDF"
                     >
@@ -3400,7 +3403,7 @@ export default function PatientRecord({
                           onAssinar={(item) => void pedirAssinatura(item)}
                           onAbrirAssinado={(item) => void abrirAssinado(item)}
                           onPrescrever={(item) => void prescrever(item)}
-                          onImprimir={(item) => void imprimirProntuario(patient, [item], integridade, true, adendos)}
+                          onImprimir={(item) => void imprimirProntuario(patient, [item], integridade, true, adendos, clinicId)}
                           prescrevendo={prescrevendo}
                           receitas={receitas.filter((r) => r.consultationId === consultation.id)}
                           assinando={assinando}

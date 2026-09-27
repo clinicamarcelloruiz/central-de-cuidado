@@ -34,7 +34,7 @@ import { prepararPrescricao } from '@/lib/memed'
 import Agenda from '@/sections/Agenda'
 import Settings from '@/sections/Settings'
 import AccessAdmin from '@/sections/AccessAdmin'
-import logo from '@/assets/logo.webp'
+import { lembrarClinica, marcaDaClinica, ultimaClinicaVista } from '@/lib/marca'
 import gastroWatermark from '@/assets/sidebar-gastro-full.jpg'
 import { useAuth } from '@/auth/AuthProvider'
 import { useDialogos } from '@/components/dialogos-contexto'
@@ -196,6 +196,10 @@ export default function Home() {
   >(null)
   const pendentes = dueCount(db.patients)
   const [solicitacoes, setSolicitacoes] = useState<PendingRequest[]>([])
+  // Clinica atual, para o logo do menu (ver lib/marca.ts). Comeca pela ultima
+  // vista neste navegador para o menu nao piscar a cada recarga.
+  const [clinicaId, setClinicaId] = useState<string | null>(ultimaClinicaVista)
+  const marca = clinicaId ? marcaDaClinica(clinicaId) : null
   // Conversas esperando alguem da equipe (22/09/2026). Ver o bloco do
   // contador, mais abaixo, para o porque.
   const [espera, setEspera] = useState<EsperaDaEquipe & { longa: boolean; ha: string }>({
@@ -212,6 +216,8 @@ export default function Home() {
     try {
       const membership = await getCurrentMembership()
       if (!membership) return
+      setClinicaId(membership.clinicId)
+      lembrarClinica(membership.clinicId)
       // Junto das solicitacoes, e no mesmo relogio de 60s: um aviso a mais
       // nao justifica outra rodada de consultas.
       // "Ha quanto tempo" e calculado aqui, na chegada do dado, e nao durante
@@ -426,11 +432,17 @@ export default function Home() {
         <div className="absolute -right-24 top-24 h-64 w-64 rounded-full bg-[#2f7fc1]/10 blur-3xl" />
         <div className="relative flex h-full flex-col">
           <div className="px-7 pb-7 pt-8 [@media(max-height:820px)]:pb-4 [@media(max-height:820px)]:pt-5">
-            <img src={logo} alt="Dr. Marcello Ruiz" className="h-12 w-auto max-w-[190px] brightness-0 invert [@media(max-height:820px)]:h-9" />
-            <div className="mt-5 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-white/45 [@media(max-height:820px)]:mt-3">
-              <HeartHandshake className="h-3.5 w-3.5 text-[#6aa8d9]" />
-              Central de cuidado
-            </div>
+            {marca ? (
+              <img src={marca.src} alt={marca.nome} className="h-12 w-auto max-w-[190px] brightness-0 invert [@media(max-height:820px)]:h-9" />
+            ) : (
+              <div className="h-12 [@media(max-height:820px)]:h-9" aria-hidden="true" />
+            )}
+            {marca?.mostraEtiquetaDoProduto && (
+              <div className="mt-5 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-white/45 [@media(max-height:820px)]:mt-3">
+                <HeartHandshake className="h-3.5 w-3.5 text-[#6aa8d9]" />
+                Central de cuidado
+              </div>
+            )}
             {/* Versao publicada, logo abaixo do nome: e o que responde, sem
                 adivinhacao, se a tela aberta ja e a de depois da ultima
                 publicacao. Ficava no rodape, mas em tela menor o rodape nao
@@ -558,7 +570,11 @@ export default function Home() {
           so aparece no computador. */}
       <header className="sticky top-0 z-30 border-b border-white/10 bg-[#081b2c]/95 px-4 py-3 text-white backdrop-blur-xl lg:hidden">
         <div className="relative mx-auto flex max-w-2xl items-center justify-between">
-          <img src={logo} alt="Dr. Marcello Ruiz" className="h-8 w-auto max-w-[150px] brightness-0 invert" />
+          {marca ? (
+            <img src={marca.src} alt={marca.nome} className="h-8 w-auto max-w-[150px] brightness-0 invert" />
+          ) : (
+            <div className="h-8" aria-hidden="true" />
+          )}
           <div className="flex items-center gap-2">
             <button
               type="button"
