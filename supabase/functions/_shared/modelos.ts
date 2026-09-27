@@ -47,6 +47,23 @@ const MODELOS: Record<string, { corpo: string; rodape?: string; botoes?: string[
       '3. O Dr. Marcello recebe o aviso e chama vocês na sala de espera assim que terminar a consulta anterior.\n\n' +
       'Se precisar remarcar, é só responder esta mensagem.',
   },
+  // Modelos da clinica de teste (27/09/2026): os mesmos tres de cima que
+  // citavam o Dr. Marcello, com o nome do Consultorio Central de Cuidado. Vivem
+  // so na conta de teste da Meta; a clinica de teste aponta para eles em
+  // clinic_settings.
+  demo_acompanhamento: {
+    corpo:
+      'Olá, {{1}}. O Consultório Central de Cuidado está entrando em contato para acompanhar ' +
+      'sua consulta realizada em {{2}}. Como você está? Responda esta mensagem caso ' +
+      'precise falar com nossa equipe.',
+    rodape: 'Para não receber novos acompanhamentos, responda SAIR.',
+    botoes: ['Estou bem', 'Preciso de ajuda', 'Não quero receber'],
+  },
+  demo_resposta_da_clinica: {
+    corpo:
+      'Olá, {{1}}. Aqui é o Consultório Central de Cuidado.\n\n{{2}}\n\n' +
+      'Se precisar, é só responder por aqui.',
+  },
   resposta_da_clinica: {
     corpo:
       'Olá, {{1}}. Aqui é o consultório do Dr. Marcello Ruiz.\n\n{{2}}\n\n' +

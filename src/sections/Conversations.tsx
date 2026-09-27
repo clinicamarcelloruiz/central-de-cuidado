@@ -27,6 +27,7 @@ import { supabase } from '@/lib/supabase'
 import { criarNota, listarNotas, type NotaDaConversa } from '@/lib/notas-da-conversa'
 import { linhaDoTempo } from '@/lib/linha-do-tempo'
 import { VisualizadorDeArquivo, type ArquivoAberto } from '@/components/VisualizadorDeArquivo'
+import { marcaSemClinicaConhecida } from '@/lib/marca'
 import {
   getAutoReply,
   getCurrentMembership,
@@ -2241,7 +2242,7 @@ export default function Conversations({
                         onChange={(evento) => setResposta(evento.target.value)}
                         rows={3}
                         maxLength={700}
-                        placeholder="Escreva a resposta. Ela chega precedida de 'Olá, [nome]. Aqui é o consultório do Dr. Marcello Ruiz.'"
+                        placeholder={`Escreva a resposta. Ela chega precedida de 'Olá, [nome]. Aqui é ${marcaSemClinicaConhecida(clinicId).consultorioNaResposta}.'`}
                         className="mt-3 w-full resize-y rounded-xl border border-[#2f7fc1]/25 bg-white px-3 py-2.5 text-[11px] font-semibold leading-relaxed text-[#081b2c] outline-none transition placeholder:font-medium placeholder:text-slate-300 focus:border-[#2f7fc1] focus:ring-4 focus:ring-[#2f7fc1]/10"
                       />
                       <p className="mt-1 text-[9px] font-bold text-[#16456b]/60">

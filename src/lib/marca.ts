@@ -25,6 +25,13 @@ export type Marca = {
    * conta de teste mostrada a outros medicos.
    */
   nomeNoRodape: string | null
+  /**
+   * Como o consultorio se apresenta nos modelos da Meta, para as previas da
+   * tela baterem com o que a familia recebe. Cada clinica tem os modelos
+   * dela; os da clinica de teste nao citam o Dr. Marcello (27/09/2026).
+   */
+  quemEntraEmContato: string
+  consultorioNaResposta: string
 }
 
 const DR_MARCELLO: Marca = {
@@ -35,6 +42,8 @@ const DR_MARCELLO: Marca = {
   mostraEtiquetaDoProduto: true,
   titulo: 'Central de Cuidado | Dr. Marcello Ruiz',
   nomeNoRodape: 'Dr. Marcello Ruiz',
+  quemEntraEmContato: 'A Clínica Dr. Marcello Ruiz',
+  consultorioNaResposta: 'o consultório do Dr. Marcello Ruiz',
 }
 
 const CENTRAL: Marca = {
@@ -43,6 +52,8 @@ const CENTRAL: Marca = {
   mostraEtiquetaDoProduto: false,
   titulo: 'Central de Cuidado',
   nomeNoRodape: null,
+  quemEntraEmContato: 'O Consultório Central de Cuidado',
+  consultorioNaResposta: 'o Consultório Central de Cuidado',
 }
 
 const CLINICAS_COM_MARCA_PROPRIA: Record<string, Marca> = {

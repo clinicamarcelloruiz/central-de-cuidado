@@ -59,3 +59,4 @@ tests/saude-dos-envios.build.mjs
 tests/bloqueio-de-dia.build.mjs
 tests/whatsapp-teste.build.mjs
 tests/marca.build.mjs
+tests/quem-atende.build.mjs

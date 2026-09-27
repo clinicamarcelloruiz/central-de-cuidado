@@ -26,6 +26,7 @@ import {
 import DadosDaClinica from '@/sections/DadosDaClinica'
 import RespostasProntas from '@/sections/RespostasProntas'
 import InformacoesDoWhatsApp from '@/sections/InformacoesDoWhatsApp'
+import { marcaSemClinicaConhecida } from '@/lib/marca'
 
 interface Props {
   db: Db
@@ -200,7 +201,7 @@ export default function Settings({ db, importDb, clearAll }: Props) {
           <div className="rounded-[22px] border border-[#081b2c]/[0.07] bg-[#efeae2] p-4 sm:p-5">
             <div className="max-w-md rounded-[14px] rounded-tl-none bg-white p-3.5 text-xs leading-relaxed text-[#203546] shadow-sm">
               <p>
-                Olá, <strong>[nome do paciente]</strong>. A Clínica Dr. Marcello Ruiz está entrando
+                Olá, <strong>[nome do paciente]</strong>. {marcaSemClinicaConhecida(clinicId).quemEntraEmContato} está entrando
                 em contato para acompanhar sua consulta realizada em <strong>[data da consulta]</strong>.
                 Como você está? Responda esta mensagem caso precise falar com nossa equipe.
               </p>

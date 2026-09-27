@@ -22,6 +22,7 @@ import { avisoDeHorario } from './expediente.ts'
 import { dataDeNascimentoIso } from './datas.ts'
 import type { adminClient } from './whatsapp.ts'
 import { cadastrarDaFicha, type ConsultaParaCadastro } from './cadastro.ts'
+import { quemAtende } from './quem-atende.ts'
 import {
   acharResposta,
   assuntoClinico,
@@ -941,7 +942,7 @@ async function naoEntendi(
   registrar('nao_entendi')
   if (assuntoClinico(texto)) {
     return (
-      'Sobre sintomas, remédios e o que fazer, quem responde é o Dr. Marcello ou alguém ' +
+      `Sobre sintomas, remédios e o que fazer, quem responde é ${quemAtende(clinicId).o} ou alguém ` +
       'da equipe - por aqui eu não posso orientar. Digite *9* para falar com a equipe.\n\n' +
       pergunta
     )
@@ -2243,7 +2244,7 @@ async function tentarFichaPendente(
   return {
     resposta:
       `📋 O cadastro da sua consulta de *${quando}* ficou pela metade. ` +
-      'São poucas perguntas, e ajudam o Dr. Marcello a já ter os dados na hora.\n\n' +
+      `São poucas perguntas, e ajudam ${quemAtende(clinicId).o} a já ter os dados na hora.\n\n` +
       'Quer completar agora?',
     botoes: [
       { id: 'FICHA', titulo: 'Completar cadastro' },
@@ -2545,6 +2546,7 @@ async function perguntarExigencia(
  */
 async function registrarPedido(
   admin: Admin,
+  clinicId: string,
   conversationId: string,
   pedido: PedidoDeDocumento,
   exigencia: string,
@@ -2571,7 +2573,7 @@ async function registrarPedido(
       // nunca existiu. Prometer o envio seria mandar essa pessoa esperar um
       // documento que nao ha; prometer a resposta e verdade nos dois casos, e
       // no caso comum - o que motivou tudo isto - a resposta E o documento.
-      '\n\nO Dr. Marcello vai revisar e responder por aqui, em até *1 dia útil*.\n\n' +
+      `\n\n${quemAtende(clinicId).O} vai revisar e responder por aqui, em até *1 dia útil*.\n\n` +
       VOLTA,
     atencao: 'documento',
   }
@@ -2726,7 +2728,7 @@ export async function tratarConversa(opcoes: {
     unico && opcoes.textos.saudacaoConhecida.trim()
       ? opcoes.textos.saudacaoConhecida.replace(/\{nome\}/g, primeiroNome)
       : opcoes.textos.saudacao
-  ).trim() || 'Olá! 👋 Aqui é o consultório do Dr. Marcello Ruiz, Gastroenterologista Pediátrico.'
+  ).trim() || quemAtende(clinicId).saudacaoPadrao
 
   /** Quem vai no prontuario da consulta: o escolhido, ou o unico que existe. */
   const pacienteDaConsulta =
@@ -3012,7 +3014,7 @@ export async function tratarConversa(opcoes: {
         admin,
         conversationId,
         saudacao,
-        'Sobre sintomas, remédios e o que fazer, quem responde é o Dr. Marcello ou alguém da equipe - ' +
+        `Sobre sintomas, remédios e o que fazer, quem responde é ${quemAtende(clinicId).o} ou alguém da equipe - ` +
           'por aqui eu não posso orientar. Digite *3* para falar com a equipe, ou escolha:',
       )
     }
@@ -3051,7 +3053,7 @@ export async function tratarConversa(opcoes: {
       return {
         resposta:
           'Aqui não dá para voltar uma pergunta - mas o que já foi respondido está guardado, ' +
-          'e o Dr. Marcello confere tudo na consulta.\n\n' +
+          `e ${quemAtende(clinicId).o} confere tudo na consulta.\n\n` +
           perguntaAtual.texto,
       }
     }
@@ -3066,7 +3068,7 @@ export async function tratarConversa(opcoes: {
         })
         return {
           resposta:
-            'Esse dado o Dr. Marcello precisa ter no cadastro. Pode responder aqui, ' +
+            `Esse dado ${quemAtende(clinicId).o} precisa ter no cadastro. Pode responder aqui, ` +
             'mesmo que não seja exato?\n\n' +
             perguntaAtual.texto,
         }
@@ -3084,7 +3086,7 @@ export async function tratarConversa(opcoes: {
         return restantes.length
           ? await perguntarDados(
               admin, conversationId, consulta, restantes,
-              'Tudo bem, deixamos esse campo em branco: o Dr. Marcello completa na consulta.',
+              `Tudo bem, deixamos esse campo em branco: ${quemAtende(clinicId).o} completa na consulta.`,
               manual,
             )
           : await terminarDados(admin, conversationId, clinicId, consulta, manual)
@@ -3188,7 +3190,7 @@ export async function tratarConversa(opcoes: {
         admin,
         conversationId,
         saudacao,
-        'Sobre sintomas, remédios e o que fazer, quem responde é o Dr. Marcello ou alguém da equipe - ' +
+        `Sobre sintomas, remédios e o que fazer, quem responde é ${quemAtende(clinicId).o} ou alguém da equipe - ` +
           'por aqui eu não posso orientar. Digite *3* para falar com a equipe, ou escolha:',
       )
     }
@@ -3279,7 +3281,7 @@ export async function tratarConversa(opcoes: {
     })
     return {
       resposta:
-        '✅ Registrado. Vou passar para o Dr. Marcello.\n\n' +
+        `✅ Registrado. Vou passar para ${quemAtende(clinicId).o}.\n\n` +
         'O documento corrigido é enviado ao paciente, não por este canal.\n\n' +
         avisoDeHorario(),
       atencao: 'farmacia',
@@ -3459,6 +3461,7 @@ export async function tratarConversa(opcoes: {
     const exigencia = nada ? '' : resposta
     return await registrarPedido(
       admin,
+      clinicId,
       conversationId,
       pedido,
       exigencia || (opcoes.anexo ? 'enviou foto do documento' : ''),
