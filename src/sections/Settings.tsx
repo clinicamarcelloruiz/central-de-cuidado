@@ -167,7 +167,7 @@ export default function Settings({ db, importDb, clearAll }: Props) {
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_350px]">
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_350px]">
       <div className="space-y-5">
       <DadosDaClinica />
       <InformacoesDoWhatsApp />

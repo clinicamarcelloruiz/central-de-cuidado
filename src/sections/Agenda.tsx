@@ -1446,7 +1446,7 @@ export default function Agenda({
               ))}
             </div>
           ) : (
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               {/* Horarios de atendimento */}
               <div className="surface-card rounded-[20px] p-4">
                 <p className="flex items-center gap-1.5 text-xs font-extrabold text-[#081b2c]">

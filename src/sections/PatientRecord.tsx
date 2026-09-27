@@ -3197,7 +3197,7 @@ export default function PatientRecord({
                   esquerda enquanto o medico percorre as consultas a direita.
                   Antes era preciso rolar ate o topo para conferir convenio,
                   idade ou responsavel no meio de uma leitura. */}
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,270px)_minmax(0,1fr)] lg:items-start">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,270px)_minmax(0,1fr)] lg:items-start">
                 <aside className="surface-card rounded-[20px] p-4 lg:sticky lg:top-0">
                   <p className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-[#1f4f78]">
                     Dados do paciente

@@ -369,8 +369,13 @@ export default function Followups({ patients, setFollowup, onAbrirConversa }: Pr
     )
   }
 
+  // grid-cols-1 no celular, e nao so "grid": sem coluna declarada o grid cria
+  // uma coluna do tamanho do conteudo, e a dica truncada de "Enviados,
+  // aguardando" (texto de uma linha so) esticava a coluna para 450px numa tela
+  // de 397. Os cartoes vazavam pela direita (26/09/2026). A mesma troca foi
+  // feita nos outros grids de pagina.
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
       <div className="space-y-6">
         {/* Mora aqui, e nao na Visao geral (pedido de 25/09/2026): e nesta tela
             que a equipe acompanha o que o sistema envia sozinho. */}

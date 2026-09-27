@@ -449,7 +449,7 @@ export default function Dashboard({
         </Panel>
       ) : (
         <>
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
             <Panel title="Perfil dos pacientes" subtitle="Distribuição por sexo informado" icon={UsersRound}>
               <Donut female={female} male={male} other={other} />
             </Panel>
@@ -491,7 +491,7 @@ export default function Dashboard({
             subtitle="Para decidir horário, unidade e alcance da divulgação"
             icon={MapPinned}
           >
-            <div className="grid gap-7 lg:grid-cols-3 lg:divide-x lg:divide-[#081b2c]/[0.07]">
+            <div className="grid grid-cols-1 gap-7 lg:grid-cols-3 lg:divide-x lg:divide-[#081b2c]/[0.07]">
               {/* "do paciente" no rotulo de proposito: sem isso, cidade e
                   bairro se confundem com o endereco da unidade. */}
               <Ranking title="Cidade do paciente" items={cities} color={SAGE} maiusculo />
@@ -509,7 +509,7 @@ export default function Dashboard({
           </Panel>
 
           <Panel title="Leitura da base clínica" subtitle="Principais recortes para apoiar decisões da rotina" icon={Stethoscope}>
-            <div className="grid gap-7 lg:grid-cols-2 lg:divide-x lg:divide-[#081b2c]/[0.07]">
+            <div className="grid grid-cols-1 gap-7 lg:grid-cols-2 lg:divide-x lg:divide-[#081b2c]/[0.07]">
               <Ranking title="CID-10 mais frequentes" items={cids} color={AZUL} maiusculo />
               <div className="lg:pl-7">
                 {/* Maiúsculo como o CID: o convênio é digitado à mão em cada
