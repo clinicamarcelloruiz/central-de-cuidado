@@ -47,7 +47,13 @@ export async function entregar(admin: Admin, linhas: Linha[], carga: unknown, ch
     linhas.map(async (linha) => {
       const r = await enviarPush(linha, carga, chaves)
       if (r.ok) {
-        await admin.from('push_inscricoes').update({ ultimo_envio_em: new Date().toISOString(), ultimo_erro: null }).eq('id', linha.id)
+        const { error } = await admin
+          .from('push_inscricoes')
+          .update({ ultimo_envio_em: new Date().toISOString(), ultimo_erro: null })
+          .eq('id', linha.id)
+        // O aviso saiu; so o registro falhou. Grita para a tela nao mentir
+        // "nunca enviou" sem motivo.
+        if (error) console.warn('Notificacao enviada, mas nao consegui registrar o envio', error)
       } else if (r.status === 404 || r.status === 410) {
         // O aparelho desinstalou, limpou os dados ou revogou a permissao. A
         // linha nao serve mais; guardar so faria cada aviso falhar de novo.
@@ -69,6 +75,14 @@ export async function entregar(admin: Admin, linhas: Linha[], carga: unknown, ch
   }
 }
 
+async function marcarErro(admin: Admin, linhas: Linha[], texto: string) {
+  const { error } = await admin
+    .from('push_inscricoes')
+    .update({ ultimo_erro: texto.slice(0, 300) })
+    .in('id', linhas.map((l) => l.id))
+  if (error) console.warn('Notificacao no celular: nem o erro consegui gravar', error)
+}
+
 /** Avisa todos os aparelhos inscritos da clinica. Nunca lanca. */
 export async function avisarEquipe(admin: Admin, clinicId: string, aviso: Aviso): Promise<void> {
   try {
@@ -84,14 +98,32 @@ export async function avisarEquipe(admin: Admin, clinicId: string, aviso: Aviso)
 
     // So quem ainda e da equipe. Quem saiu da clinica pode ter deixado o
     // celular inscrito, e a mensagem da familia nao e mais da conta dela.
-    const { data: membros } = await admin
+    //
+    // Se essa leitura falhar, NAO manda para ninguem (melhor nao avisar do
+    // que mostrar a mensagem de uma familia no celular de quem saiu), mas
+    // grita: log e ultimo_erro em cada aparelho, que a tela de Preferencias
+    // mostra em vermelho. Em 28/09/2026 o service role nao podia ler
+    // clinic_memberships, o erro era ignorado, a lista saia vazia e nenhum
+    // aviso saiu durante a manha inteira - sem rastro nenhum.
+    const { data: membros, error: erroDosMembros } = await admin
       .from('clinic_memberships')
       .select('user_id')
       .eq('clinic_id', clinicId)
       .eq('status', 'active')
+    if (erroDosMembros) {
+      console.warn('Notificacao no celular: nao consegui ler a equipe da clinica', erroDosMembros)
+      await marcarErro(admin, inscricoes as Linha[], `Servidor sem acesso à equipe da clínica: ${erroDosMembros.message}`)
+      return
+    }
     const ativos = new Set((membros ?? []).map((m: { user_id: string }) => m.user_id))
     const linhas = (inscricoes as Linha[]).filter((l) => ativos.has(l.user_id))
-    if (!linhas.length) return
+    if (!linhas.length) {
+      console.warn('Notificacao no celular: aparelhos inscritos, mas de ninguem ativo na equipe', {
+        clinicId,
+        inscricoes: inscricoes.length,
+      })
+      return
+    }
 
     const chaves = await chavesDaClinica(admin)
     const r = await entregar(admin, linhas, aviso, chaves)

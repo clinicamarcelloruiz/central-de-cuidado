@@ -36,6 +36,12 @@ const MODELOS: Record<string, { corpo: string; rodape?: string; botoes?: string[
   // Aviso unico da mudanca de Santos para a Livance (26/09/2026). Aprovado como
   // Utilidade so depois de falar da consulta da familia e perder o link do
   // Instagram - na primeira versao a Meta quis classificar como Marketing.
+  //
+  // DESATUALIZADO desde 28/09/2026 e NAO ENVIADO: o Dr. Marcello avisou que na
+  // Livance e so o 20o andar e que o pagamento e pelo link que a Livance manda
+  // ao agendar, nao no totem. O texto aprovado na Meta ainda diz "20o e 21o
+  // andares" e "pagamento no totem". Precisa de modelo novo aprovado antes de
+  // disparar; quando sair, este texto troca junto (e o nome, se mudar).
   mudanca_santos_livance: {
     corpo:
       'Olá, {{1}}. Aqui é do consultório do Dr. Marcello Ruiz.\n\n' +

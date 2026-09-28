@@ -15,6 +15,12 @@ const MODELOS = {
   // Aviso unico da mudanca de Santos para a Livance (26/09/2026). Aprovado como
   // Utilidade so depois de falar da consulta da familia e perder o link do
   // Instagram - na primeira versao a Meta quis classificar como Marketing.
+  //
+  // DESATUALIZADO desde 28/09/2026 e NAO ENVIADO: o Dr. Marcello avisou que na
+  // Livance e so o 20o andar e que o pagamento e pelo link que a Livance manda
+  // ao agendar, nao no totem. O texto aprovado na Meta ainda diz "20o e 21o
+  // andares" e "pagamento no totem". Precisa de modelo novo aprovado antes de
+  // disparar; quando sair, este texto troca junto (e o nome, se mudar).
   mudanca_santos_livance: {
     corpo: "Ol\xE1, {{1}}. Aqui \xE9 do consult\xF3rio do Dr. Marcello Ruiz.\n\nSua consulta de {{2}} \xE0s {{3}} em Santos ser\xE1 no novo endere\xE7o:\n\u{1F4CD} Livance, Av. Anna Costa, 228, 20\xBA e 21\xBA andares, Gonzaga, Santos\n\nComo funciona a chegada:\n1. Fa\xE7a o check-in em um dos totens digitais, digitando o nome do paciente.\n2. Ainda no totem, fa\xE7a o pagamento da consulta: Pix, d\xE9bito ou cr\xE9dito (\xE0 vista).\n3. O Dr. Marcello recebe o aviso e chama voc\xEAs na sala de espera assim que terminar a consulta anterior.\n\nSe precisar remarcar, \xE9 s\xF3 responder esta mensagem."
   },
