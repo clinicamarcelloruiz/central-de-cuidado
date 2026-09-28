@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   AlertTriangle,
   ArrowDown,
@@ -2395,7 +2396,12 @@ export default function Conversations({
           </div>
         </div>
       )}
-      {modoWhatsApp && selected && (
+      {/* Portal no body, como o VisualizadorDeArquivo: a tela de Respostas
+          fica dentro do .animate-enter, e o transform da animacao vira o
+          "chao" de todo position:fixed la dentro. Sem o portal, a tela cheia
+          nascia do tamanho da secao, com a pagina travada por baixo - foi o
+          "entra bugado e fica travado" de 27/09/2026. */}
+      {modoWhatsApp && selected && createPortal(
         <div className="fixed inset-0 z-[60] flex flex-col bg-[#efeae2] lg:hidden" role="dialog" aria-label={`Conversa com ${selected.patientName}`}>
           {/* Barra de cima: voltar, foto, nome e acoes - a do WhatsApp. */}
           <div
@@ -2674,7 +2680,8 @@ export default function Conversations({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       <VisualizadorDeArquivo arquivo={arquivoAberto} onFechar={fecharArquivo} />
     </div>

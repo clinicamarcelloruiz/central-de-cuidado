@@ -203,20 +203,20 @@ export default function Home() {
   // no celular sumiam o "Todas as conversas" e o nome de quem fala. Medido, e
   // nao chutado, porque o sino abre um painel e a barra muda de altura; no
   // computador ele some (lg:hidden) e a medida vira 0 sozinha.
-  const topoDoCelular = useRef<HTMLElement>(null)
-  useEffect(() => {
-    const alvo = topoDoCelular.current
+  // Callback ref, e nao useRef + useEffect([]): na primeira montagem o Home
+  // ainda mostra "carregando" e o cabecalho nao existe - o efeito rodava uma
+  // vez, nao achava nada e nunca mais media. Assim mede quando ele nasce.
+  const observadorDoTopo = useRef<ResizeObserver | null>(null)
+  const topoDoCelular = useCallback((alvo: HTMLElement | null) => {
+    observadorDoTopo.current?.disconnect()
+    observadorDoTopo.current = null
     if (!alvo) return
     const publicar = () =>
       document.documentElement.style.setProperty('--altura-topo-celular', `${alvo.offsetHeight}px`)
     publicar()
     const observador = new ResizeObserver(publicar)
     observador.observe(alvo)
-    window.addEventListener('resize', publicar)
-    return () => {
-      observador.disconnect()
-      window.removeEventListener('resize', publicar)
-    }
+    observadorDoTopo.current = observador
   }, [])
   const nomeNoRodape =
     marca?.nomeNoRodape ??
