@@ -38,7 +38,9 @@ import { lembrarClinica, marcaDaClinica, ultimaClinicaVista } from '@/lib/marca'
 import gastroWatermark from '@/assets/sidebar-gastro-full.jpg'
 import { useAuth } from '@/auth/AuthProvider'
 import { useDialogos } from '@/components/dialogos-contexto'
-import { parametrosDoEndereco } from '@/lib/endereco'
+import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco'
+import { registrarServiceWorker } from '@/lib/notificacoes'
+import ConviteParaAvisos from '@/components/ConviteParaAvisos'
 
 type Tab = 'dashboard' | 'agenda' | 'followups' | 'conversas' | 'pacientes' | 'config' | 'admin'
 type Icon = ComponentType<{ className?: string; strokeWidth?: number }>
@@ -174,10 +176,33 @@ export default function Home() {
    */
   const [tab, setTab] = useState<Tab>(() => {
     const endereco = parametrosDoEndereco()
+    if (endereco.get('conversa')) return 'conversas'
     return endereco.get('state') || endereco.get('paciente') ? 'pacientes' : 'followups'
   })
   // Paciente cuja conversa deve abrir ao entrar em Respostas pelo atalho.
   const [conversaFoco, setConversaFoco] = useState<string | null>(null)
+  /**
+   * Conversa pedida pelo toque na notificacao do celular (28/09/2026). Vem
+   * pelo endereco (?conversa=, app fechado) ou por mensagem do service worker
+   * (app ja aberto). O `vez` faz o mesmo aviso tocado duas vezes abrir de novo.
+   */
+  const [conversaDoAviso, setConversaDoAviso] = useState<{ id: string; vez: number } | null>(() => {
+    const id = parametrosDoEndereco().get('conversa')
+    return id ? { id, vez: Date.now() } : null
+  })
+  useEffect(() => {
+    if (parametrosDoEndereco().get('conversa')) apagarParametrosDoEndereco(['conversa'])
+    void registrarServiceWorker()
+    if (!('serviceWorker' in navigator)) return
+    const aoReceber = (evento: MessageEvent) => {
+      const dados = evento.data as { tipo?: string; conversa?: string } | null
+      if (dados?.tipo !== 'abrir-conversa') return
+      setTab('conversas')
+      if (dados.conversa) setConversaDoAviso({ id: dados.conversa, vez: Date.now() })
+    }
+    navigator.serviceWorker.addEventListener('message', aoReceber)
+    return () => navigator.serviceWorker.removeEventListener('message', aoReceber)
+  }, [])
   const [newPatientSignal, setNewPatientSignal] = useState(0)
   const [preCadastro, setPreCadastro] = useState<
     {
@@ -774,6 +799,7 @@ export default function Home() {
             {tab === 'conversas' && (
               <Conversations
                 focoPatientId={conversaFoco}
+                focoConversa={conversaDoAviso}
                 onCadastrarContato={cadastrarContato}
                 compacto={topoRecolhido}
                 onAlternarCompacto={tela.computador ? alternarTopo : undefined}
@@ -809,6 +835,8 @@ export default function Home() {
           </div>
         </div>
       </main>
+
+      <ConviteParaAvisos clinicId={clinicaId} />
 
       <nav
         className="fixed inset-x-3 bottom-3 z-40 flex rounded-[22px] border border-[#081b2c]/10 bg-white/95 px-1.5 py-1.5 shadow-[0_18px_55px_rgba(8,27,44,.2)] backdrop-blur-xl lg:hidden"

@@ -36,3 +36,8 @@ verify_jwt = true
 # Aviso unico da mudanca de Santos (26/09/2026), chamado a mao pelo editor SQL
 # via pg_net, sem sessao de usuario. Exige x-cron-secret, como o lembrete.
 verify_jwt = false
+
+[functions.notificar-equipe]
+# Chamada pelo navegador com a sessao do usuario logado (chave publica e botao
+# de teste das notificacoes no celular). Mantem o JWT.
+verify_jwt = true

@@ -463,11 +463,14 @@ function horaLocal(iso: string) {
 
 export default function Conversations({
   focoPatientId,
+  focoConversa,
   onCadastrarContato,
   compacto = false,
   onAlternarCompacto,
 }: {
   focoPatientId?: string | null
+  /** Conversa tocada na notificacao do celular. */
+  focoConversa?: { id: string; vez: number } | null
   /** Abre a tela de pacientes com nome e telefone do contato ja preenchidos. */
   onCadastrarContato?: (dados: PreCadastro) => void
   /**
@@ -794,6 +797,21 @@ export default function Conversations({
     // openConversation e estavel o bastante para este uso pontual
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focoPatientId, conversations])
+
+  /**
+   * Toque na notificacao do celular: abre a conversa pelo id. Cada toque
+   * (vez) abre uma so vez - sem isso a lista, ao se atualizar em tempo real,
+   * puxaria a pessoa de volta para esta conversa a cada mensagem nova.
+   */
+  const avisoAtendido = useRef(0)
+  useEffect(() => {
+    if (!focoConversa || focoConversa.vez === avisoAtendido.current || conversations.length === 0) return
+    const alvo = conversations.find((item) => item.id === focoConversa.id)
+    if (!alvo) return
+    avisoAtendido.current = focoConversa.vez
+    if (alvo.id !== selectedId) void openConversation(alvo)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focoConversa, conversations])
 
   /**
    * Tempo real: a tela se atualiza sozinha quando um paciente responde, sem

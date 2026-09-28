@@ -6,6 +6,12 @@ import { RegistroDeEventos } from '../_shared/eventos-do-webhook.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
 import { textoDaLocalizacao, textoDosContatos } from '../_shared/mensagem-recebida.ts'
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
+import { montarAviso } from '../_shared/aviso-da-equipe.ts'
+import { avisarEquipe } from '../_shared/push-da-equipe.ts'
+
+// O runtime das Edge Functions deixa terminar trabalho depois da resposta.
+// Fora dele (teste local) cai no await comum.
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined
 import {
   avisoDaResposta,
   respostaAoAcompanhamento,
@@ -835,6 +841,46 @@ Deno.serve(async (req) => {
               }
             } catch (erro) {
               console.warn('Nao consegui registrar os eventos do robo', erro)
+            }
+
+            /**
+             * Notificacao no celular da equipe (28/09/2026). Ver
+             * _shared/aviso-da-equipe.ts para quando avisa.
+             *
+             * O motivo final espelha o que as linhas de cima gravaram: o do
+             * resultado; se o robo respondeu sem pedir gente, a bandeira que
+             * ja estava (ela so sobe); se calou, a mesma regra do silencio.
+             *
+             * Por ultimo e fora do caminho: a resposta a familia ja saiu, e o
+             * envio roda depois de o webhook responder a Meta. Falha aqui vira
+             * aviso no log e ultimo_erro no aparelho, nunca mensagem perdida.
+             */
+            try {
+              const motivoAgora = resultado
+                ? resultado.atencao ??
+                  (resultado.concluida
+                    ? null
+                    : conversaAnterior?.needs_attention
+                      ? String(conversaAnterior.attention_reason ?? '') || null
+                      : null)
+                : String(conversaAnterior?.attention_reason ?? '') || 'atendente'
+              const aviso = montarAviso({
+                conversationId: conversation.id,
+                atencaoAntes: Boolean(conversaAnterior?.needs_attention),
+                motivoAntes: (conversaAnterior?.attention_reason as string | null) ?? null,
+                motivoAgora,
+                texto: body,
+                pacientes,
+                nomeDoPerfil: nomeDoPerfil || String(conversaAnterior?.profile_name ?? ''),
+                telefone: waId,
+              })
+              if (aviso) {
+                const envio = avisarEquipe(admin, clinicId, aviso)
+                if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(envio)
+                else await envio
+              }
+            } catch (erro) {
+              console.warn('Notificacao no celular: nao consegui montar o aviso', erro)
             }
           }
 

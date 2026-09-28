@@ -26,6 +26,7 @@ import {
 import DadosDaClinica from '@/sections/DadosDaClinica'
 import RespostasProntas from '@/sections/RespostasProntas'
 import InformacoesDoWhatsApp from '@/sections/InformacoesDoWhatsApp'
+import NotificacoesNoCelular from '@/sections/NotificacoesNoCelular'
 import { marcaSemClinicaConhecida } from '@/lib/marca'
 
 interface Props {
@@ -170,6 +171,8 @@ export default function Settings({ db, importDb, clearAll }: Props) {
   return (
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_350px]">
       <div className="space-y-5">
+      {/* Primeiro da tela: no celular e o que a pessoa veio fazer aqui. */}
+      <NotificacoesNoCelular clinicId={clinicId} />
       <DadosDaClinica />
       <InformacoesDoWhatsApp />
       <RespostasProntas />
