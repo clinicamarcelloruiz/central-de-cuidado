@@ -22,6 +22,7 @@ import {
   ClipboardList,
   List as ListIcon,
   Lock,
+  MoreVertical,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { criarNota, listarNotas, type NotaDaConversa } from '@/lib/notas-da-conversa'
@@ -426,6 +427,38 @@ function formatWhen(value: string | null) {
 }
 
 export type PreCadastro = { nome: string; telefone: string }
+
+
+/* Ajudantes do visual WhatsApp (27/09/2026). */
+function iniciais(nome: string) {
+  const partes = nome.trim().split(/\s+/).filter(Boolean)
+  const letras = (partes[0]?.[0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')
+  return letras.toUpperCase() || '?'
+}
+const CORES_DE_AVATAR = ['#128c7e', '#2f7fc1', '#8e5cc4', '#d9764f', '#3b9c5a', '#c2527c', '#5b6b7a']
+function corDoAvatar(nome: string) {
+  let soma = 0
+  for (const letra of nome) soma = (soma * 31 + letra.charCodeAt(0)) >>> 0
+  return CORES_DE_AVATAR[soma % CORES_DE_AVATAR.length]
+}
+function diaLocal(iso: string) {
+  return new Date(iso).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+}
+function rotuloDoDia(iso: string) {
+  const dia = diaLocal(iso)
+  const hoje = new Date()
+  const ontem = new Date(hoje.getTime() - 86_400_000)
+  if (dia === diaLocal(hoje.toISOString())) return 'Hoje'
+  if (dia === diaLocal(ontem.toISOString())) return 'Ontem'
+  return dia
+}
+function horaLocal(iso: string) {
+  return new Date(iso).toLocaleTimeString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 export default function Conversations({
   focoPatientId,
@@ -1138,6 +1171,71 @@ export default function Conversations({
     }
   }, [clinicId, selected?.patientId])
 
+
+  /**
+   * Visual "igual ao WhatsApp" no celular (27/09/2026).
+   *
+   * Pedido da equipe: no celular, quem responde familia o dia inteiro vive no
+   * WhatsApp, e a conversa aqui tinha outra cara - botoes, blocos, resumo em
+   * cima. Este modo abre a conversa em tela cheia, com a barra de cima, o papel
+   * de parede, os baloes e a barra de digitar do app. O visual padrao continua
+   * sendo o padrao; a escolha fica guardada neste aparelho.
+   *
+   * Tudo o que a equipe faz aqui passa pelas MESMAS funcoes do visual padrao
+   * (enviarResposta, responderPorModelo, reabrirConversa...). So muda a casca:
+   * uma regra nova de envio nao pode existir num visual e faltar no outro.
+   */
+  const [visualWhatsApp, setVisualWhatsApp] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('central.conversa-visual') === 'whatsapp'
+    } catch {
+      return false
+    }
+  })
+  const trocarVisual = (whatsapp: boolean) => {
+    setVisualWhatsApp(whatsapp)
+    setMenuWhats(false)
+    try {
+      window.localStorage.setItem('central.conversa-visual', whatsapp ? 'whatsapp' : 'padrao')
+    } catch {
+      // sem armazenamento: vale ate recarregar a pagina
+    }
+  }
+  const [telaDeCelular, setTelaDeCelular] = useState(() => window.matchMedia('(max-width: 1023px)').matches)
+  useEffect(() => {
+    const consulta = window.matchMedia('(max-width: 1023px)')
+    const mudar = () => setTelaDeCelular(consulta.matches)
+    consulta.addEventListener('change', mudar)
+    return () => consulta.removeEventListener('change', mudar)
+  }, [])
+  const [menuWhats, setMenuWhats] = useState(false)
+  const rolagemWhats = useRef<HTMLDivElement>(null)
+  const modoWhatsApp = visualWhatsApp && telaDeCelular && selected !== null
+
+  // Tela cheia de verdade: a pagina de tras nao rola junto com a conversa.
+  useEffect(() => {
+    if (!modoWhatsApp) return
+    const antes = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = antes
+    }
+  }, [modoWhatsApp])
+
+  // Depois de enviar, o campo volta a ter uma linha so.
+  useEffect(() => {
+    if (resposta) return
+    const campo = document.getElementById('resposta-whatsapp')
+    if (campo) campo.style.height = ''
+  }, [resposta])
+
+  // Abre no fim, como o WhatsApp, e desce quando chega mensagem nova.
+  useEffect(() => {
+    if (!modoWhatsApp) return
+    const caixa = rolagemWhats.current
+    if (caixa) caixa.scrollTop = caixa.scrollHeight
+  }, [modoWhatsApp, selectedId, messages.length, notas.length])
+
   if (loading) {
     return (
       <div className="surface-card rounded-[22px] p-8 text-center text-xs font-semibold text-slate-500">
@@ -1767,7 +1865,7 @@ export default function Conversations({
               as partes internas, onde nao atrapalha o sticky. */}
           <div
             ref={painel}
-            className={`surface-card rolagem-fina min-h-[320px] min-w-0 rounded-[22px] lg:h-full lg:overflow-y-auto ${
+            className={`surface-card rolagem-fina min-h-[320px] min-w-0 scroll-mt-[var(--altura-topo-celular,0px)] rounded-[22px] lg:h-full lg:overflow-y-auto ${
               selected ? '' : 'hidden lg:block'
             }`}
           >
@@ -1785,18 +1883,32 @@ export default function Conversations({
                     ate a borda do cartao, para nada aparecer por tras. */}
                 <div
                   ref={cabecalho}
-                  className="sticky top-0 z-20 rounded-t-[22px] bg-white/95 px-4 pt-4 backdrop-blur"
+                  // top: no celular gruda logo abaixo da barra do app (ver
+                  // --altura-topo-celular no Home); antes ficava por tras dela e
+                  // o "Todas as conversas" sumia ao rolar (27/09/2026).
+                  className="sticky top-[var(--altura-topo-celular,0px)] z-20 rounded-t-[22px] bg-white/95 px-4 pt-4 backdrop-blur lg:top-0"
                 >
                 {/* Só no celular: no computador a lista está do lado, e um
                     botão de voltar ali seria um passo inventado. */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(null)}
-                  className="mb-3 inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 px-3 py-2 text-[10px] font-extrabold text-slate-500 transition hover:text-[#1f4f78] lg:hidden"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Todas as conversas
-                </button>
+                <div className="mb-3 flex items-center justify-between gap-2 lg:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(null)}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 px-3 py-2 text-[10px] font-extrabold text-slate-500 transition hover:text-[#1f4f78]"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    Todas as conversas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => trocarVisual(true)}
+                    title="Abre a conversa com a cara do WhatsApp, em tela cheia"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#e7f8ee] px-3 py-2 text-[10px] font-extrabold text-[#128c4a] transition hover:bg-[#d6f3e2]"
+                  >
+                    <MessageSquareText className="h-3.5 w-3.5" />
+                    Visual WhatsApp
+                  </button>
+                </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#081b2c]/[0.07] pb-3">
                   <div>
                     <p className="text-sm font-extrabold text-[#081b2c]">{selected.patientName}</p>
@@ -1914,7 +2026,7 @@ export default function Conversations({
                     {messages.length > 6 && (
                       <div
                         className="sticky z-10 mb-1 flex justify-end gap-1.5"
-                        style={{ top: alturaCabecalho + 4 }}
+                        style={{ top: `calc(var(--altura-topo-celular, 0px) + ${alturaCabecalho + 4}px)` }}
                       >
                         <button
                           type="button"
@@ -2280,6 +2392,287 @@ export default function Conversations({
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+      {modoWhatsApp && selected && (
+        <div className="fixed inset-0 z-[60] flex flex-col bg-[#efeae2] lg:hidden" role="dialog" aria-label={`Conversa com ${selected.patientName}`}>
+          {/* Barra de cima: voltar, foto, nome e acoes - a do WhatsApp. */}
+          <div
+            className="flex items-center gap-2 bg-white px-2 pb-2 text-[#111b21] shadow-[0_1px_2px_rgba(11,20,26,.12)]"
+            style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)' }}
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedId(null)}
+              aria-label="Voltar para as conversas"
+              className="rounded-full p-2 text-[#54656f] active:bg-black/5"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <span
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[15px] font-bold text-white"
+              style={{ background: corDoAvatar(selected.patientName) }}
+              aria-hidden="true"
+            >
+              {iniciais(selected.patientName)}
+            </span>
+            <div className="min-w-0 flex-1 leading-tight">
+              <p className="truncate text-[16px] font-semibold">{selected.patientName}</p>
+              <p className="truncate text-[12.5px] text-[#667781]">
+                {selected.phone} · {STATUS_LABEL[selected.status]}
+              </p>
+            </div>
+            {selected.status === 'resolved' ? (
+              <button
+                type="button"
+                onClick={() => void reabrir(selected.id)}
+                aria-label="Reabrir conversa"
+                title="Reabrir conversa"
+                className="rounded-full p-2 text-[#54656f] active:bg-black/5"
+              >
+                <RotateCcw className="h-5 w-5" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void resolve(selected.id)}
+                aria-label="Concluir conversa"
+                title="Concluir conversa"
+                className="rounded-full p-2 text-[#54656f] active:bg-black/5"
+              >
+                <Check className="h-5 w-5" />
+              </button>
+            )}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setMenuWhats((aberto) => !aberto)}
+                aria-label="Mais opções"
+                aria-expanded={menuWhats}
+                className="rounded-full p-2 text-[#54656f] active:bg-black/5"
+              >
+                <MoreVertical className="h-5 w-5" />
+              </button>
+              {menuWhats && (
+                <div className="absolute right-0 top-11 z-10 w-60 overflow-hidden rounded-[10px] bg-white py-1.5 text-[14.5px] text-[#111b21] shadow-[0_6px_24px_rgba(11,20,26,.25)]">
+                  {janelaAberta && (
+                    <>
+                      <button type="button" disabled={enviando} onClick={() => { setMenuWhats(false); void enviarMenu() }} className="block w-full px-4 py-2.5 text-left active:bg-black/5 disabled:opacity-40">
+                        Enviar menu de opções
+                      </button>
+                      <button type="button" disabled={enviando} onClick={() => { setMenuWhats(false); void enviarQuestionario() }} className="block w-full px-4 py-2.5 text-left active:bg-black/5 disabled:opacity-40">
+                        Enviar questionário
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // A nota interna tem campo proprio e aviso de que a
+                      // familia nao recebe: fica no visual padrao, que ja
+                      // mostra tudo isso, em vez de virar um balao parecido
+                      // com mensagem de verdade.
+                      trocarVisual(false)
+                      setEscrevendoNota(true)
+                    }}
+                    className="block w-full px-4 py-2.5 text-left active:bg-black/5"
+                  >
+                    Escrever nota interna
+                  </button>
+                  <button type="button" onClick={() => trocarVisual(false)} className="block w-full px-4 py-2.5 text-left active:bg-black/5">
+                    Voltar ao visual padrão
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {error && (
+            <div className="flex items-start gap-2 bg-[#fdecea] px-4 py-2 text-[12.5px] font-semibold text-[#b42318]">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="flex-1">{error}</span>
+              <button type="button" onClick={() => setError('')} aria-label="Fechar aviso" className="shrink-0">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Conversa: papel de parede, separador de dia e baloes com
+              "rabinho" na primeira mensagem de cada sequencia. */}
+          <div
+            ref={rolagemWhats}
+            className="min-h-0 flex-1 overflow-y-auto px-3 py-2"
+            style={FUNDO_WHATSAPP}
+            onClick={() => menuWhats && setMenuWhats(false)}
+          >
+            {loadingMessages ? (
+              <p className="mx-auto mt-10 w-fit rounded-[8px] bg-white/90 px-3 py-1.5 text-[12.5px] text-[#54656f]">
+                Carregando mensagens...
+              </p>
+            ) : (
+              <div className="flex flex-col gap-[3px] pb-2">
+                {linhaDoTempo(messages, notas).map((entrada, indice, todas) => {
+                  const quando = entrada.tipo === 'nota' ? entrada.item.criadoEm : entrada.item.createdAt
+                  const anterior = indice > 0 ? todas[indice - 1] : null
+                  const quandoAnterior = anterior
+                    ? anterior.tipo === 'nota'
+                      ? anterior.item.criadoEm
+                      : anterior.item.createdAt
+                    : null
+                  const novoDia = !quandoAnterior || diaLocal(quandoAnterior) !== diaLocal(quando)
+                  const separador = novoDia ? (
+                    <div key={`dia-${indice}`} className="my-2 flex justify-center">
+                      <span className="rounded-[8px] bg-white px-3 py-1 text-[12.5px] font-medium text-[#54656f] shadow-[0_1px_0.5px_rgba(11,20,26,.13)]">
+                        {rotuloDoDia(quando)}
+                      </span>
+                    </div>
+                  ) : null
+
+                  if (entrada.tipo === 'nota') {
+                    const nota = entrada.item
+                    return [
+                      separador,
+                      <div key={`nota-${nota.id}`} className="my-1 flex justify-center">
+                        <div className="max-w-[85%] rounded-[8px] border border-[#e8c96a] bg-[#fff6d6] px-3 py-1.5 text-center shadow-[0_1px_0.5px_rgba(11,20,26,.1)]">
+                          <p className="flex items-center justify-center gap-1 text-[11px] font-bold uppercase tracking-wide text-[#8a6a10]">
+                            <Lock className="h-3 w-3" /> Nota interna{nota.autorNome ? ` · ${nota.autorNome}` : ''}
+                          </p>
+                          <p className="mt-0.5 whitespace-pre-wrap break-words text-[13.5px] text-[#3d3208]">{nota.texto}</p>
+                        </div>
+                      </div>,
+                    ]
+                  }
+
+                  const message = entrada.item
+                  const outbound = message.direction === 'outbound'
+                  const mesmoLadoAntes =
+                    !novoDia &&
+                    anterior?.tipo === 'mensagem' &&
+                    (anterior.item.direction === 'outbound') === outbound
+                  const comRabinho = !mesmoLadoAntes
+                  return [
+                    separador,
+                    <div
+                      key={message.id}
+                      className={`flex ${outbound ? 'justify-end' : 'justify-start'} ${comRabinho ? 'mt-1.5' : ''}`}
+                    >
+                      <div
+                        className={`relative max-w-[82%] rounded-[7.5px] px-[9px] pb-[6px] pt-[6px] shadow-[0_1px_0.5px_rgba(11,20,26,.13)] ${
+                          outbound ? 'bg-[#d9fdd3]' : 'bg-white'
+                        } ${comRabinho ? (outbound ? 'rounded-tr-none' : 'rounded-tl-none') : ''}`}
+                      >
+                        {comRabinho && (
+                          <svg
+                            viewBox="0 0 8 13"
+                            width="8"
+                            height="13"
+                            aria-hidden="true"
+                            className={`absolute top-0 ${outbound ? '-right-2' : '-left-2'}`}
+                          >
+                            <path
+                              fill={outbound ? '#d9fdd3' : '#ffffff'}
+                              d={outbound ? 'M5.188 0H0v11.193l6.467-8.625C7.526 1.156 6.958 0 5.188 0z' : 'M2.812 0H8v11.193L1.533 2.568C.474 1.156 1.042 0 2.812 0z'}
+                            />
+                          </svg>
+                        )}
+                        {message.anexoUrl && (
+                          <Anexo url={message.anexoUrl} mime={message.anexoMime} caminho={message.anexoPath} onAbrir={setArquivoAberto} />
+                        )}
+                        {(!message.anexoUrl || !/^\[/.test(message.body)) && (
+                          <p className="whitespace-pre-wrap break-words pr-[58px] text-[14.2px] leading-[19px] text-[#111b21]">
+                            {(message.body && comLinks(message.body)) ||
+                              (message.templateName ? `[modelo: ${message.templateName}]` : '[sem conteúdo]')}
+                          </p>
+                        )}
+                        <span className="absolute bottom-[5px] right-[8px] flex items-center gap-[3px] text-[11px] leading-none text-[#667781]">
+                          {horaLocal(message.createdAt)}
+                          {outbound && <Confirmacao status={message.status} />}
+                        </span>
+                        {message.failureReason && (
+                          <p className="mt-1 pb-3 text-[11.5px] font-semibold text-[#b42318]">{message.failureReason}</p>
+                        )}
+                      </div>
+                    </div>,
+                  ]
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Barra de digitar. Com a janela de 24h fechada, o texto vai
+              dentro do modelo aprovado - a Meta nao aceita texto livre -, e o
+              aviso de cima diz isso antes de a pessoa escrever. */}
+          <div className="bg-transparent px-1.5 pt-1" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 6px)' }}>
+            {!janelaAberta && (
+              <div className="mx-1 mb-1.5 rounded-[10px] bg-white px-3 py-2 text-[12.5px] text-[#54656f] shadow-[0_1px_0.5px_rgba(11,20,26,.13)]">
+                <p>
+                  Janela de 24h fechada: a mensagem sai dentro do modelo aprovado
+                  (&quot;Olá, [nome]. Aqui é {marcaSemClinicaConhecida(clinicId).consultorioNaResposta}.&quot;), sem quebra de linha.
+                </p>
+                <button
+                  type="button"
+                  disabled={reabrindo || enviandoModelo}
+                  onClick={() => void reabrirConversa()}
+                  className="mt-1 font-semibold text-[#008069] disabled:opacity-50"
+                >
+                  {reabrindo ? 'Enviando convite...' : 'Só convidar a responder'}
+                </button>
+                {avisoRetomada && <p className="mt-1 font-semibold text-[#b42318]">{avisoRetomada}</p>}
+              </div>
+            )}
+            {arquivo && janelaAberta && (
+              <div className="mx-1 mb-1.5 flex items-center gap-2 rounded-[10px] bg-white px-3 py-2 text-[12.5px] text-[#111b21] shadow-[0_1px_0.5px_rgba(11,20,26,.13)]">
+                <Paperclip className="h-4 w-4 shrink-0 text-[#54656f]" />
+                <span className="min-w-0 flex-1 truncate">{arquivo.name}</span>
+                <button type="button" onClick={() => setArquivo(null)} aria-label="Tirar o arquivo" className="shrink-0 text-[#54656f]">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+            <div className="flex items-end gap-1.5">
+              <div className="flex min-h-[48px] min-w-0 flex-1 items-end rounded-[24px] bg-white px-2 shadow-[0_1px_0.5px_rgba(11,20,26,.13)]">
+                <textarea
+                  id="resposta-whatsapp"
+                  value={resposta}
+                  onChange={(e) => {
+                    const texto = e.target.value
+                    setResposta(janelaAberta ? texto : texto.replace(/\s*\n+\s*/g, ' '))
+                    // Cresce com o texto ate umas 5 linhas, como no app.
+                    e.target.style.height = 'auto'
+                    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`
+                  }}
+                  rows={1}
+                  maxLength={janelaAberta ? 4096 : 700}
+                  placeholder="Mensagem"
+                  className="max-h-[120px] min-w-0 flex-1 resize-none bg-transparent px-2 py-[13px] text-[16px] leading-[21px] text-[#111b21] outline-none placeholder:text-[#8696a0]"
+                />
+                {janelaAberta && (
+                  <button
+                    type="button"
+                    disabled={enviando}
+                    onClick={() => seletorDeArquivo.current?.click()}
+                    aria-label="Anexar arquivo"
+                    className="mb-[6px] rounded-full p-2 text-[#54656f] active:bg-black/5 disabled:opacity-40"
+                  >
+                    <Paperclip className="h-5 w-5 -rotate-45" />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                disabled={
+                  janelaAberta
+                    ? enviando || (!resposta.trim() && !arquivo)
+                    : enviandoModelo || reabrindo || !resposta.trim()
+                }
+                onClick={() => void (janelaAberta ? enviarResposta() : responderPorModelo())}
+                aria-label="Enviar"
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#1daa61] text-white shadow-[0_1px_2px_rgba(11,20,26,.2)] transition active:bg-[#178a4f] disabled:bg-[#1daa61]/60"
+              >
+                <Send className="h-5 w-5" />
+              </button>
+            </div>
           </div>
         </div>
       )}

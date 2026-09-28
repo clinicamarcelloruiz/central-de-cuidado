@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ComponentType } from 'react'
+import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
 import {
   Bell,
   CalendarDays,
@@ -198,6 +198,26 @@ export default function Home() {
   // vista neste navegador para o menu nao piscar a cada recarga.
   const [clinicaId, setClinicaId] = useState<string | null>(ultimaClinicaVista)
   const marca = clinicaId ? marcaDaClinica(clinicaId) : null
+  // Altura do cabecalho do celular, publicada como --altura-topo-celular (27/09/2026).
+  // O cabecalho da conversa tambem e grudado no topo, e ficava POR TRAS deste:
+  // no celular sumiam o "Todas as conversas" e o nome de quem fala. Medido, e
+  // nao chutado, porque o sino abre um painel e a barra muda de altura; no
+  // computador ele some (lg:hidden) e a medida vira 0 sozinha.
+  const topoDoCelular = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const alvo = topoDoCelular.current
+    if (!alvo) return
+    const publicar = () =>
+      document.documentElement.style.setProperty('--altura-topo-celular', `${alvo.offsetHeight}px`)
+    publicar()
+    const observador = new ResizeObserver(publicar)
+    observador.observe(alvo)
+    window.addEventListener('resize', publicar)
+    return () => {
+      observador.disconnect()
+      window.removeEventListener('resize', publicar)
+    }
+  }, [])
   const nomeNoRodape =
     marca?.nomeNoRodape ??
     (String((user?.user_metadata as { full_name?: unknown } | undefined)?.full_name ?? '').trim() || 'Equipe clínica')
@@ -572,7 +592,10 @@ export default function Home() {
           a lista do que pede atencao, cada linha levando para a tela certa.
           O botao de sair nao existia no celular: o do rodape do menu lateral
           so aparece no computador. */}
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#081b2c]/95 px-4 py-3 text-white backdrop-blur-xl lg:hidden">
+      <header
+        ref={topoDoCelular}
+        className="sticky top-0 z-30 border-b border-white/10 bg-[#081b2c]/95 px-4 py-3 text-white backdrop-blur-xl lg:hidden"
+      >
         <div className="relative mx-auto flex max-w-2xl items-center justify-between">
           {marca ? (
             <img src={marca.src} alt={marca.nome} className="h-8 w-auto max-w-[150px] brightness-0 invert" />
