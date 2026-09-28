@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AlertTriangle,
@@ -1230,12 +1230,43 @@ export default function Conversations({
     if (campo) campo.style.height = ''
   }, [resposta])
 
-  // Abre no fim, como o WhatsApp, e desce quando chega mensagem nova.
+  // Abre JA no fim, como o WhatsApp (28/09/2026). Antes a conversa aparecia
+  // no topo e descia na frente da pessoa: o scroll rodava depois da pintura
+  // (useEffect) e as fotos, carregando depois, empurravam o fim para baixo.
+  // Agora posiciona antes de pintar e fica "grudada" no fim enquanto o
+  // conteudo cresce - ate a pessoa subir para ler, ai para de puxar.
+  const grudadoNoFim = useRef(true)
+  const conteudoWhats = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (!modoWhatsApp) return
+    grudadoNoFim.current = true
+    const caixa = rolagemWhats.current
+    if (caixa) caixa.scrollTop = caixa.scrollHeight
+  }, [modoWhatsApp, selectedId, loadingMessages])
+  useLayoutEffect(() => {
+    if (!modoWhatsApp || !grudadoNoFim.current) return
+    const caixa = rolagemWhats.current
+    if (caixa) caixa.scrollTop = caixa.scrollHeight
+  }, [modoWhatsApp, messages.length, notas.length])
   useEffect(() => {
     if (!modoWhatsApp) return
     const caixa = rolagemWhats.current
-    if (caixa) caixa.scrollTop = caixa.scrollHeight
-  }, [modoWhatsApp, selectedId, messages.length, notas.length])
+    const conteudo = conteudoWhats.current
+    if (!caixa || !conteudo) return
+    const observador = new ResizeObserver(() => {
+      if (grudadoNoFim.current) caixa.scrollTop = caixa.scrollHeight
+    })
+    observador.observe(conteudo)
+    return () => observador.disconnect()
+  }, [modoWhatsApp, selectedId, loadingMessages])
+
+  // Voltar para a lista leva ao TOPO dela (28/09/2026). No celular a pagina
+  // inteira rola, e a pessoa voltava parada no meio da lista, na altura em
+  // que a conversa estava.
+  function voltarParaALista() {
+    setSelectedId(null)
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'auto' }))
+  }
 
   if (loading) {
     return (
@@ -1894,7 +1925,7 @@ export default function Conversations({
                 <div className="mb-3 flex items-center justify-between gap-2 lg:hidden">
                   <button
                     type="button"
-                    onClick={() => setSelectedId(null)}
+                    onClick={voltarParaALista}
                     className="inline-flex items-center gap-1.5 rounded-xl border border-[#081b2c]/10 px-3 py-2 text-[10px] font-extrabold text-slate-500 transition hover:text-[#1f4f78]"
                   >
                     <ArrowLeft className="h-3.5 w-3.5" />
@@ -2410,7 +2441,7 @@ export default function Conversations({
           >
             <button
               type="button"
-              onClick={() => setSelectedId(null)}
+              onClick={voltarParaALista}
               aria-label="Voltar para as conversas"
               className="rounded-full p-2 text-[#54656f] active:bg-black/5"
             >
@@ -2508,6 +2539,10 @@ export default function Conversations({
               "rabinho" na primeira mensagem de cada sequencia. */}
           <div
             ref={rolagemWhats}
+            onScroll={(e) => {
+              const caixa = e.currentTarget
+              grudadoNoFim.current = caixa.scrollHeight - caixa.scrollTop - caixa.clientHeight < 80
+            }}
             className="min-h-0 flex-1 overflow-y-auto px-3 py-2"
             style={FUNDO_WHATSAPP}
             onClick={() => menuWhats && setMenuWhats(false)}
@@ -2517,7 +2552,7 @@ export default function Conversations({
                 Carregando mensagens...
               </p>
             ) : (
-              <div className="flex flex-col gap-[3px] pb-2">
+              <div ref={conteudoWhats} className="flex flex-col gap-[3px] pb-2">
                 {linhaDoTempo(messages, notas).map((entrada, indice, todas) => {
                   const quando = entrada.tipo === 'nota' ? entrada.item.criadoEm : entrada.item.createdAt
                   const anterior = indice > 0 ? todas[indice - 1] : null

@@ -74,6 +74,14 @@ const SITUACOES: Record<string, string> = {
 
 const PADRAO = 'https://drmarcelloruiz.com.br/assets/perfil-whatsapp.png'
 
+// Foto de cada clinica, quando nao vem uma URL no pedido (28/09/2026). A
+// clinica de teste usa a marca do produto: publicada junto do sistema (pasta
+// public), para trocar a foto ser trocar o arquivo e publicar. As outras
+// seguem com a do Dr. Marcello, como sempre.
+const FOTO_DA_CLINICA: Record<string, string> = {
+  'f392fe85-ef6e-4729-bd2c-54dbfc9901b9': 'https://drmarcelloruiz.com.br/central-de-cuidado/perfil-whatsapp-central.jpg',
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'Método não permitido.' }, 405)
@@ -172,7 +180,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, perfil: PERFIL })
     }
 
-    const imagemUrl = corpo.imagemUrl?.trim() || PADRAO
+    const imagemUrl = corpo.imagemUrl?.trim() || FOTO_DA_CLINICA[String(ajustes.clinic_id)] || PADRAO
 
     // 1) Buscar a imagem.
     const imagem = await fetch(imagemUrl)
