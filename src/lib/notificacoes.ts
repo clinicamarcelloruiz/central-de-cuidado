@@ -101,10 +101,17 @@ async function registroPronto(): Promise<ServiceWorkerRegistration> {
 export async function ativarNotificacoes(clinicId: string): Promise<void> {
   const permissao = await Notification.requestPermission()
   if (permissao !== 'granted') {
+    // 'default' quase nunca e a pessoa dizendo nao: e o Chrome escondendo o
+    // pedido (ele "silencia" sites que pedem muito, e a janelinha vira um
+    // sino riscado na barra de endereco) ou a pessoa fechando sem ler. Em
+    // 28/09/2026 a mensagem era so "Permissao nao concedida" e nao dizia o
+    // que fazer - o caminho precisa estar escrito aqui.
     throw new Error(
-      permissao === 'denied'
-        ? 'Notificações bloqueadas neste aparelho. Libere nos ajustes do celular e tente de novo.'
-        : 'Permissão não concedida.',
+      ehIPhone()
+        ? 'O iPhone não liberou os avisos. Abra Ajustes → Notificações → Central, ative "Permitir Notificações" e toque em Ativar de novo.'
+        : permissao === 'denied'
+          ? 'Os avisos estão bloqueados para a Central. Toque no ícone à esquerda do endereço (cadeado ou ajustes) → Notificações → Permitir, e depois em Ativar de novo.'
+          : 'O navegador não mostrou o pedido. Toque no ícone à esquerda do endereço (sino riscado, cadeado ou ajustes) → Notificações → Permitir, e depois em Ativar de novo.',
     )
   }
 
