@@ -26,7 +26,9 @@ export function iniciais(nome: string): string {
     .replace(/^(dr|dra)\.?\s+/i, '')
     .trim()
     .split(/\s+/)
-    .filter(Boolean)
+    // So palavras que comecam com letra: emoji ou "(filho)" no nome viravam
+    // meio caractere nas iniciais (visto nas conversas em 02/10/2026).
+    .filter((parte) => /^\p{L}/u.test(parte))
   if (!partes.length) return '?'
   const primeira = partes[0][0] ?? ''
   const ultima = partes.length > 1 ? partes[partes.length - 1][0] : ''

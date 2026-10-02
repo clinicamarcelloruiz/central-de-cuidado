@@ -433,7 +433,10 @@ export type PreCadastro = { nome: string; telefone: string }
 
 /* Ajudantes do visual WhatsApp (27/09/2026). */
 function iniciais(nome: string) {
-  const partes = nome.trim().split(/\s+/).filter(Boolean)
+  // So palavras que comecam com letra (02/10/2026): "Leticia Freire 🍃" virava
+  // "L" + meio emoji (o losango com interrogacao) e "Marcelo Ruiz (filho)"
+  // virava "M(". Emoji, parenteses e numeros ficam fora das iniciais.
+  const partes = nome.trim().split(/\s+/).filter((parte) => /^\p{L}/u.test(parte))
   const letras = (partes[0]?.[0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')
   return letras.toUpperCase() || '?'
 }
@@ -2465,7 +2468,12 @@ export default function Conversations({
           nascia do tamanho da secao, com a pagina travada por baixo - foi o
           "entra bugado e fica travado" de 27/09/2026. */}
       {modoListaWhats && createPortal(
-        <div className="fixed inset-0 z-[60] flex flex-col bg-white lg:hidden" role="dialog" aria-label="Conversas">
+        // z-[35]: cobre a barra escura de cima (z-30) mas fica ABAIXO do menu
+        // de baixo do sistema (z-40, Home). Pedido do Edu (02/10/2026): no modo
+        // WhatsApp o menu da clinica continua embaixo, como as abas do proprio
+        // WhatsApp - sem ele a lista virava um beco sem saida, so com o "Chat
+        // normal" para sair. Ja a conversa aberta (z-[60]) cobre tudo.
+        <div className="fixed inset-0 z-[35] flex flex-col bg-white lg:hidden" role="dialog" aria-label="Conversas">
           {/* Topo: titulo e a volta para o chat da clinica. */}
           <div
             className="flex items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-4 pb-2"
@@ -2514,7 +2522,12 @@ export default function Conversations({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto overscroll-contain">
+          {/* Folga embaixo do tamanho do menu flutuante, para a ultima
+              conversa nao ficar escondida atras dele. */}
+          <div
+            className="flex-1 overflow-y-auto overscroll-contain"
+            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 96px)' }}
+          >
             {visiveis.length === 0 && (
               <p className="px-6 py-10 text-center text-[13px] text-[#667781]">Nenhuma conversa aqui.</p>
             )}
