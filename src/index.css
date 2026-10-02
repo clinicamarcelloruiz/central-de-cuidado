@@ -156,3 +156,32 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/*
+ * Contorno pulsante da foto no topo (01/10/2026), no azul-marinho do BI
+ * (#0A1F32), pulsando devagar como os indicadores dos paineis. Na barra
+ * escura do celular o marinho some no fundo, entao la o halo e claro.
+ * Quem pediu menos movimento no sistema ve so o contorno, parado.
+ */
+.foto-pulsante {
+  box-shadow: 0 0 0 2px #0a1f32;
+  animation: foto-pulso 2.8s ease-in-out infinite;
+}
+.foto-pulsante-escura {
+  box-shadow: 0 0 0 2px #86bce4;
+  animation: foto-pulso-escura 2.8s ease-in-out infinite;
+}
+@keyframes foto-pulso {
+  0%, 100% { box-shadow: 0 0 0 2px #0a1f32, 0 0 0 2px rgba(10, 31, 50, 0.45); }
+  50% { box-shadow: 0 0 0 2px #0a1f32, 0 0 0 9px rgba(10, 31, 50, 0); }
+}
+@keyframes foto-pulso-escura {
+  0%, 100% { box-shadow: 0 0 0 2px #86bce4, 0 0 0 2px rgba(134, 188, 228, 0.5); }
+  50% { box-shadow: 0 0 0 2px #86bce4, 0 0 0 8px rgba(134, 188, 228, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .foto-pulsante,
+  .foto-pulsante-escura {
+    animation: none;
+  }
+}

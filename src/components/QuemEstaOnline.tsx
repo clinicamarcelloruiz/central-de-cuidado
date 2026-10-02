@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Camera, RefreshCw } from 'lucide-react'
 import { corDoNome, iniciais, linkDaFoto, type PessoaOnline } from '@/lib/equipe-online'
+import AjustarFoto from '@/components/AjustarFoto'
 
 /**
  * As fotinhas no topo (01/10/2026): a sua primeiro, clicavel para trocar, e
@@ -64,18 +65,32 @@ export default function QuemEstaOnline({
   const visiveis = outros.slice(0, escuro ? 1 : 4)
   const resto = outros.length - visiveis.length
 
-  async function escolher(arquivo: File | undefined) {
+  // A foto escolhida passa primeiro pelo ajuste (centralizar e aproximar).
+  const [paraAjustar, setParaAjustar] = useState<File | null>(null)
+
+  function escolher(arquivo: File | undefined) {
+    if (entrada.current) entrada.current.value = ''
     if (!arquivo) return
+    if (!arquivo.type.startsWith('image/')) {
+      setErro('Escolha uma imagem.')
+      window.setTimeout(() => setErro(''), 6000)
+      return
+    }
     setErro('')
+    setParaAjustar(arquivo)
+  }
+
+  async function salvarAjustada(foto: File) {
     setEnviando(true)
     try {
-      await onEscolherFoto(arquivo)
+      await onEscolherFoto(foto)
+      setParaAjustar(null)
     } catch (causa) {
+      setParaAjustar(null)
       setErro(causa instanceof Error ? causa.message : 'Não foi possível trocar a foto.')
       window.setTimeout(() => setErro(''), 6000)
     } finally {
       setEnviando(false)
-      if (entrada.current) entrada.current.value = ''
     }
   }
 
@@ -111,7 +126,7 @@ export default function QuemEstaOnline({
         disabled={enviando}
         title={`${nome} · trocar foto`}
         aria-label="Trocar minha foto"
-        className="group relative rounded-full transition hover:scale-105 disabled:cursor-wait"
+        className={`group relative rounded-full transition hover:scale-105 disabled:cursor-wait ${escuro ? 'foto-pulsante-escura' : 'foto-pulsante'}`}
       >
         <Avatar nome={nome} caminho={foto} tamanho={tamanho} anel={anel} />
         <span
@@ -127,8 +142,12 @@ export default function QuemEstaOnline({
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={(e) => void escolher(e.target.files?.[0])}
+        onChange={(e) => escolher(e.target.files?.[0])}
       />
+
+      {paraAjustar && (
+        <AjustarFoto arquivo={paraAjustar} onCancelar={() => setParaAjustar(null)} onSalvar={salvarAjustada} />
+      )}
 
       {erro && (
         <p className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700 shadow-lg">
