@@ -7,6 +7,7 @@ import {
   CircleUserRound,
   HeartHandshake,
   LogOut,
+  MessageCircle,
   MessageCircleHeart,
   MessagesSquare,
   Plus,
@@ -43,6 +44,7 @@ import { registrarServiceWorker } from '@/lib/notificacoes'
 import ConviteParaAvisos from '@/components/ConviteParaAvisos'
 import QuemEstaOnline from '@/components/QuemEstaOnline'
 import { enviarMinhaFoto, useEquipeOnline } from '@/lib/equipe-online'
+import { ligarModoWhatsApp } from '@/lib/modo-whatsapp'
 
 type Tab = 'dashboard' | 'agenda' | 'followups' | 'conversas' | 'pacientes' | 'config' | 'admin'
 type Icon = ComponentType<{ className?: string; strokeWidth?: number }>
@@ -634,11 +636,25 @@ export default function Home() {
       >
         <div className="relative mx-auto flex max-w-2xl items-center justify-between">
           {marca ? (
-            <img src={marca.src} alt={marca.nome} className="h-8 w-auto max-w-[150px] brightness-0 invert" />
+            <img src={marca.src} alt={marca.nome} className="h-7 w-auto max-w-[112px] brightness-0 invert min-[400px]:h-8 min-[400px]:max-w-[150px]" />
           ) : (
             <div className="h-8" aria-hidden="true" />
           )}
           <div className="flex items-center gap-2">
+            {/* Modo WhatsApp (02/10/2026): leva a Respostas ja em tela cheia,
+                lista e conversa como no app. "Chat normal", la dentro, volta. */}
+            <button
+              type="button"
+              onClick={() => {
+                ligarModoWhatsApp()
+                setTab('conversas')
+              }}
+              aria-label="Abrir conversas no modo WhatsApp"
+              title="Modo WhatsApp"
+              className="pulso-whatsapp flex h-10 w-10 items-center justify-center rounded-xl bg-[#2f7fc1] text-white"
+            >
+              <MessageCircle className="h-[19px] w-[19px]" />
+            </button>
             <QuemEstaOnline
               nome={nomeNoRodape}
               foto={equipeOnline.foto}

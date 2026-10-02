@@ -28,6 +28,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { criarNota, listarNotas, type NotaDaConversa } from '@/lib/notas-da-conversa'
 import { linhaDoTempo } from '@/lib/linha-do-tempo'
+import { CHAVE_DO_VISUAL, EVENTO_MODO_WHATSAPP } from '@/lib/modo-whatsapp'
 import { VisualizadorDeArquivo, type ArquivoAberto } from '@/components/VisualizadorDeArquivo'
 import { marcaSemClinicaConhecida } from '@/lib/marca'
 import {
@@ -1206,7 +1207,7 @@ export default function Conversations({
    */
   const [visualWhatsApp, setVisualWhatsApp] = useState<boolean>(() => {
     try {
-      return window.localStorage.getItem('central.conversa-visual') === 'whatsapp'
+      return window.localStorage.getItem(CHAVE_DO_VISUAL) === 'whatsapp'
     } catch {
       return false
     }
@@ -1215,7 +1216,7 @@ export default function Conversations({
     setVisualWhatsApp(whatsapp)
     setMenuWhats(false)
     try {
-      window.localStorage.setItem('central.conversa-visual', whatsapp ? 'whatsapp' : 'padrao')
+      window.localStorage.setItem(CHAVE_DO_VISUAL, whatsapp ? 'whatsapp' : 'padrao')
     } catch {
       // sem armazenamento: vale ate recarregar a pagina
     }
@@ -1230,16 +1231,29 @@ export default function Conversations({
   const [menuWhats, setMenuWhats] = useState(false)
   const rolagemWhats = useRef<HTMLDivElement>(null)
   const modoWhatsApp = visualWhatsApp && telaDeCelular && selected !== null
+  // Modo WhatsApp completo no celular (02/10/2026): sem conversa aberta, a
+  // LISTA tambem vira tela cheia, sem o menu da clinica, comecando la em
+  // cima - como o app. "Chat normal" volta ao visual da clinica.
+  const modoListaWhats = visualWhatsApp && telaDeCelular && selected === null
+  // O balao azul da barra do celular (Home) liga o modo de fora.
+  useEffect(() => {
+    const ligar = () => {
+      setVisualWhatsApp(true)
+      setMenuWhats(false)
+    }
+    window.addEventListener(EVENTO_MODO_WHATSAPP, ligar)
+    return () => window.removeEventListener(EVENTO_MODO_WHATSAPP, ligar)
+  }, [])
 
   // Tela cheia de verdade: a pagina de tras nao rola junto com a conversa.
   useEffect(() => {
-    if (!modoWhatsApp) return
+    if (!modoWhatsApp && !modoListaWhats) return
     const antes = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
       document.body.style.overflow = antes
     }
-  }, [modoWhatsApp])
+  }, [modoWhatsApp, modoListaWhats])
 
   // Depois de enviar, o campo volta a ter uma linha so.
   useEffect(() => {
@@ -2450,6 +2464,123 @@ export default function Conversations({
           "chao" de todo position:fixed la dentro. Sem o portal, a tela cheia
           nascia do tamanho da secao, com a pagina travada por baixo - foi o
           "entra bugado e fica travado" de 27/09/2026. */}
+      {modoListaWhats && createPortal(
+        <div className="fixed inset-0 z-[60] flex flex-col bg-white lg:hidden" role="dialog" aria-label="Conversas">
+          {/* Topo: titulo e a volta para o chat da clinica. */}
+          <div
+            className="flex items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-4 pb-2"
+            style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 10px)' }}
+          >
+            <h2 className="text-[22px] font-bold text-[#111b21]">Conversas</h2>
+            <button
+              type="button"
+              onClick={() => trocarVisual(false)}
+              className="flex items-center gap-1.5 rounded-full bg-[#081b2c] px-3 py-2 text-[11px] font-extrabold text-white active:bg-[#102d47]"
+            >
+              <ListIcon className="h-3.5 w-3.5" />
+              Chat normal
+            </button>
+          </div>
+
+          <div className="px-3 pt-2">
+            <label className="flex items-center gap-2 rounded-full bg-[#f0f2f5] px-3 py-2">
+              <Search className="h-4 w-4 text-[#8696a0]" />
+              <input
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Pesquisar paciente ou telefone"
+                className="w-full bg-transparent text-[14px] text-[#111b21] outline-none placeholder:text-[#8696a0]"
+              />
+            </label>
+            <div className="flex gap-2 py-2">
+              {(
+                [
+                  ['todas', 'Todas'],
+                  ['atencao', `Esperando${attention.length ? ` ${attention.length}` : ''}`],
+                  ['novas', 'Não lidas'],
+                ] as [Recorte, string][]
+              ).map(([valor, rotulo]) => (
+                <button
+                  key={valor}
+                  type="button"
+                  onClick={() => setRecorte(valor)}
+                  className={`rounded-full px-3 py-1.5 text-[12px] font-semibold ${
+                    recorte === valor ? 'bg-[#d9fdd3] text-[#008069]' : 'bg-[#f0f2f5] text-[#54656f]'
+                  }`}
+                >
+                  {rotulo}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto overscroll-contain">
+            {visiveis.length === 0 && (
+              <p className="px-6 py-10 text-center text-[13px] text-[#667781]">Nenhuma conversa aqui.</p>
+            )}
+            {visiveis.map((conversa) => {
+              const nome = conversa.patientId
+                ? conversa.patientName
+                : conversa.profileName || conversa.phone || 'Contato sem cadastro'
+              const motivo = conversa.needsAttention && conversa.attentionReason ? MOTIVO_ATENCAO[conversa.attentionReason] : null
+              const quando = conversa.lastMessageAt ? new Date(conversa.lastMessageAt) : null
+              const hoje = diaLocal(new Date().toISOString())
+              const ontem = diaLocal(new Date(Date.now() - 86400000).toISOString())
+              const rotuloQuando = !quando
+                ? ''
+                : diaLocal(quando.toISOString()) === hoje
+                  ? horaLocal(quando.toISOString())
+                  : diaLocal(quando.toISOString()) === ontem
+                    ? 'ontem'
+                    : quando.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' })
+              return (
+                <button
+                  key={conversa.id}
+                  type="button"
+                  onClick={() => void openConversation(conversa)}
+                  className="flex w-full items-center gap-3 bg-white px-3 text-left active:bg-[#f5f6f6]"
+                >
+                  <span
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[15px] font-bold text-white"
+                    style={{ background: corDoAvatar(nome) }}
+                  >
+                    {iniciais(nome)}
+                  </span>
+                  <span className="min-w-0 flex-1 border-b border-[#f0f2f5] py-3">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-[15px] font-semibold text-[#111b21]">{nome}</span>
+                        {motivo && (
+                          <span className="shrink-0 rounded-md bg-[#fdecea] px-1.5 py-0.5 text-[9px] font-extrabold text-[#c0392b]">
+                            {motivo.rotulo}
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        className={`shrink-0 text-[11px] ${conversa.unreadCount > 0 ? 'font-bold text-[#1daa61]' : 'text-[#667781]'}`}
+                      >
+                        {rotuloQuando}
+                      </span>
+                    </span>
+                    <span className="mt-0.5 flex items-center justify-between gap-2">
+                      <span className="truncate text-[13px] text-[#667781]">
+                        {(conversa.lastMessage || 'Sem mensagens').replace(/\s+/g, ' ')}
+                      </span>
+                      {conversa.unreadCount > 0 && (
+                        <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-[#1daa61] px-1.5 text-[11px] font-bold text-white">
+                          {conversa.unreadCount}
+                        </span>
+                      )}
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>,
+        document.body,
+      )}
+
       {modoWhatsApp && selected && createPortal(
         <div className="fixed inset-0 z-[60] flex flex-col bg-[#efeae2] lg:hidden" role="dialog" aria-label={`Conversa com ${selected.patientName}`}>
           {/* Barra de cima: voltar, foto, nome e acoes - a do WhatsApp. */}

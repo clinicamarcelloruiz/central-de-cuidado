@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Check,
   CircleUserRound,
+  FileText,
   Edit3,
   FileHeart,
   LayoutGrid,
@@ -732,12 +733,17 @@ export default function Patients({
               </span>
 
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
+                {/* No celular o nome quebra em ate duas linhas e a etiqueta
+                    desce para baixo dele (02/10/2026): cortado em "AGATHA
+                    BE..." ninguem achava o paciente pela lista. */}
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 sm:flex-nowrap">
                   {/* Maiuscula so na exibicao: o cadastro guarda o nome como
                       foi escrito, e e assim que ele sai na receita e no
                       prontuario. Aqui a lista fica uniforme, sem depender de
                       quem digitou ter caprichado. */}
-                  <p className="truncate text-xs font-extrabold uppercase text-[#081b2c]">{patient.nome}</p>
+                  <p className="line-clamp-2 min-w-0 break-words text-xs font-extrabold uppercase leading-snug text-[#081b2c] sm:truncate">
+                    {patient.nome}
+                  </p>
                   {patient.criadoAutomaticamenteEm && <AConferir />}
                 </div>
                 <p className="truncate text-[10px] text-slate-400">
@@ -752,12 +758,17 @@ export default function Patients({
               </div>
 
               <div className="flex shrink-0 items-center gap-1">
+                {/* No celular, so o icone: a palavra "Prontuario" comia a
+                    metade do espaco do nome. */}
                 <button
                   type="button"
                   onClick={() => setRecordPatientId(patient.id)}
-                  className="rounded-lg bg-[#eef3f2] px-2.5 py-1.5 text-[10px] font-extrabold text-[#557f75] transition hover:bg-[#e2ece9]"
+                  aria-label={`Prontuário de ${patient.nome}`}
+                  title="Prontuário"
+                  className="flex items-center gap-1 rounded-lg bg-[#eef3f2] p-2 text-[10px] font-extrabold text-[#557f75] transition hover:bg-[#e2ece9] sm:px-2.5 sm:py-1.5"
                 >
-                  Prontuário
+                  <FileText className="h-4 w-4 sm:hidden" />
+                  <span className="hidden sm:inline">Prontuário</span>
                 </button>
                 <button
                   type="button"
