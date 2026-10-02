@@ -1,7 +1,7 @@
 import '../_shared/whatsapp.ts'
 import { adminClient, digits, sha256HmacHex, safeEqual } from '../_shared/whatsapp.ts'
 import { colherEventos, type Estado, pediuNotaFiscal, type Toque, tratarConversa } from '../_shared/atendimento.ts'
-import { montarConteudo } from '../_shared/conteudo.ts'
+import { montarMensagens } from '../_shared/conteudo.ts'
 import { RegistroDeEventos } from '../_shared/eventos-do-webhook.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
 import { textoDaLocalizacao, textoDosContatos } from '../_shared/mensagem-recebida.ts'
@@ -696,20 +696,29 @@ Deno.serve(async (req) => {
             const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
             const enviadoEm = new Date().toISOString()
 
-            const envio = await fetch(
-              `https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`,
-              {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  messaging_product: 'whatsapp',
-                  recipient_type: 'individual',
-                  to: waId,
-                  ...montarConteudo(texto, toques),
-                }),
-              },
-            )
-            const corpoEnvio = await envio.json()
+            // Uma ou duas mensagens (01/10/2026, ver montarMensagens): texto
+            // longo vai em duas para os botoes nao se perderem. Para no
+            // primeiro erro; o registro guarda o texto inteiro e o id da
+            // ultima enviada, que e a dos botoes - e o id que o toque cita.
+            let envio = new Response(null, { status: 500 })
+            let corpoEnvio: { messages?: { id?: string }[]; error?: { message?: string } } = {}
+            for (const conteudo of montarMensagens(texto, toques)) {
+              envio = await fetch(
+                `https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`,
+                {
+                  method: 'POST',
+                  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    messaging_product: 'whatsapp',
+                    recipient_type: 'individual',
+                    to: waId,
+                    ...conteudo,
+                  }),
+                },
+              )
+              corpoEnvio = await envio.json().catch(() => ({}))
+              if (!envio.ok) break
+            }
 
             await admin.from('whatsapp_messages').insert({
               clinic_id: clinicId,

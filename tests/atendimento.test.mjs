@@ -11,6 +11,7 @@
 // calado), e nao o Supabase.
 import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
+import { montarMensagens } from './conteudo.build.mjs'
 
 // ---------------------------------------------------------------
 // Banco falso
@@ -328,6 +329,22 @@ async function caso(titulo, passos, opcoes = {}) {
     })
 
     const resposta = r?.resposta ?? null
+    // Auditoria de botoes (01/10/2026), em TODA mensagem de TODO caso: o que
+    // oferece opcao numerada tem de chegar com botao ou lista, depois de
+    // passar pelo envio de verdade (montarMensagens), e caber no limite da
+    // Meta. Pedido do Edu: tocar ou digitar, a escolha e da familia. Antes
+    // disto, 19 respostas so aceitavam digitar, e a de informacoes da unidade
+    // perdia a lista por passar de 1024 caracteres.
+    if (resposta) {
+      const enviadas = montarMensagens(resposta, r?.botoes || r?.lista ? { botoes: r?.botoes, lista: r?.lista } : undefined)
+      const ofereceNumero = /\*\d\*|[Dd]igite \*?\d|[Rr]esponda (com )?\*?\d/.test(resposta)
+      if (ofereceNumero && !enviadas.some((m) => m.type === 'interactive')) {
+        falhas.push(`${titulo} | oferece opção sem botão: ${resposta.slice(0, 70)}`)
+      }
+      if (enviadas.some((m) => m.type === 'interactive' && m.interactive.body.text.length > 1024)) {
+        falhas.push(`${titulo} | mensagem com botão acima de 1024 caracteres`)
+      }
+    }
     ultimoToque = { resposta: r?.resposta ?? '', botoes: r?.botoes, lista: r?.lista, concluida: r?.concluida, atencao: r?.atencao }
     transcricao.push(`  > ${texto}\n    ${resposta ? resposta.replace(/\n/g, '\n    ') : '(silêncio)'}`)
 

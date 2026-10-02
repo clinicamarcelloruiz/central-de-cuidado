@@ -12,6 +12,7 @@
 // partida.
 
 import { tratarConversa } from './atendimento.build.mjs'
+import { montarMensagens } from './conteudo.build.mjs'
 
 // ---------------------------------------------------------------
 // Os textos reais
@@ -272,16 +273,27 @@ async function conversar(titulo, mensagens, opcoes = {}) {
       console.log('    (o robô fica em silêncio)')
       continue
     }
-    console.log(bloco(r.resposta, '    '))
-    if (r.botoes) console.log('    [botões] ' + r.botoes.map((b) => b.titulo).join(' | '))
-    // Titulo e descricao: a descricao e o que explica para onde a linha leva, e
-    // esconde-la aqui ja deixou passar um "Voce viu: Santos" numa linha que
-    // servia justamente para ver as OUTRAS unidades.
-    if (r.lista)
-      console.log(
-        `    [lista "${r.lista.rotulo}"] ` +
-          r.lista.linhas.map((l) => (l.descricao ? `${l.titulo} (${l.descricao})` : l.titulo)).join(' | '),
-      )
+    // O que CHEGA no celular (01/10/2026): passa pelo envio de verdade, que
+    // divide texto longo e poe os botoes do fecho. Antes a simulacao mostrava
+    // a lista pedida pelo robo, e ninguem via que ela se perdia no envio.
+    const enviadas = montarMensagens(r.resposta, r.botoes || r.lista ? { botoes: r.botoes, lista: r.lista } : undefined)
+    enviadas.forEach((m, i) => {
+      if (enviadas.length > 1) console.log(`    ── mensagem ${i + 1} de ${enviadas.length} ──`)
+      const corpo = m.type === 'text' ? m.text.body : m.interactive.body.text
+      console.log(bloco(corpo, '    '))
+      if (m.type !== 'interactive') return
+      if (m.interactive.type === 'button') {
+        console.log('    [botões] ' + m.interactive.action.buttons.map((b) => b.reply.title).join(' | '))
+      } else {
+        // Titulo e descricao: a descricao e o que explica para onde a linha
+        // leva, e esconde-la aqui ja deixou passar um "Voce viu: Santos" numa
+        // linha que servia justamente para ver as OUTRAS unidades.
+        console.log(
+          `    [lista "${m.interactive.action.button}"] ` +
+            m.interactive.action.sections[0].rows.map((l) => (l.description ? `${l.title} (${l.description})` : l.title)).join(' | '),
+        )
+      }
+    })
     if (r.atencao) console.log(`    ⚑ conversa marcada para a equipe: ${r.atencao}`)
   }
 

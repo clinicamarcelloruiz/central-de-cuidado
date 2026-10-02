@@ -64,3 +64,4 @@ tests/web-push.build.mjs
 tests/aviso-da-equipe.build.mjs
 tests/rajada.build.mjs
 tests/ficha-pendente.build.mjs
+tests/conteudo.build.mjs
