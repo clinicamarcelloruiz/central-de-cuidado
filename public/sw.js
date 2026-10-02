@@ -29,7 +29,11 @@ self.addEventListener('push', (evento) => {
     self.registration.showNotification(titulo, {
       body: aviso.corpo || 'Nova mensagem',
       icon: 'icone-192.png?v=3',
-      badge: 'icone-192.png?v=3',
+      // Icone pequeno da barra de status (02/10/2026). O Android pinta de
+      // branco tudo o que nao e transparente: com o icone colorido aparecia um
+      // quadrado branco ao lado do relogio. Este e so o desenho do logo, em
+      // branco sobre fundo transparente.
+      badge: 'icone-badge.png?v=1',
       tag: aviso.etiqueta || undefined,
       // Mesma conversa escrevendo de novo: troca a notificacao e toca de novo,
       // como o WhatsApp, em vez de empilhar ou ficar muda.
