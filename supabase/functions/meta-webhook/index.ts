@@ -1,6 +1,6 @@
 import '../_shared/whatsapp.ts'
 import { adminClient, digits, sha256HmacHex, safeEqual } from '../_shared/whatsapp.ts'
-import { colherEventos, type Estado, type Toque, tratarConversa } from '../_shared/atendimento.ts'
+import { colherEventos, type Estado, pediuNotaFiscal, type Toque, tratarConversa } from '../_shared/atendimento.ts'
 import { montarConteudo } from '../_shared/conteudo.ts'
 import { RegistroDeEventos } from '../_shared/eventos-do-webhook.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
@@ -8,6 +8,7 @@ import { textoDaLocalizacao, textoDosContatos } from '../_shared/mensagem-recebi
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 import { montarAviso } from '../_shared/aviso-da-equipe.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
+import { ESPERA_MAXIMA_MS, precisaEsperar } from '../_shared/rajada.ts'
 
 // O runtime das Edge Functions deixa terminar trabalho depois da resposta.
 // Fora dele (teste local) cai no await comum.
@@ -399,6 +400,49 @@ Deno.serve(async (req) => {
           //
           // Perder o convenio e um arranhao. Perder o estado da conversa
           // desliga o atendimento inteiro. Por isso os dois pedidos.
+          // Rajada (01/10/2026, ver _shared/rajada.ts): se a familia acabou de
+          // pedir nota fiscal e o pedido ainda nao teve resposta, esta
+          // mensagem espera essa resposta sair antes de ler a conversa. Sem
+          // isto as duas rodavam juntas, e a segunda mandava o menu por cima
+          // do pedido. So nota fiscal: as outras mensagens nao esperam nada.
+          //
+          // Em try/catch e com limite: a espera e cortesia. Se a consulta
+          // falhar ou o tempo acabar, segue como antes - com aviso no log.
+          try {
+            const { data: conversaDaRajada } = await admin
+              .from('whatsapp_conversations')
+              .select('id')
+              .eq('clinic_id', clinicId)
+              .eq('wa_id', waId)
+              .maybeSingle()
+            if (conversaDaRajada?.id) {
+              const inicio = Date.now()
+              while (Date.now() - inicio < ESPERA_MAXIMA_MS) {
+                const { data: ultima } = await admin
+                  .from('whatsapp_messages')
+                  .select('direction,created_at,body')
+                  .eq('conversation_id', conversaDaRajada.id)
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .maybeSingle()
+                const resumo = ultima
+                  ? {
+                      direction: ultima.direction as 'inbound' | 'outbound',
+                      criadaEm: String(ultima.created_at),
+                      corpo: (ultima.body as string | null) ?? '',
+                    }
+                  : null
+                if (!precisaEsperar(resumo, Date.now(), pediuNotaFiscal)) break
+                await new Promise((ok) => setTimeout(ok, 500))
+              }
+              if (Date.now() - inicio >= ESPERA_MAXIMA_MS) {
+                console.warn('Rajada: a mensagem anterior nao teve resposta a tempo; seguindo assim mesmo', waId)
+              }
+            }
+          } catch (erro) {
+            console.warn('Rajada: nao consegui conferir a mensagem anterior', erro)
+          }
+
           const COLUNAS_ESTAVEIS =
             'id,booking_state,booking_options,booking_unit_id,booking_patient_id,' +
             'booking_replaces_id,booking_intake_id,booking_modality,needs_attention,' +
@@ -514,7 +558,21 @@ Deno.serve(async (req) => {
 
             respondendoEnvioNosso = dentroDaJanelaDeResposta(ultimoNossoResult.data)
             ultimoEnvioId = (ultimoNossoResult.data as { external_message_id?: string | null } | null)?.external_message_id ?? null
-            equipeFalouRecentemente = equipeFalouHaPouco(ultimoHumanoResult.data)
+            // Coluna nova (01/10/2026) em consulta propria: sem ela, perde-se
+            // so o "Destravar" valendo contra a regra das 12h - nao a conversa.
+            let roboLiberadoEm: string | null = null
+            try {
+              const { data: liberacao, error: erroLiberacao } = await admin
+                .from('whatsapp_conversations')
+                .select('robo_liberado_em')
+                .eq('id', conversaAnterior.id)
+                .maybeSingle()
+              if (erroLiberacao) throw erroLiberacao
+              roboLiberadoEm = (liberacao as { robo_liberado_em?: string | null } | null)?.robo_liberado_em ?? null
+            } catch (erro) {
+              console.warn('Coluna robo_liberado_em indisponivel; Destravar nao vence a regra das 12h', erro)
+            }
+            equipeFalouRecentemente = equipeFalouHaPouco(ultimoHumanoResult.data, Date.now(), roboLiberadoEm)
           }
 
           const body = messageBody(message)

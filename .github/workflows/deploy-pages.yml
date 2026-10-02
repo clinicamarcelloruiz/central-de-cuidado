@@ -177,3 +177,4 @@ jobs:
           supabase functions deploy memed-receita --project-ref "$PROJECT_REF"
           supabase functions deploy aviso-mudanca-santos --project-ref "$PROJECT_REF"
           supabase functions deploy notificar-equipe --project-ref "$PROJECT_REF"
+          supabase functions deploy ficha-pendente --project-ref "$PROJECT_REF"

@@ -41,6 +41,8 @@ import { useDialogos } from '@/components/dialogos-contexto'
 import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco'
 import { registrarServiceWorker } from '@/lib/notificacoes'
 import ConviteParaAvisos from '@/components/ConviteParaAvisos'
+import QuemEstaOnline from '@/components/QuemEstaOnline'
+import { enviarMinhaFoto, useEquipeOnline } from '@/lib/equipe-online'
 
 type Tab = 'dashboard' | 'agenda' | 'followups' | 'conversas' | 'pacientes' | 'config' | 'admin'
 type Icon = ComponentType<{ className?: string; strokeWidth?: number }>
@@ -243,9 +245,18 @@ export default function Home() {
     observador.observe(alvo)
     observadorDoTopo.current = observador
   }, [])
-  const nomeNoRodape =
-    marca?.nomeNoRodape ??
-    (String((user?.user_metadata as { full_name?: unknown } | undefined)?.full_name ?? '').trim() || 'Equipe clínica')
+  // O nome de QUEM entrou vem primeiro (01/10/2026). Antes a marca da clinica
+  // vencia, e com o Edu entrando com conta propria o rodape dizia "Dr.
+  // Marcello Ruiz" para ele tambem - e a foto no topo mostraria o nome errado
+  // para os colegas. A marca so cobre conta sem nome.
+  const meuNome = String((user?.user_metadata as { full_name?: unknown } | undefined)?.full_name ?? '').trim()
+  const nomeNoRodape = meuNome || marca?.nomeNoRodape || 'Equipe clínica'
+  const equipeOnline = useEquipeOnline(clinicaId, user?.id ?? null, nomeNoRodape)
+  const escolherMinhaFoto = async (arquivo: File) => {
+    if (!user?.id) return
+    const caminho = await enviarMinhaFoto(user.id, arquivo, equipeOnline.foto)
+    equipeOnline.setFoto(caminho)
+  }
   // Conversas esperando alguem da equipe (22/09/2026). Ver o bloco do
   // contador, mais abaixo, para o porque.
   const [espera, setEspera] = useState<EsperaDaEquipe & { longa: boolean; ha: string }>({
@@ -628,6 +639,13 @@ export default function Home() {
             <div className="h-8" aria-hidden="true" />
           )}
           <div className="flex items-center gap-2">
+            <QuemEstaOnline
+              nome={nomeNoRodape}
+              foto={equipeOnline.foto}
+              outros={equipeOnline.outros}
+              tema="escuro"
+              onEscolherFoto={escolherMinhaFoto}
+            />
             <button
               type="button"
               onClick={() => setAvisosAbertos((aberto) => !aberto)}
@@ -755,6 +773,15 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-3">
+              <div className="hidden lg:block">
+                <QuemEstaOnline
+                  nome={nomeNoRodape}
+                  foto={equipeOnline.foto}
+                  outros={equipeOnline.outros}
+                  tema="claro"
+                  onEscolherFoto={escolherMinhaFoto}
+                />
+              </div>
               <div className="hidden items-center gap-2.5 rounded-2xl border border-[#081b2c]/[0.07] bg-white/70 px-4 py-3 text-xs font-semibold text-slate-500 shadow-sm backdrop-blur sm:flex">
                 <CalendarDays className="h-4 w-4 text-[#2f7fc1]" />
                 {formatToday()}

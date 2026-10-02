@@ -75,6 +75,18 @@ conferir(
   equipeFalouRecentemente(null, AGORA) === false,
 )
 
+// Destravar (01/10/2026): a equipe devolveu a conversa ao robo. O Edu
+// destravou, escreveu "Oi" 6h depois da equipe e o robo seguia calado.
+conferir(
+  'Equipe falou há 6h mas destravou depois: o robô volta a atender',
+  equipeFalouRecentemente({ created_at: quando(6) }, AGORA, quando(1)) === false,
+)
+
+conferir(
+  'Destravou e a equipe voltou a escrever depois: o robô se cala de novo',
+  equipeFalouRecentemente({ created_at: quando(1) }, AGORA, quando(6)) === true,
+)
+
 // ---------------------------------------------------------------------------
 // O que a pessoa quis dizer
 // ---------------------------------------------------------------------------

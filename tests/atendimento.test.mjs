@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario, colherEventos } from './atendimento.build.mjs'
+import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 
 // ---------------------------------------------------------------
@@ -1245,24 +1245,33 @@ for (const frase of [
   await caso(`"${frase}" abre o agendamento`, [[frase, 'Em qual unidade']])
 }
 
-// Mas a PRIMEIRA mensagem, não. O botão do site manda "Vim pelo site e gostaria
-// de agendar uma consulta" já escrito, e a conversa começava em "Em qual
-// unidade?", sem apresentação e sem as outras opções. Quem chega tem que ver o
-// menu antes de ser levado para dentro de um fluxo.
-await caso('Primeira mensagem sempre vê o menu, mesmo pedindo para agendar', [
-  ['Olá! Vim pelo site do Dr. Marcello e gostaria de agendar uma consulta.', 'Como podemos ajudar'],
+// Primeira mensagem pedindo para agendar (01/10/2026): vai direto para a
+// agenda, com a apresentação em cima e o *0* para ver as outras opções. Antes
+// recebia o menu inteiro: das 16 conversas que chegaram pelo botão do site em
+// 10 dias, três tocaram em "Minha consulta" achando que era "marcar" e
+// acabaram pedindo atendente.
+await caso('Mensagem do site vai direto para a agenda, com a apresentação', [
+  ['Olá! Vim pelo site do Dr. Marcello e gostaria de agendar uma consulta.',
+    ['Aqui é o consultório', 'Já separei a agenda', 'digite *0*', 'Em qual unidade']],
 ], { primeiraMensagem: true })
 
-// E o menu vence a resposta pronta: "retorno" é palavra-chave do texto de
-// documentos, e quem pediu para marcar não perguntou o que levar.
+// E a agenda vence a resposta pronta: "retorno" é palavra-chave do texto de
+// documentos, e quem pediu para marcar não perguntou o que levar (Sonia,
+// 15/09/2026).
 await caso('Pedido de agendamento na primeira mensagem não vira resposta pronta', [
-  ['quero marcar retorno para o Tomás', 'Como podemos ajudar'],
+  ['quero marcar retorno para o Tomás', 'Em qual unidade'],
 ], { primeiraMensagem: true, respostasProntas: RESPOSTAS })
 
-// E da segunda em diante o atalho volta a valer: ela já sabe o que existe ali.
-await caso('Depois do menu, o atalho volta a valer', [
-  ['Olá! Vim pelo site do Dr. Marcello e gostaria de agendar uma consulta.', 'Como podemos ajudar'],
+// Quem só cumprimentou continua vendo o menu, e o atalho vale depois dele.
+await caso('Cumprimento na primeira mensagem vê o menu; depois o atalho vale', [
+  ['Oi', 'Como podemos ajudar'],
   ['quero agendar', 'Em qual unidade'],
+], { primeiraMensagem: true })
+
+// Depois da agenda direta, o *0* mostra o menu completo - a saída prometida.
+await caso('Da agenda direta, o 0 leva ao menu completo', [
+  ['Olá! Vim pelo site do Dr. Marcello e gostaria de agendar uma consulta.', 'Em qual unidade'],
+  ['0', 'Como podemos ajudar'],
 ], { primeiraMensagem: true })
 
 // Remarcar e desmarcar contem "marcar" e sao o oposto: quem pede isso ja tem
@@ -1788,6 +1797,54 @@ await caso('Toque em Marcar uma consulta na fila da equipe abre o agendamento', 
 await caso('Texto solto na fila com equipe conversando continua sem robô', [
   ['ok, aguardo', null],
 ], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false })
+
+// ---------------------------------------------------------------
+// Reserva sem cadastro: o lembrete de 6h abre a ficha (01/10/2026)
+// ---------------------------------------------------------------
+//
+// O lembrete nao e fluxo novo: ele poe a conversa na primeira pergunta que
+// falta, e a resposta da familia cai no mesmo caminho de logo depois de marcar.
+
+{
+  const titulo = 'Lembrete de ficha pendente abre a ficha na pergunta que falta'
+  const { admin, conversa } = fazerAdmin({ unidades: TRES_UNIDADES, slotsPorUnidade: SLOTS_CHEIOS, consultasComFicha: FICHA_VAZIA })
+  const { faltam, faltaObrigatoria } = faltamNaFicha(FICHA_VAZIA[0])
+  if (!faltaObrigatoria || faltam[0] !== 'nome') {
+    falhas.push(`${titulo} | ficha vazia deveria cobrar o nome primeiro, veio: ${faltam.join(',')}`)
+  } else passou++
+
+  const r = await abrirFichaPeloLembrete(admin, 'conv1', 'c-ficha', faltam, '📋 Sua reserva está quase confirmada.')
+  if (!r?.resposta?.includes('quase confirmada') || !r.resposta.includes('nome completo do paciente')) {
+    falhas.push(`${titulo} | lembrete deveria trazer o aviso e a pergunta do nome, veio: ${r?.resposta?.slice(0, 120)}`)
+  } else passou++
+  if (conversa.booking_state !== 'dados_nome' || conversa.booking_intake_id !== 'c-ficha') {
+    falhas.push(`${titulo} | conversa deveria ficar na pergunta do nome da reserva c-ficha, ficou: ${conversa.booking_state} / ${conversa.booking_intake_id}`)
+  } else passou++
+}
+
+// A resposta da mae ao lembrete segue a ficha normalmente.
+await caso('Resposta ao lembrete de ficha segue para a próxima pergunta', [
+  ['Helena Souza Lima', 'data de nascimento'],
+], {
+  consultas: CONSULTA_SEM_FICHA,
+  fichas: FICHA_VAZIA,
+  estadoInicial: {
+    booking_state: 'dados_nome',
+    booking_intake_id: 'c-ficha',
+    booking_options: { tentativas: 0, faltam: ['nome', 'nascimento', 'responsavel', 'cpf', 'email'], manual: false },
+  },
+})
+
+// Consulta ja ligada a um paciente, ou com o obrigatorio preenchido, nao tem
+// o que cobrar - o lembrete nao sai.
+{
+  const titulo = 'Ficha completa ou paciente ligado: nada a cobrar'
+  const comPaciente = faltamNaFicha({ ...FICHA_VAZIA[0], patient_id: 'p1' })
+  const completa = faltamNaFicha(FICHA_COMPLETA[0])
+  if (comPaciente.faltaObrigatoria || completa.faltaObrigatoria) {
+    falhas.push(`${titulo} | nao deveria cobrar: paciente=${comPaciente.faltaObrigatoria} completa=${completa.faltaObrigatoria}`)
+  } else passou++
+}
 
 // 24/09/2026: a atendente disse "basta escolher a opção 2"; a mãe escreveu
 // "Pode agendar" e "2" e o robô ficou mudo por 35 minutos. Agora ela recebe o

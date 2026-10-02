@@ -2056,6 +2056,15 @@ export async function resetConversationBot(conversationId: string) {
     })
     .eq('id', conversationId)
   if (error) fail(error)
+
+  // A hora do Destravar (01/10/2026): o robo deixa de contar o que a equipe
+  // escreveu antes dela. Update separado porque a coluna e nova - se o banco
+  // ainda nao a tem, o destravar de cima continua valendo e so isto se perde.
+  const { error: erroDaHora } = await (supabase as unknown as SupabaseClient)
+    .from('whatsapp_conversations')
+    .update({ robo_liberado_em: new Date().toISOString() })
+    .eq('id', conversationId)
+  if (erroDaHora) console.warn('Destravar: nao consegui gravar a hora; o robo pode seguir calado ate 12h', erroDaHora)
 }
 
 export interface AutoReplySettings {

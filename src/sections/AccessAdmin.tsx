@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useDialogos } from '@/components/dialogos-contexto'
 import { useAuth } from '@/auth/AuthProvider'
-import { Check, Clock3, RefreshCw, ShieldCheck, UserRoundCheck, X } from 'lucide-react'
+import { Check, Clock3, KeyRound, RefreshCw, ShieldCheck, UserRoundCheck, X } from 'lucide-react'
+import PainelAdministracao from '@/sections/PainelAdministracao'
 import {
   alterarAcesso,
   approveAccessRequest,
@@ -45,6 +46,8 @@ export default function AccessAdmin() {
   // que ja existe, so o responsavel pelo sistema (migration 20260924160000).
   // O banco confere de novo; a tela so esconde.
   const souResponsavel = acessos.some((a) => a.userId === user?.id && a.protegido)
+  // Painel "Administracao" (01/10/2026): so para o responsavel pelo sistema.
+  const [administracaoAberta, setAdministracaoAberta] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -168,16 +171,33 @@ export default function AccessAdmin() {
             Um cadastro novo não enxerga nenhum paciente até você escolher o perfil e aprovar o pedido.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#081b2c]/10 bg-white px-4 py-3 text-xs font-extrabold text-[#385a70] transition hover:border-[#1f4f78]/40 hover:text-[#1f4f78] disabled:opacity-60"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Atualizar
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {souResponsavel && (
+            <button
+              type="button"
+              onClick={() => setAdministracaoAberta((aberta) => !aberta)}
+              aria-expanded={administracaoAberta}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#081b2c] px-4 py-3 text-xs font-extrabold text-white transition hover:bg-[#102d47]"
+            >
+              <KeyRound className="h-4 w-4" />
+              Administração
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#081b2c]/10 bg-white px-4 py-3 text-xs font-extrabold text-[#385a70] transition hover:border-[#1f4f78]/40 hover:text-[#1f4f78] disabled:opacity-60"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Atualizar
+          </button>
+        </div>
       </div>
+
+      {souResponsavel && administracaoAberta && clinicId && (
+        <PainelAdministracao clinicId={clinicId} onFechar={() => setAdministracaoAberta(false)} />
+      )}
 
       {error && (
         <div role="alert" className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-semibold text-red-600">

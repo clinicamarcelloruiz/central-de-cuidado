@@ -2253,6 +2253,46 @@ async function tentarFichaPendente(
   }
 }
 
+/**
+ * Para o lembrete de reserva sem cadastro (01/10/2026, ver
+ * _shared/ficha-pendente.ts e a funcao ficha-pendente).
+ *
+ * O que falta na ficha de uma consulta, na ordem das perguntas, e se falta
+ * alguma obrigatoria. Mesmo criterio de fichaPendente: consulta ja ligada a
+ * um paciente nao tem ficha a cobrar.
+ */
+export function faltamNaFicha(linha: Record<string, unknown>): { faltam: string[]; faltaObrigatoria: boolean } {
+  if (linha.patient_id) return { faltam: [], faltaObrigatoria: false }
+  const vazia = (coluna: string) => !String(linha[coluna] ?? '').trim()
+  return {
+    faltam: PERGUNTAS.filter((p) => vazia(p.coluna)).map((p) => p.chave),
+    faltaObrigatoria: PERGUNTAS.some((p) => p.obrigatoria && vazia(p.coluna)),
+  }
+}
+
+/** As colunas da ficha na consulta, para quem precisa ler faltamNaFicha. */
+export const COLUNAS_DA_FICHA = PERGUNTAS.map((p) => p.coluna)
+
+/**
+ * Abre a ficha na conversa, como se o robo tivesse acabado de perguntar: a
+ * proxima mensagem da familia cai como resposta da primeira pergunta que
+ * falta. E o mesmo caminho de logo depois de marcar - nada de fluxo novo.
+ */
+export async function abrirFichaPeloLembrete(
+  admin: Admin,
+  conversationId: string,
+  appointmentId: string,
+  faltam: string[],
+  aviso: string,
+): Promise<Resultado> {
+  return await perguntarDados(admin, conversationId, appointmentId, faltam, aviso)
+}
+
+/** Fecha a etapa em andamento da conversa (reserva cancelada). */
+export async function encerrarEtapa(admin: Admin, conversationId: string) {
+  await limparEstado(admin, conversationId)
+}
+
 /** Retoma o cadastro pendente a partir da primeira pergunta sem resposta. */
 async function retomarFicha(
   admin: Admin,
@@ -2990,13 +3030,38 @@ export async function tratarConversa(opcoes: {
     // Nota fiscal: a mensagem ja diz o que a pessoa quer. Ver pediuNotaFiscal.
     if (pediuNotaFiscal(texto)) return await registrarPedidoDeNota(admin, conversationId)
 
-    // Quem pediu para marcar na primeira mensagem ve o MENU, e nao uma resposta
-    // pronta. Sem esta linha, "quero marcar retorno para o Anthony" caia no
-    // texto de documentos, porque "retorno" e palavra-chave dele - foi o que
-    // aconteceu com a Sonia. O pedido e claro demais para o robo responder
-    // outra coisa; so nao e claro o bastante para pular a apresentacao.
+    // Quem pediu para marcar na primeira mensagem vai direto para a agenda,
+    // COM a apresentacao em cima (01/10/2026).
+    //
+    // Ate aqui recebia o menu inteiro. Nos 10 dias ate 01/10, 16 conversas
+    // chegaram pelo botao do site ("Vim pelo site e gostaria de agendar uma
+    // consulta"): metade tocou em "Marcar" - um passo a toa -, e tres tocaram
+    // em "Minha consulta" achando que era "marcar minha consulta", leram "Nao
+    // encontrei nenhuma consulta" e acabaram pedindo atendente. O cuidado de
+    // 15/09 (quem so quer saber o valor precisa saber que pode perguntar)
+    // continua: a saudacao vem antes, e a linha seguinte diz que o *0* mostra
+    // todas as opcoes.
+    //
+    // Continua valendo o que veio da Sonia: pedido de marcar nunca vira
+    // resposta pronta, nem quando "retorno" casa com o texto de documentos.
     if (pediuAgendamento(texto) && !assuntoClinico(texto)) {
-      return await mostrarMenu(admin, conversationId, saudacao)
+      registrar('opcao_escolhida', '2')
+      const agenda = await iniciarAgendamento(
+        admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
+      )
+      // Sem resposta da agenda (nao deveria acontecer): o menu de sempre, e
+      // nunca silencio na primeira mensagem de alguem.
+      if (!agenda) return await mostrarMenu(admin, conversationId, saudacao)
+      // Conta como menu visto: daqui em diante os atalhos valem, como para
+      // quem passou pelo menu.
+      await salvarEstado(admin, conversationId, { menu_sent_at: new Date().toISOString() })
+      return {
+        ...agenda,
+        resposta:
+          `${saudacao}\n\n` +
+          'Já separei a agenda para você 👇 Se antes quiser saber valores ou tirar uma dúvida, digite *0* para ver todas as opções.\n\n' +
+          agenda.resposta,
+      }
     }
 
     // A pergunta vem antes do menu. Quem escreveu uma duvida que a clinica ja

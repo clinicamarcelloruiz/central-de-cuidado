@@ -61,9 +61,19 @@ export function respondendoEnvioNosso(
 export function equipeFalouRecentemente(
   ultimaHumana: { created_at?: string | null } | null,
   agora = Date.now(),
+  /**
+   * Quando alguem da equipe apertou "Destravar" (01/10/2026). Destravar e a
+   * equipe devolvendo a conversa ao robo: o que ela escreveu ANTES disso deixa
+   * de contar. Sem isto o botao limpava a etapa mas o robo seguia calado por
+   * ate 12h - o Edu destravou as 23:02, escreveu "Oi" e a conversa acendeu
+   * como "Quer falar com a equipe", porque a equipe tinha falado as 16:50.
+   */
+  roboLiberadoEm: string | null = null,
 ) {
   if (!ultimaHumana?.created_at) return false
-  return agora - new Date(ultimaHumana.created_at).getTime() < JANELA_CONVERSA_HUMANA_MS
+  const falou = new Date(ultimaHumana.created_at).getTime()
+  if (roboLiberadoEm && new Date(roboLiberadoEm).getTime() >= falou) return false
+  return agora - falou < JANELA_CONVERSA_HUMANA_MS
 }
 
 /**
