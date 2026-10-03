@@ -436,6 +436,11 @@ conferir('Acompanhamento de 3 dias atrás já não vale', depoisDoAcompanhamento
 conferir('Sem acompanhamento, não vale', depoisDoAcompanhamento(null, AGORA) === false)
 conferir('Relógio torto (no futuro) não vale', depoisDoAcompanhamento({ created_at: quando(-2) }, AGORA) === false)
 
+conferir(
+  'Botao "Estamos bem" do acompanhamento v2 e resposta positiva',
+  interpretarResposta('Estamos bem', true).isWell === true,
+)
+
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)
 console.log(`FALHAS: ${falhas.length}`)
 if (falhas.length) {

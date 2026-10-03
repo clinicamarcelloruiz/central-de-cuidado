@@ -1,5 +1,5 @@
 import { adminClient, formatDateBR, toBrazilE164 } from './whatsapp.ts'
-import { textoDoModelo } from './modelos.ts'
+import { parametrosDoAcompanhamento, textoDoModelo } from './modelos.ts'
 import { variantesDoTelefone } from './telefone-br.ts'
 import { chaveDoWhatsApp, foraDaListaDeTeste, listaDeTeste } from './whatsapp-teste.ts'
 
@@ -186,6 +186,14 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
   }
 
   const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
+  const nomeDoModelo = settings.whatsapp_template_name || 'acompanhamento_pos_consulta'
+  // Nome completo ou so o primeiro, conforme o modelo (03/10/2026). Ver
+  // parametrosDoAcompanhamento em modelos.ts.
+  const parametros = parametrosDoAcompanhamento(
+    nomeDoModelo,
+    patient.name,
+    formatDateBR(consultation.consultation_date),
+  )
   const graphResponse = await fetch(
     `https://graph.facebook.com/${graphVersion}/${settings.whatsapp_phone_number_id}/messages`,
     {
@@ -197,15 +205,12 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
         to: waId,
         type: 'template',
         template: {
-          name: settings.whatsapp_template_name || 'acompanhamento_pos_consulta',
+          name: nomeDoModelo,
           language: { code: settings.whatsapp_template_language || 'pt_BR' },
           components: [
             {
               type: 'body',
-              parameters: [
-                { type: 'text', text: patient.name },
-                { type: 'text', text: formatDateBR(consultation.consultation_date) },
-              ],
+              parameters: parametros.map((text) => ({ type: 'text', text })),
             },
           ],
         },
@@ -220,9 +225,8 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
   // sistema fez. Quem abre a conversa na plataforma precisa ver a mesma coisa
   // que esta no celular dela; o resumo ficava parecendo que o sistema tinha
   // mandado outra mensagem.
-  const nomeDoModelo = settings.whatsapp_template_name || 'acompanhamento_pos_consulta'
   const summary =
-    textoDoModelo(nomeDoModelo, [patient.name, formatDateBR(consultation.consultation_date)]) ??
+    textoDoModelo(nomeDoModelo, parametros) ??
     `Acompanhamento de ${followupLabel} enviado para ${patient.name} ` +
       `(consulta em ${formatDateBR(consultation.consultation_date)}).`
 

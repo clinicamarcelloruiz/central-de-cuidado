@@ -14,7 +14,32 @@
  */
 
 /** Modelos conhecidos, pelo nome cadastrado na Meta. */
-const MODELOS: Record<string, { corpo: string; rodape?: string; botoes?: string[] }> = {
+const MODELOS: Record<string, {
+  corpo: string
+  rodape?: string
+  botoes?: string[]
+  /** O {{1}} e so o primeiro nome da crianca, e nao o nome completo. */
+  primeiroNome?: boolean
+}> = {
+  // Versao 2 do acompanhamento (enviada a Meta em 03/10/2026). A primeira
+  // chamava a crianca pelo nome completo e perguntava "Como voce esta?", como se
+  // ela fosse ler - "Ola, Davi Serrano Silva Perricone... Como voce esta?". Esta
+  // fala com os pais e pergunta pela crianca, pelo primeiro nome.
+  //
+  // O botao e "Estamos bem" de proposito: interpretarResposta (lembrete.ts) ja
+  // le "estamos bem" como resposta positiva, sem mexer em regra nenhuma.
+  //
+  // Passa a valer quando clinic_settings.whatsapp_template_name apontar para
+  // ela - o que so pode acontecer DEPOIS de a Meta aprovar.
+  acompanhamento_pos_consulta_v2: {
+    corpo:
+      'Olá! Aqui é do consultório do Dr. Marcello Ruiz. Estamos passando para saber como {{1}} ' +
+      'está depois da consulta do dia {{2}}. Se precisar falar com a nossa equipe, é só responder ' +
+      'esta mensagem.',
+    rodape: 'Para não receber novos acompanhamentos, responda SAIR.',
+    botoes: ['Estamos bem', 'Preciso de ajuda', 'Não quero receber'],
+    primeiroNome: true,
+  },
   acompanhamento_pos_consulta: {
     corpo:
       'Olá, {{1}}. A Clínica Dr. Marcello Ruiz está entrando em contato para acompanhar ' +
@@ -75,6 +100,26 @@ const MODELOS: Record<string, { corpo: string; rodape?: string; botoes?: string[
       'Olá, {{1}}. Aqui é o consultório do Dr. Marcello Ruiz.\n\n{{2}}\n\n' +
       'Se precisar, é só responder por aqui.',
   },
+}
+
+/**
+ * Os parametros do acompanhamento, na ordem do modelo: quem e quando.
+ *
+ * O modelo antigo leva o nome completo; o v2, so o primeiro nome. Nome de
+ * cadastro todo em maiusculas ("AGATHA BETTINI") vira "Agatha" - no meio de uma
+ * frase, em maiusculas, parece grito.
+ */
+export function parametrosDoAcompanhamento(nomeDoModelo: string, nomeDoPaciente: string, data: string): string[] {
+  const completo = String(nomeDoPaciente ?? '').trim()
+  if (!MODELOS[nomeDoModelo]?.primeiroNome) return [completo, data]
+  const primeiro = completo.split(/\s+/)[0] ?? ''
+  const nome =
+    primeiro && primeiro === primeiro.toUpperCase()
+      ? primeiro.charAt(0) + primeiro.slice(1).toLowerCase()
+      : primeiro
+  // Sem nome nenhum, "como a crianca esta" ainda e uma frase inteira; vazio
+  // deixaria "saber como  esta" - e a Meta recusa parametro vazio.
+  return [nome || 'a criança', data]
 }
 
 /**

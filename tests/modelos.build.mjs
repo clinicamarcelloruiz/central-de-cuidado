@@ -1,4 +1,20 @@
 const MODELOS = {
+  // Versao 2 do acompanhamento (enviada a Meta em 03/10/2026). A primeira
+  // chamava a crianca pelo nome completo e perguntava "Como voce esta?", como se
+  // ela fosse ler - "Ola, Davi Serrano Silva Perricone... Como voce esta?". Esta
+  // fala com os pais e pergunta pela crianca, pelo primeiro nome.
+  //
+  // O botao e "Estamos bem" de proposito: interpretarResposta (lembrete.ts) ja
+  // le "estamos bem" como resposta positiva, sem mexer em regra nenhuma.
+  //
+  // Passa a valer quando clinic_settings.whatsapp_template_name apontar para
+  // ela - o que so pode acontecer DEPOIS de a Meta aprovar.
+  acompanhamento_pos_consulta_v2: {
+    corpo: "Ol\xE1! Aqui \xE9 do consult\xF3rio do Dr. Marcello Ruiz. Estamos passando para saber como {{1}} est\xE1 depois da consulta do dia {{2}}. Se precisar falar com a nossa equipe, \xE9 s\xF3 responder esta mensagem.",
+    rodape: "Para n\xE3o receber novos acompanhamentos, responda SAIR.",
+    botoes: ["Estamos bem", "Preciso de ajuda", "N\xE3o quero receber"],
+    primeiroNome: true
+  },
   acompanhamento_pos_consulta: {
     corpo: "Ol\xE1, {{1}}. A Cl\xEDnica Dr. Marcello Ruiz est\xE1 entrando em contato para acompanhar sua consulta realizada em {{2}}. Como voc\xEA est\xE1? Responda esta mensagem caso precise falar com nossa equipe.",
     rodape: "Para n\xE3o receber novos acompanhamentos, responda SAIR.",
@@ -40,6 +56,13 @@ const MODELOS = {
     corpo: "Ol\xE1, {{1}}. Aqui \xE9 o consult\xF3rio do Dr. Marcello Ruiz.\n\n{{2}}\n\nSe precisar, \xE9 s\xF3 responder por aqui."
   }
 };
+function parametrosDoAcompanhamento(nomeDoModelo, nomeDoPaciente, data) {
+  const completo = String(nomeDoPaciente ?? "").trim();
+  if (!MODELOS[nomeDoModelo]?.primeiroNome) return [completo, data];
+  const primeiro = completo.split(/\s+/)[0] ?? "";
+  const nome = primeiro && primeiro === primeiro.toUpperCase() ? primeiro.charAt(0) + primeiro.slice(1).toLowerCase() : primeiro;
+  return [nome || "a crian\xE7a", data];
+}
 function textoDoModelo(nome, parametros) {
   const modelo = MODELOS[nome];
   if (!modelo) return null;
@@ -54,5 +77,6 @@ function textoDoModelo(nome, parametros) {
   ].filter(Boolean).join("\n\n");
 }
 export {
+  parametrosDoAcompanhamento,
   textoDoModelo
 };
