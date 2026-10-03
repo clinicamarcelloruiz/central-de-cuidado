@@ -30,6 +30,8 @@ function fazerAdmin({
   colunasAusentes = [],
   // Consultas com o cadastro (intake_*) como o banco devolve.
   consultasComFicha = [],
+  // Horarios semanais cadastrados por unidade (so a contagem importa aqui).
+  regrasPorUnidade = {},
 }) {
   const conversa = {
     booking_state: null,
@@ -111,6 +113,14 @@ function fazerAdmin({
       }
       if (tabela === 'clinics') {
         return { select: () => chain({ single: { timezone: 'America/Sao_Paulo' } }) }
+      }
+      // Agenda da telemedicina (03/10/2026): o robo so pergunta se ha horario.
+      if (tabela === 'availability_rules') {
+        return {
+          select: () => ({
+            eq: (_c, id) => ({ limit: async () => ({ data: regrasPorUnidade[id] ?? [], error: null }) }),
+          }),
+        }
       }
       // Respostas prontas: o que a clinica cadastrou para o robo responder
       // sozinho. Vazio por padrao - a maioria dos casos nao passa por aqui.
@@ -259,6 +269,7 @@ async function caso(titulo, passos, opcoes = {}) {
     telemedicina: opcoes.telemedicina ?? { ativa: false, texto: '' },
     colunasAusentes: opcoes.colunasAusentes ?? [],
     consultasComFicha: opcoes.fichas ?? [],
+    regrasPorUnidade: opcoes.regras ?? {},
   })
 
   // A conversa começa como se o menu já tivesse aparecido alguma vez.
@@ -1484,8 +1495,9 @@ await caso('"Quanto custa" com um lugar só responde o texto do assunto', [
 // ---------------------------------------------------------------------------
 // Telemedicina
 //
-// Nao tem agenda propria: usa os horarios das unidades fisicas. A consulta e
-// gravada na unidade que cedeu o horario, com modalidade 'telemedicina'. E a
+// Clinica SEM agenda propria de telemedicina: usa os horarios das unidades
+// fisicas e grava na unidade que cedeu o horario, com modalidade
+// 'telemedicina'. Com agenda propria (03/10/2026), ver os casos COM_TELE. E a
 // unica etapa com saida de urgencia.
 // ---------------------------------------------------------------------------
 
@@ -1533,6 +1545,79 @@ await caso('Telemedicina marca na unidade que cedeu o horário, como telemedicin
     if (m.unit_id !== 'u-vila') falhas.push(`${titulo} | unidade errada: ${m.unit_id}`)
     else passou++
     if (m.modality !== 'telemedicina') falhas.push(`${titulo} | modalidade errada: ${m.modality}`)
+    else passou++
+  },
+})
+
+// Agenda propria da telemedicina (03/10/2026). Em 03/10 o Dr. Marcello atendeu
+// por video o Miguel e a consulta estava gravada em "Livance Ibirapuera", onde
+// ninguem procurou. A telemedicina virou uma unidade marcada (telemedicina =
+// true), que nao e lugar: nao aparece entre as unidades, e e la que a consulta
+// por video fica gravada.
+const COM_TELE = [...TRES_UNIDADES, { id: 'u-tele', name: 'Telemedicina', address: '', telemedicina: true }]
+
+await caso('Agenda da telemedicina não aparece como unidade física', [
+  ['agendar', ['Em qual unidade', 'Telemedicina (por vídeo)']],
+], {
+  telemedicina: TELE,
+  unidades: COM_TELE,
+  verificar: ({ transcricao, titulo }) => {
+    const lista = transcricao.join('')
+    // So a opcao de video; a unidade "Telemedicina" crua nao pode aparecer.
+    if ((lista.match(/Telemedicina/g) ?? []).length !== 1) falhas.push(`${titulo} | telemedicina listada duas vezes`)
+    else passou++
+  },
+})
+
+await caso('Sem horários próprios: usa os das unidades, mas grava na agenda da telemedicina', [
+  ['agendar', 'Em qual unidade'],
+  ['4', ['Datas disponíveis para telemedicina', '31/08', '02/09']],
+  ['2', 'Horários de'],
+  ['1', ['Consulta marcada', 'por vídeo']],
+], {
+  telemedicina: TELE,
+  unidades: COM_TELE,
+  slots: { ...SLOTS_DUAS, 'u-tele': [] },
+  pacientes: [ANA],
+  verificar: ({ marcadas, titulo }) => {
+    const m = marcadas[0]
+    if (!m) return falhas.push(`${titulo} | nada foi marcado`)
+    if (m.unit_id !== 'u-tele') falhas.push(`${titulo} | gravou em ${m.unit_id}, e não na agenda da telemedicina`)
+    else passou++
+    if (m.modality !== 'telemedicina') falhas.push(`${titulo} | modalidade ${m.modality}`)
+    else passou++
+  },
+})
+
+await caso('Com horários próprios: só a agenda da telemedicina vale', [
+  ['agendar', 'Em qual unidade'],
+  ['4', ['Datas disponíveis para telemedicina', '05/09']],
+  ['1', 'Horários de'],
+  ['1', ['Consulta marcada', 'por vídeo']],
+], {
+  telemedicina: TELE,
+  unidades: COM_TELE,
+  slots: { ...SLOTS_DUAS, 'u-tele': [{ slot_start: '2026-09-05T22:00:00Z', slot_end: '2026-09-05T22:40:00Z' }] },
+  regras: { 'u-tele': [{ id: 'r1' }] },
+  pacientes: [ANA],
+  verificar: ({ marcadas, transcricao, titulo }) => {
+    if (/31\/08|02\/09/.test(transcricao.join(''))) falhas.push(`${titulo} | ofereceu horário das unidades físicas`)
+    else passou++
+    if (marcadas[0]?.unit_id !== 'u-tele') falhas.push(`${titulo} | gravou em ${marcadas[0]?.unit_id}`)
+    else passou++
+  },
+})
+
+await caso('Agenda da telemedicina configurada e cheia: não cai nos horários das unidades', [
+  ['agendar', 'Em qual unidade'],
+  ['4', 'não temos horários abertos em Telemedicina'],
+], {
+  telemedicina: TELE,
+  unidades: COM_TELE,
+  slots: { ...SLOTS_DUAS, 'u-tele': [] },
+  regras: { 'u-tele': [{ id: 'r1' }] },
+  verificar: ({ transcricao, titulo }) => {
+    if (/31\/08|02\/09/.test(transcricao.join(''))) falhas.push(`${titulo} | ofereceu horário das unidades físicas`)
     else passou++
   },
 })

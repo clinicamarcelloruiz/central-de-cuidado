@@ -981,6 +981,22 @@ export default function Agenda({
         </div>
       ) : (
         <>
+          {/* Agenda propria da telemedicina (03/10/2026). Sem horario
+              cadastrado, o robo continua oferecendo os horarios das unidades
+              fisicas - so que agora grava aqui. Quem abre esta agenda vazia
+              precisa saber disso, senao acha que a telemedicina parou. */}
+          {unidadeAtual?.telemedicina && (
+            <div className="flex items-start gap-2 rounded-[16px] border border-[#2f7fc1]/15 bg-[#eef5fd] px-4 py-3 text-[11px] leading-relaxed text-[#16456b]">
+              <Video className="mt-0.5 h-4 w-4 shrink-0 text-[#2f7fc1]" />
+              <p>
+                <strong>Agenda da telemedicina.</strong> Toda consulta por vídeo fica aqui.{' '}
+                {rules.length === 0
+                  ? 'Ainda não há horários próprios: o robô oferece os horários livres das unidades físicas. Cadastre os horários de vídeo em Configuração para que só eles valham.'
+                  : 'O robô oferece só os horários desta agenda.'}{' '}
+                Um horário ocupado aqui fica ocupado nas outras unidades, e vice-versa: é o mesmo médico.
+              </p>
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <select
@@ -990,7 +1006,7 @@ export default function Agenda({
               >
                 {units.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.name}
+                    {u.telemedicina ? `💻 ${u.name} (por vídeo)` : u.name}
                   </option>
                 ))}
               </select>

@@ -124,7 +124,7 @@ export default function InformacoesDoWhatsApp() {
                 <span className="flex items-center gap-1.5 text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
                   <Video className="h-3.5 w-3.5 text-[#2f7fc1]" />
                   Telemedicina
-                  <Ajuda texto="Ligada, aparece como opção nas informações e no agendamento. A consulta usa os horários das unidades físicas: é o mesmo médico no mesmo dia. Quem escolhe telemedicina também pode pedir urgência, e aí a conversa vai para a equipe com destaque." />
+                  <Ajuda texto="Ligada, aparece como opção nas informações e no agendamento. A consulta fica na agenda própria da telemedicina (em Agenda, escolha Telemedicina); enquanto ela não tiver horários cadastrados, o robô oferece os horários livres das unidades físicas. Quem escolhe telemedicina também pode pedir urgência, e aí a conversa vai para a equipe com destaque." />
                 </span>
                 <label className="flex cursor-pointer items-center gap-2 rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5">
                   <input

@@ -712,14 +712,67 @@ async function unidadePorId(admin: Admin, id: string): Promise<Unidade | null> {
   return (basico as Unidade | null) ?? null
 }
 
+/**
+ * A agenda propria da telemedicina (03/10/2026), quando a clinica tem uma.
+ *
+ * Ate esta data a telemedicina usava os horarios das unidades fisicas e a
+ * consulta ficava gravada numa delas - na Agenda, misturada com as presenciais,
+ * e ninguem achava. Agora e uma unidade marcada com telemedicina = true.
+ *
+ * Coluna nova, entao consulta propria e try/catch: sem ela, o robo segue como
+ * antes (horarios das fisicas), em vez de perder a lista de unidades inteira.
+ * O filtro e feito aqui, e nao no banco, pelo mesmo motivo.
+ */
+async function agendaDaTelemedicina(admin: Admin, clinicId: string): Promise<string | null> {
+  try {
+    const { data, error } = await admin
+      .from('clinic_units')
+      .select('id,telemedicina')
+      .eq('clinic_id', clinicId)
+      .is('archived_at', null)
+    if (error) throw error
+    const tele = ((data ?? []) as { id: string; telemedicina?: boolean | null }[]).find((u) => u.telemedicina === true)
+    return tele?.id ?? null
+  } catch (erro) {
+    console.warn('Sem a coluna clinic_units.telemedicina; telemedicina segue nos horarios das unidades fisicas', erro)
+    return null
+  }
+}
+
+/**
+ * A agenda da telemedicina ja tem horarios cadastrados?
+ *
+ * Sem horario nenhum (a clinica ainda nao configurou), o robo continua
+ * oferecendo os horarios das unidades fisicas - o que ja fazia - mas grava na
+ * agenda da telemedicina. Com horarios, so eles valem. Na duvida (falha ao
+ * ler), vale a agenda propria: oferecer um horario fora do combinado com o
+ * medico e pior do que dizer que nao ha vaga e chamar a equipe.
+ */
+async function telemedicinaTemHorarios(admin: Admin, teleId: string): Promise<boolean> {
+  try {
+    const { data, error } = await admin.from('availability_rules').select('id').eq('unit_id', teleId).limit(1)
+    if (error) throw error
+    return (data ?? []).length > 0
+  } catch (erro) {
+    console.warn('Nao consegui ler os horarios da agenda de telemedicina; usando so ela', erro)
+    return true
+  }
+}
+
 async function unidadesAtivas(admin: Admin, clinicId: string) {
+  // A agenda da telemedicina e uma unidade no banco, mas nao e lugar: nao
+  // aparece em "Em qual unidade?" nem nas informacoes por unidade. A
+  // telemedicina entra como opcao propria (UNIDADE_TELE), como sempre entrou.
+  const teleId = await agendaDaTelemedicina(admin, clinicId)
+  const semTele = (lista: Unidade[]) => lista.filter((u) => u.id !== teleId)
+
   const { data, error } = await admin
     .from('clinic_units')
     .select(COLUNAS_DA_UNIDADE)
     .eq('clinic_id', clinicId)
     .is('archived_at', null)
     .order('name')
-  if (!error && data) return data as Unidade[]
+  if (!error && data) return semTele(data as Unidade[])
 
   console.warn('clinic_units sem accepts_insurance; seguindo so com particular', error)
   const { data: basico } = await admin
@@ -728,7 +781,7 @@ async function unidadesAtivas(admin: Admin, clinicId: string) {
     .eq('clinic_id', clinicId)
     .is('archived_at', null)
     .order('name')
-  return (basico ?? []) as Unidade[]
+  return semTele((basico ?? []) as Unidade[])
 }
 
 /** As unidades fisicas e, quando a clinica oferece, a telemedicina no fim. */
@@ -760,16 +813,29 @@ async function horariosLivres(
   clinicId: string,
   unitId: string,
 ): Promise<{ horarios: Horario[]; falhou: boolean }> {
-  // Telemedicina: os horarios de todas as unidades fisicas, juntos e em ordem.
-  // Cada um lembra de onde veio, porque e la que a consulta vai ser gravada.
+  // Telemedicina. Cada horario lembra em que agenda a consulta vai ser gravada.
   if (unitId === TELE_ID) {
+    const teleId = await agendaDaTelemedicina(admin, clinicId)
+
+    // Agenda propria com horarios (03/10/2026): so ela vale.
+    if (teleId && (await telemedicinaTemHorarios(admin, teleId))) {
+      const propria = await horariosLivres(admin, clinicId, teleId)
+      return { ...propria, horarios: propria.horarios.map((h) => ({ ...h, unitId: teleId })) }
+    }
+
+    // Sem horarios proprios: os das unidades fisicas, juntos e em ordem, como
+    // era antes. O banco ja tira deles os horarios ocupados por video
+    // (available_slots cruza as agendas). Havendo agenda da telemedicina, a
+    // consulta vai para ela; sem, para a unidade que cedeu o horario.
     const fisicas = await unidadesAtivas(admin, clinicId)
     const partes = await Promise.all(fisicas.map((u) => horariosLivres(admin, clinicId, u.id)))
     if (partes.length > 0 && partes.every((p) => p.falhou)) return { horarios: [], falhou: true }
     const juntos = partes
-      .flatMap((p, i) => p.horarios.map((h) => ({ ...h, unitId: fisicas[i].id })))
+      .flatMap((p, i) => p.horarios.map((h) => ({ ...h, unitId: teleId ?? fisicas[i].id })))
       .sort((a, b) => a.inicio.localeCompare(b.inicio))
-    return { horarios: juntos, falhou: false }
+    // Duas fisicas no mesmo horario viram um horario so de video.
+    const semRepetir = juntos.filter((h, i) => i === 0 || h.inicio !== juntos[i - 1].inicio)
+    return { horarios: teleId ? semRepetir : juntos, falhou: false }
   }
 
   // Libera reservas vencidas antes de listar: sem isso o horario aparece livre
@@ -1677,9 +1743,9 @@ async function marcar(
   /** Convenio escolhido na conversa. Vazio = particular. */
   convenio = '',
 ): Promise<Resultado> {
-  // Telemedicina: a consulta e gravada na unidade fisica que cedeu o horario -
-  // e o mesmo medico, no mesmo dia, entao o horario nao pode ficar livre la.
-  // O que muda e a modalidade.
+  // Telemedicina: a consulta vai para a agenda que o horario trouxe - a da
+  // telemedicina, desde 03/10/2026 (ver horariosLivres). Clinica sem essa
+  // agenda continua gravando na unidade fisica que cedeu o horario.
   const tele = unitId === TELE_ID
   const unidadeDoHorario = tele ? slot.unitId ?? null : unitId
   if (!unidadeDoHorario) {

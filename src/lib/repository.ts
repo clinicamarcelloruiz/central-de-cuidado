@@ -448,6 +448,11 @@ export interface Unit {
   address: string
   /** Numero do estabelecimento de saude. Vazio ate a clinica levantar. */
   cnes: string
+  /**
+   * E a agenda da telemedicina (03/10/2026), e nao um lugar. Ver a migration
+   * 20261003150000_agenda_propria_da_telemedicina.sql.
+   */
+  telemedicina?: boolean
 }
 
 export interface AvailabilityRule {
@@ -558,7 +563,37 @@ export async function listUnits(clinicId: string): Promise<Unit[]> {
     .is('archived_at', null)
     .order('name')
   if (error) fail(error)
-  return data ?? []
+  const unidades: Unit[] = data ?? []
+  const tele = await idsDaTelemedicina(clinicId)
+  return unidades
+    .map((u) => ({ ...u, telemedicina: tele.has(u.id) }))
+    // A telemedicina por ultimo: e a agenda "extra", e as unidades fisicas
+    // continuam na ordem de sempre.
+    .sort((a, b) => Number(a.telemedicina) - Number(b.telemedicina))
+}
+
+/**
+ * Quais unidades sao a agenda da telemedicina (03/10/2026).
+ *
+ * Coluna nova, em consulta separada: se o banco ainda nao a tem, a Agenda
+ * abre igual, so sem a marca de video - em vez de nao abrir.
+ */
+async function idsDaTelemedicina(clinicId: string): Promise<Set<string>> {
+  try {
+    const { data, error } = await tabelaCrua('clinic_units')
+      .select('id,telemedicina')
+      .eq('clinic_id', clinicId)
+      .order('name', { ascending: true })
+    if (error) throw error
+    return new Set(
+      ((data ?? []) as { id: string; telemedicina?: boolean | null }[])
+        .filter((u) => u.telemedicina === true)
+        .map((u) => u.id),
+    )
+  } catch (erro) {
+    console.warn('Sem a coluna clinic_units.telemedicina; agenda sem a marca de video', erro)
+    return new Set()
+  }
 }
 
 export async function createUnit(clinicId: string, name: string, address: string): Promise<Unit> {
@@ -3140,8 +3175,11 @@ export async function listInformacoesDasUnidades(clinicId: string): Promise<Info
     .eq('clinic_id', clinicId)
     .order('name', { ascending: true })
   if (error) fail(error)
+  // A agenda da telemedicina nao e lugar: o texto dela e o da telemedicina,
+  // logo abaixo na mesma tela.
+  const tele = await idsDaTelemedicina(clinicId)
   return ((data ?? []) as { id: string; name: string; info_text: string | null; archived_at: string | null }[])
-    .filter((u) => !u.archived_at)
+    .filter((u) => !u.archived_at && !tele.has(u.id))
     .map((u) => ({ id: u.id, nome: u.name, texto: u.info_text ?? '' }))
 }
 
