@@ -182,7 +182,8 @@ export default function Settings({ db, importDb, clearAll }: Props) {
           aprovado. A equipe editava, salvava, e o paciente continuava
           recebendo o texto da Meta. Agora a tela mostra o que de fato sai.
           O texto abaixo espelha supabase/functions/_shared/modelos.ts
-          (acompanhamento_pos_consulta): mudou la, muda aqui. */}
+          (acompanhamento_pos_consulta_v2 na clinica real desde 03/10/2026;
+          o antigo na de teste): mudou la, muda aqui. */}
       <section className="surface-card overflow-hidden rounded-[26px]">
         <div className="border-b border-[#081b2c]/[0.06] bg-gradient-to-r from-white to-[#f0f6fc] p-5 sm:p-6">
           <div className="flex items-start gap-3">
@@ -203,16 +204,25 @@ export default function Settings({ db, importDb, clearAll }: Props) {
         <div className="space-y-4 p-5 sm:p-6">
           <div className="rounded-[22px] border border-[#081b2c]/[0.07] bg-[#efeae2] p-4 sm:p-5">
             <div className="max-w-md rounded-[14px] rounded-tl-none bg-white p-3.5 text-xs leading-relaxed text-[#203546] shadow-sm">
-              <p>
-                Olá, <strong>[nome do paciente]</strong>. {marcaSemClinicaConhecida(clinicId).quemEntraEmContato} está entrando
-                em contato para acompanhar sua consulta realizada em <strong>[data da consulta]</strong>.
-                Como você está? Responda esta mensagem caso precise falar com nossa equipe.
-              </p>
+              {marcaSemClinicaConhecida(clinicId).acompanhamentoV2 ? (
+                <p>
+                  Olá! Aqui é do {marcaSemClinicaConhecida(clinicId).consultorioNaResposta}. Estamos passando para
+                  saber como <strong>[primeiro nome da criança]</strong> está depois da consulta do
+                  dia <strong>[data da consulta]</strong>. Se precisar falar com a nossa equipe, é só responder
+                  esta mensagem.
+                </p>
+              ) : (
+                <p>
+                  Olá, <strong>[nome do paciente]</strong>. {marcaSemClinicaConhecida(clinicId).quemEntraEmContato} está entrando
+                  em contato para acompanhar sua consulta realizada em <strong>[data da consulta]</strong>.
+                  Como você está? Responda esta mensagem caso precise falar com nossa equipe.
+                </p>
+              )}
               <p className="mt-2 text-[10px] text-slate-400">
                 Para não receber novos acompanhamentos, responda SAIR.
               </p>
               <div className="mt-3 grid gap-1.5 border-t border-[#081b2c]/[0.06] pt-2.5 text-center text-[11px] font-bold text-[#2f7fc1]">
-                <span>Estou bem</span>
+                <span>{marcaSemClinicaConhecida(clinicId).acompanhamentoV2 ? 'Estamos bem' : 'Estou bem'}</span>
                 <span>Preciso de ajuda</span>
                 <span>Não quero receber</span>
               </div>

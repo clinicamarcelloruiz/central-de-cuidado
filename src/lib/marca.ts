@@ -32,6 +32,13 @@ export type Marca = {
    */
   quemEntraEmContato: string
   consultorioNaResposta: string
+  /**
+   * O acompanhamento desta clinica ja e o v2 (03/10/2026): fala com os pais e
+   * pergunta pela crianca pelo primeiro nome. Ver acompanhamento_pos_consulta_v2
+   * em supabase/functions/_shared/modelos.ts. A clinica de teste segue com o
+   * modelo antigo (demo_acompanhamento) ate ganhar o dela.
+   */
+  acompanhamentoV2: boolean
 }
 
 const DR_MARCELLO: Marca = {
@@ -44,6 +51,7 @@ const DR_MARCELLO: Marca = {
   nomeNoRodape: 'Dr. Marcello Ruiz',
   quemEntraEmContato: 'A Clínica Dr. Marcello Ruiz',
   consultorioNaResposta: 'o consultório do Dr. Marcello Ruiz',
+  acompanhamentoV2: true,
 }
 
 const CENTRAL: Marca = {
@@ -54,6 +62,7 @@ const CENTRAL: Marca = {
   nomeNoRodape: null,
   quemEntraEmContato: 'O Consultório Central de Cuidado',
   consultorioNaResposta: 'o Consultório Central de Cuidado',
+  acompanhamentoV2: false,
 }
 
 const CLINICAS_COM_MARCA_PROPRIA: Record<string, Marca> = {
