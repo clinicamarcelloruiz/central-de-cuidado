@@ -144,6 +144,12 @@ function ehReserva(item: Appointment) {
  * calendario por dia. O dia bloqueado entra para ser visto e liberado dali
  * mesmo; sem isso ele so sumia da lista e ninguem sabia por que.
  */
+/** "Livance Ibirapuera - São Paulo" vira "São Paulo"; "Livance · Santos", "Santos". */
+function nomeCurto(nome: string) {
+  const partes = nome.split(/\s+[-·—]\s+/)
+  return (partes[partes.length - 1] || nome).trim()
+}
+
 function agruparPorDia(slots: string[], appointments: Appointment[], bloqueios: ScheduleException[]) {
   const dias = new Map<string, { livres: string[]; marcados: Appointment[]; bloqueio: ScheduleException | null }>()
   const garantir = (chave: string) => {
@@ -582,6 +588,9 @@ export default function Agenda({
     reminderDays: 1,
   })
   const [slots, setSlots] = useState<string[]>([])
+  // Telemedicina sem horario proprio (03/10/2026): de qual unidade fisica veio
+  // cada horario livre. Vazio nas outras agendas.
+  const [origemDoHorario, setOrigemDoHorario] = useState<Map<string, string>>(new Map())
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -663,14 +672,44 @@ export default function Agenda({
       ])
       setLigarHoje(pendencias)
       setRules(regras)
-      setSlots(livres)
+
+      // Agenda da telemedicina sem horario proprio (03/10/2026). O robo
+      // oferece os horarios livres das unidades fisicas - e a agenda precisa
+      // mostrar os mesmos, senao a recepcao ve "sem horarios" enquanto o
+      // robo marca. O banco ja tira dali o que esta ocupado por video.
+      const tele = units.find((u) => u.id === unitId)?.telemedicina
+      if (tele && regras.length === 0) {
+        const fisicas = units.filter((u) => !u.telemedicina)
+        const partes = await Promise.all(
+          fisicas.map((u) =>
+            listAvailableSlots(u.id).catch((erro) => {
+              console.warn(`Horarios livres de ${u.name} indisponiveis`, erro)
+              return [] as string[]
+            }),
+          ),
+        )
+        const origem = new Map<string, string>()
+        partes.forEach((lista, i) => {
+          for (const inicio of lista) {
+            const chave = new Date(inicio).toISOString()
+            const ja = origem.get(chave)
+            const nome = nomeCurto(fisicas[i].name)
+            origem.set(chave, ja && ja !== nome ? `${ja} / ${nome}` : nome)
+          }
+        })
+        setOrigemDoHorario(origem)
+        setSlots([...origem.keys()].sort())
+      } else {
+        setOrigemDoHorario(new Map())
+        setSlots(livres)
+      }
       setAppointments(marcados)
       setHistorico(passadas)
       setVagas(vagasCanceladas)
     } catch (causa) {
       setError(causa instanceof Error ? causa.message : 'Não foi possível carregar os horários.')
     }
-  }, [clinicId, unitId])
+  }, [clinicId, unitId, units])
 
   useEffect(() => {
     void carregarBase()
@@ -1099,7 +1138,7 @@ export default function Agenda({
                   </div>
                 </div>
               )}
-              {rules.length === 0 && (
+              {rules.length === 0 && !unidadeAtual?.telemedicina && (
                 <div className="flex items-start gap-2 rounded-[16px] border border-[#2f7fc1]/40 bg-[#eef5fd] p-3 text-[11px] font-bold text-[#16456b]">
                   <Clock className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>
@@ -1109,7 +1148,7 @@ export default function Agenda({
                 </div>
               )}
 
-              {dias.length === 0 && rules.length > 0 && (
+              {dias.length === 0 && (rules.length > 0 || unidadeAtual?.telemedicina) && (
                 <div className="surface-card rounded-[22px] p-8 text-center text-xs font-semibold text-slate-500">
                   Nenhum horário disponível nos próximos {prefs.horizonDays} dias.
                 </div>
@@ -1428,13 +1467,16 @@ export default function Agenda({
                            conquista, e uma vaga de ultima hora que alguem pode
                            querer. Quem esta na fila de espera cabe aqui. */
                         const vaga = vagaPorInstante.get(new Date(slot).getTime())
+                        const origem = origemDoHorario.get(new Date(slot).toISOString())
                         return (
                           <button
                             key={slot}
                             type="button"
                             onClick={() => setSlotEscolhido(slot)}
                             title={
-                              vaga
+                              origem
+                                ? `Livre em ${origem}. Marcando aqui, vira consulta por vídeo e o horário fecha lá.`
+                                : vaga
                                 ? `${vaga.paciente} cancelou${
                                     vaga.canceladoEm ? ` em ${diaEHora(vaga.canceladoEm)}` : ''
                                   }. O horário está livre.`
@@ -1448,6 +1490,7 @@ export default function Agenda({
                           >
                             {vaga && <span aria-hidden="true">↩ </span>}
                             {hora(slot)}
+                            {origem && <span className="ml-1 font-semibold text-slate-400">· {origem}</span>}
                           </button>
                         )
                       })}
