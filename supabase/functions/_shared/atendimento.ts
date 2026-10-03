@@ -2705,6 +2705,12 @@ export async function tratarConversa(opcoes: {
    */
   podeIniciarMenu: boolean
   /**
+   * A familia recebeu o acompanhamento pos-consulta ha menos de 48h, e
+   * ninguem da equipe esta conversando. Ver depoisDoAcompanhamento em
+   * lembrete.ts. Ausente vale falso.
+   */
+  posAcompanhamento?: boolean
+  /**
    * A mensagem e um anexo: foto, documento, audio ou video.
    *
    * Quem manda a foto de um exame quer que alguem OLHE. Responder o menu a isso
@@ -3022,10 +3028,58 @@ export async function tratarConversa(opcoes: {
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
       )
     }
+    // Depois do acompanhamento pos-consulta (03/10/2026).
+    //
+    // O modelo diz "Como voce esta? Responda esta mensagem caso precise falar
+    // com nossa equipe" - entao o que a familia escreve em seguida e recado
+    // para a equipe, nao inicio de conversa. Em 03/10 o robo tratou como
+    // inicio: a mae do Davi contou que fez dois dos tres exames e recebeu "nao
+    // posso orientar sobre sintomas" com o menu, sem ninguem avisado; a Eloah
+    // agradeceu e recebeu a apresentacao inteira do consultorio.
+    //
+    // Pedido de marcar e nota fiscal seguem o caminho deles, mais abaixo. Frase
+    // curta que nao e agradecimento ("sim", "otimo") tambem: cai na regra de
+    // sempre.
+    if (opcoes.posAcompanhamento) {
+      if (soAgradecimento(texto)) {
+        registrar('acompanhamento_agradeceu')
+        return { resposta: '💙 Nós que agradecemos! Qualquer coisa, é só escrever por aqui.', concluida: true }
+      }
+      const palavrasDoRecado = normalizar(texto)
+        .replace(/[^a-z\s]/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter((p) => p.length > 1)
+      const recado =
+        palavrasDoRecado.length >= 3 &&
+        !soCumprimento(texto) &&
+        !pediuNotaFiscal(texto) &&
+        !(pediuAgendamento(texto) && !assuntoClinico(texto))
+      // Urgencia nao chega aqui: "urgente" e tratado antes, em qualquer etapa.
+      if (recado) {
+        registrar('acompanhamento_recado')
+        const chamada = await chamarEquipe(admin, conversationId)
+        return {
+          ...chamada,
+          resposta:
+            'Obrigado por nos contar! 💙 Sua mensagem já está com a nossa equipe, e ' +
+            `${quemAtende(clinicId).o} fica sabendo. Se for preciso, alguém responde por aqui.\n\n` +
+            avisoDeHorario() + '\n\n' + VOLTA,
+        }
+      }
+    }
+
     // Sem etapa aberta, o menu e uma iniciativa nossa - e iniciativa tem hora.
     // Mandar menu depois de "Estou bem, obrigada", ou no meio de uma conversa
     // que a secretaria esta tocando, atrapalha em vez de ajudar.
     if (!opcoes.podeIniciarMenu) return null
+
+    // So agradecimento, sem etapa aberta (03/10/2026): "Ok, obrigada" depois
+    // de "Consulta confirmada" ou de um atendimento encerrado recebia a
+    // apresentacao inteira do consultorio, como se a pessoa chegasse agora.
+    if (soAgradecimento(texto)) {
+      return { resposta: '😊 Por nada! Se precisar de algo, é só escrever *0* para ver as opções.', concluida: true }
+    }
 
     // Nota fiscal: a mensagem ja diz o que a pessoa quer. Ver pediuNotaFiscal.
     if (pediuNotaFiscal(texto)) return await registrarPedidoDeNota(admin, conversationId)

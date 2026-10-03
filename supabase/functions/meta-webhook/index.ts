@@ -15,6 +15,7 @@ import { ESPERA_MAXIMA_MS, precisaEsperar } from '../_shared/rajada.ts'
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined
 import {
   avisoDaResposta,
+  depoisDoAcompanhamento,
   respostaAoAcompanhamento,
   equipeFalouRecentemente as equipeFalouHaPouco,
   interpretarResposta,
@@ -535,8 +536,11 @@ Deno.serve(async (req) => {
           // Id da nossa mensagem mais recente, para saber se um toque veio de
           // uma lista antiga. Ver oQueFoiEscolhido em _shared/lembrete.ts.
           let ultimoEnvioId: string | null = null
+          // A conversa ainda e a do acompanhamento pos-consulta (03/10/2026).
+          // Ver depoisDoAcompanhamento em _shared/lembrete.ts.
+          let acompanhamentoRecente = false
           if (conversaAnterior?.id) {
-            const [ultimoNossoResult, ultimoHumanoResult] = await Promise.all([
+            const [ultimoNossoResult, ultimoHumanoResult, ultimoAcompanhamentoResult] = await Promise.all([
               admin
                 .from('whatsapp_messages')
                 .select('followup_id,appointment_id,created_at,external_message_id')
@@ -554,9 +558,25 @@ Deno.serve(async (req) => {
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .maybeSingle(),
+              admin
+                .from('whatsapp_messages')
+                .select('created_at')
+                .eq('conversation_id', conversaAnterior.id)
+                .eq('direction', 'outbound')
+                .not('followup_id', 'is', null)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle(),
             ])
 
             respondendoEnvioNosso = dentroDaJanelaDeResposta(ultimoNossoResult.data)
+            // Falha aqui custa so o tratamento especial do pos-consulta: a
+            // mensagem segue o caminho de sempre. Mas avisa, para nao virar
+            // mais um defeito mudo.
+            if (ultimoAcompanhamentoResult.error) {
+              console.warn('Nao consegui ler o ultimo acompanhamento da conversa', ultimoAcompanhamentoResult.error)
+            }
+            acompanhamentoRecente = depoisDoAcompanhamento(ultimoAcompanhamentoResult.data)
             ultimoEnvioId = (ultimoNossoResult.data as { external_message_id?: string | null } | null)?.external_message_id ?? null
             // Coluna nova (01/10/2026) em consulta propria: sem ela, perde-se
             // so o "Destravar" valendo contra a regra das 12h - nao a conversa.
@@ -761,6 +781,9 @@ Deno.serve(async (req) => {
               opcoesAtuais: conversaAnterior?.booking_options ?? null,
               unidadeEmAndamento: conversaAnterior?.booking_unit_id ?? null,
               podeIniciarMenu: !respondendoEnvioNosso && !equipeFalouRecentemente,
+              // Com a equipe ja conversando, quem responde e ela - o robo nao
+              // entra nem para dizer "passei sua mensagem".
+              posAcompanhamento: acompanhamentoRecente && !equipeFalouRecentemente,
               texto: escolhido,
               telefone: waId,
               pacientes,

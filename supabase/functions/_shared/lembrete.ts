@@ -52,6 +52,29 @@ export function respondendoEnvioNosso(
 }
 
 /**
+ * A conversa ainda e a do acompanhamento pos-consulta?
+ *
+ * Diferente de respondendoEnvioNosso, que olha so a ULTIMA mensagem nossa: la,
+ * o "Que bom saber!" do robo ja apaga o contexto. Foi o que aconteceu em
+ * 03/10/2026 - a familia do Davi tocou em "Estou bem" e, um minuto depois,
+ * escreveu que tinha feito dois dos tres exames e esperava o convenio liberar o
+ * terceiro. Para o robo aquilo ja era conversa nova: respondeu "sobre sintomas
+ * e remedios eu nao posso orientar" com o menu, e o recado para o medico nao
+ * acendeu para ninguem. A Eloah agradeceu ("Obrigada🙏🏻🌹") e recebeu a
+ * apresentacao inteira do consultorio.
+ *
+ * Aqui vale o ACOMPANHAMENTO mais recente (followup_id), dentro de 48h.
+ */
+export function depoisDoAcompanhamento(
+  ultimoAcompanhamento: { created_at?: string | null } | null,
+  agora = Date.now(),
+) {
+  if (!ultimoAcompanhamento?.created_at) return false
+  const idade = agora - new Date(ultimoAcompanhamento.created_at).getTime()
+  return idade >= 0 && idade < JANELA_RESPOSTA_MS
+}
+
+/**
  * Alguem da equipe escreveu para esta pessoa ha pouco?
  *
  * A pergunta precisa ser sobre gente. Ate 30/08/2026 ela era so "saiu alguma

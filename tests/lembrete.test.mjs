@@ -7,6 +7,7 @@
 // segundos, e nao la, em silencio.
 import {
   avisoDaResposta,
+  depoisDoAcompanhamento,
   respostaAoAcompanhamento,
   equipeFalouRecentemente,
   interpretarResposta,
@@ -422,6 +423,18 @@ conferir(
     oQueFoiEscolhido({ id: '', titulo: 'quero marcar' }) === 'quero marcar',
   )
 }
+
+// ---------------------------------------------------------------------------
+// Contexto do acompanhamento pos-consulta (03/10/2026)
+// ---------------------------------------------------------------------------
+//
+// O "Que bom saber!" do robo nao pode apagar o contexto: quem decide e o
+// acompanhamento mais recente, nao a ultima mensagem nossa.
+conferir('Acompanhamento de 1h atrás ainda vale', depoisDoAcompanhamento({ created_at: quando(1) }, AGORA) === true)
+conferir('Acompanhamento de 47h atrás ainda vale', depoisDoAcompanhamento({ created_at: quando(47) }, AGORA) === true)
+conferir('Acompanhamento de 3 dias atrás já não vale', depoisDoAcompanhamento({ created_at: quando(72) }, AGORA) === false)
+conferir('Sem acompanhamento, não vale', depoisDoAcompanhamento(null, AGORA) === false)
+conferir('Relógio torto (no futuro) não vale', depoisDoAcompanhamento({ created_at: quando(-2) }, AGORA) === false)
 
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)
 console.log(`FALHAS: ${falhas.length}`)

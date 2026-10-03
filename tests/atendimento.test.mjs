@@ -321,6 +321,7 @@ async function caso(titulo, passos, opcoes = {}) {
       // se aquela mensagem e a primeira da conversa.
       jaViuOMenu: Boolean(conversa.menu_sent_at),
       podeIniciarMenu: ajustes.podeIniciarMenu ?? opcoes.podeIniciarMenu ?? true,
+      posAcompanhamento: ajustes.posAcompanhamento ?? opcoes.posAcompanhamento ?? false,
       texto: texto === '[ANEXO]' ? '' : texto,
       telefone: opcoes.telefone ?? '5511999999999',
       pacientes: opcoes.pacientes ?? [],
@@ -658,6 +659,93 @@ await caso(
   'Mas quem pede para agendar é atendido mesmo assim',
   [['agendar', 'Em qual unidade']],
   { podeIniciarMenu: false },
+)
+
+// Depois do acompanhamento pos-consulta (casos reais de 03/10/2026). O
+// "Que bom saber!" do robo ja tinha saido, entao podeIniciarMenu era verdadeiro
+// e a mensagem seguinte era tratada como inicio de conversa.
+await caso(
+  'Real 03/10: recado depois do acompanhamento vai para a equipe, sem sermão',
+  [[
+    'Bom dia dos 3 exames que o Dr pediu para o Davi, já consegui fazer 2. Estou no aguardo da autorização do convênio para o 3 exame.',
+    ['Obrigado por nos contar', 'Dr. Marcello fica sabendo'],
+  ]],
+  {
+    posAcompanhamento: true,
+    verificar: ({ conversa, ultimoToque, titulo }) => {
+      if (ultimoToque.atencao !== 'atendente') falhas.push(`${titulo} | atenção ${ultimoToque.atencao}`)
+      else passou++
+      if (conversa.booking_state !== 'atendente') falhas.push(`${titulo} | etapa ${conversa.booking_state}`)
+      else passou++
+      if (/sintomas, remédios/.test(ultimoToque.resposta)) falhas.push(`${titulo} | ainda diz que não orienta`)
+      else passou++
+    },
+  },
+)
+
+await caso(
+  'Real 03/10: "Obrigada🙏🏻🌹" depois do acompanhamento não recebe a apresentação',
+  [['Obrigada🙏🏻🌹', 'Nós que agradecemos']],
+  {
+    posAcompanhamento: true,
+    verificar: ({ ultimoToque, titulo }) => {
+      if (/consultório do Dr/.test(ultimoToque.resposta)) falhas.push(`${titulo} | mandou a apresentação`)
+      else passou++
+      if (!ultimoToque.concluida || ultimoToque.atencao) falhas.push(`${titulo} | deveria concluir sem chamar a equipe`)
+      else passou++
+    },
+  },
+)
+
+// Resposta digitada direto no acompanhamento (podeIniciarMenu falso): antes era
+// silencio, e a familia ficava sem saber se alguem leu.
+await caso(
+  'Acompanhamento respondido por escrito: a família ouve que a equipe recebeu',
+  [['Ele melhorou bastante da constipação, obrigada doutor', 'Obrigado por nos contar']],
+  { posAcompanhamento: true, podeIniciarMenu: false },
+)
+
+await caso(
+  'Acompanhamento com urgência sobe como urgência',
+  [['Ele piorou muito, está vomitando sem parar, é urgente', 'é urgência']],
+  {
+    posAcompanhamento: true,
+    verificar: ({ ultimoToque, titulo }) => {
+      if (ultimoToque.atencao !== 'urgencia') falhas.push(`${titulo} | atenção ${ultimoToque.atencao}`)
+      else passou++
+    },
+  },
+)
+
+await caso(
+  'Depois do acompanhamento, pedido de retorno abre a agenda (não vira recado)',
+  [['quero marcar o retorno dele', 'Em qual unidade']],
+  { posAcompanhamento: true },
+)
+
+await caso(
+  'Depois do acompanhamento, cumprimento continua recebendo o menu',
+  [['Bom dia', 'Como podemos ajudar']],
+  { posAcompanhamento: true },
+)
+
+// Fora do acompanhamento, "ok obrigada" sem etapa aberta (depois de "Consulta
+// confirmada", por exemplo) tambem nao recebe a apresentacao.
+await caso(
+  'Agradecimento sem etapa aberta: "Por nada", sem apresentação',
+  [['Ok, obrigada!', 'Por nada']],
+  {
+    verificar: ({ ultimoToque, titulo }) => {
+      if (/consultório do Dr/.test(ultimoToque.resposta)) falhas.push(`${titulo} | mandou a apresentação`)
+      else passou++
+    },
+  },
+)
+
+// Sem o contexto do acompanhamento, frase longa continua no caminho de sempre.
+await caso(
+  'Sem acompanhamento recente, sintoma continua recebendo a orientação de sempre',
+  [['meu filho está com dor de barriga desde ontem', 'quem responde é o Dr. Marcello']],
 )
 
 // ---------------------------------------------------------------
