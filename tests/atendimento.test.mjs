@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha } from './atendimento.build.mjs'
+import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 import { montarMensagens } from './conteudo.build.mjs'
 
@@ -2044,6 +2044,73 @@ await caso('"Pode agendar" na fila recebe o botão de marcar', [
   ['2', 'Marcar uma consulta'],
   ['Marcar uma consulta', 'Em qual unidade'],
 ], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false })
+
+// Real 05/10/2026 (Conrado): o toque no botão manda o ID do botão, e não o
+// título. Com id "2", o toque virava "quero marcar" de novo e o robô oferecia o
+// mesmo botão - três vezes. O teste acima só mandava o título, que é o caso do
+// botão de mensagem antiga, e por isso não viu o laço.
+{
+  let idDoBotao = null
+  await caso('Real 05/10: na fila, o botão de marcar tem id próprio', [
+    ['Gostaria de agendar', 'Marcar uma consulta'],
+  ], {
+    estadoInicial: { booking_state: 'atendente' },
+    podeIniciarMenu: false,
+    verificar: ({ ultimoToque }) => { idDoBotao = ultimoToque.botoes?.[0]?.id ?? null },
+  })
+  await caso('Real 05/10: tocar no botão abre a agenda (não repete o convite)', [
+    [idDoBotao ?? '(sem botão)', 'Em qual unidade'],
+  ], { estadoInicial: { booking_state: 'atendente', auto_replies_while_waiting: 1 }, podeIniciarMenu: false })
+}
+
+await caso('Real 05/10: "Voltar ao início" de uma mensagem antiga mostra o menu', [
+  ['Voltar ao início', 'Como podemos ajudar'],
+], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false })
+
+// Retorno para daqui a meses (real 03/10/2026, Ben). Depois do "Estou bem",
+// o pai pediu o retorno de 3 meses; o robo abriu uma agenda de 15 dias e ele
+// saiu sem marcar e sem ninguem saber.
+await caso('Real 03/10: retorno em 3 meses vai para a equipe, não para a agenda de 15 dias', [
+  ['Dr. pediu para agendar retorno em 3 meses. Gostaria de deixar agendado.', ['Anotei seu pedido de retorno', '15 dias']],
+], {
+  posAcompanhamento: true,
+  verificar: ({ ultimoToque, conversa, titulo }) => {
+    if (ultimoToque.atencao !== 'atendente') falhas.push(`${titulo} | atenção ${ultimoToque.atencao}`)
+    else passou++
+    if (conversa.booking_state !== 'atendente') falhas.push(`${titulo} | etapa ${conversa.booking_state}`)
+    else passou++
+  },
+})
+
+await caso('Retorno "daqui a dois meses" com o menu na tela também vai para a equipe', [
+  ['quero marcar o retorno daqui a dois meses', 'Anotei seu pedido de retorno'],
+], { estadoInicial: NO_MENU })
+
+await caso('Na fila: retorno em 6 meses responde sem oferecer a agenda', [
+  ['Preciso agendar o retorno dele em 6 meses', 'Anotei seu pedido de retorno'],
+], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false })
+
+await caso('Idade do filho não é prazo de retorno: "tem 6 meses" abre a agenda', [
+  ['Meu filho tem 6 meses, quero marcar uma consulta', 'Em qual unidade'],
+], { estadoInicial: NO_MENU })
+
+await caso('Retorno em 10 dias cabe na agenda e abre a agenda normal', [
+  ['quero marcar o retorno em 10 dias', 'Em qual unidade'],
+], { estadoInicial: NO_MENU })
+
+{
+  const titulo = 'retornoAlemDaAgenda: mês certo e limites'
+  const hoje = new Date('2026-10-05T12:00:00-03:00')
+  const tres = retornoAlemDaAgenda('retorno em 3 meses', 15, hoje)
+  if (tres?.mes !== 'janeiro') falhas.push(`${titulo} | 3 meses deveria cair em janeiro, veio ${tres?.mes}`)
+  else passou++
+  if (retornoAlemDaAgenda('retorno em 2 semanas', 15, hoje) !== null) falhas.push(`${titulo} | 2 semanas cabe em 15 dias`)
+  else passou++
+  if (retornoAlemDaAgenda('retorno em 3 semanas', 15, hoje) === null) falhas.push(`${titulo} | 3 semanas passa de 15 dias`)
+  else passou++
+  if (retornoAlemDaAgenda('ela nasceu há 3 meses', 15, hoje) !== null) falhas.push(`${titulo} | idade não é prazo`)
+  else passou++
+}
 
 // "Marca consulta pra minha filha, e valor da consulta" (24/09/2026): recebia
 // so o valor, porque "marca" nao era "marcar".

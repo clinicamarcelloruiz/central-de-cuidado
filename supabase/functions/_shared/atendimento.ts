@@ -319,7 +319,12 @@ function pediuMenu(texto: string) {
     t === 'inicio' ||
     t === 'voltar ao menu' ||
     t === 'menu principal' ||
-    t === 'opcoes'
+    t === 'opcoes' ||
+    // Titulos dos botoes de fecho (conteudo.ts). Toque em botao de mensagem
+    // ANTIGA chega como o titulo, e nao como "0" (ver oQueFoiEscolhido): em
+    // 05/10/2026 o Conrado tocou "Voltar ao inicio" e nao recebeu nada.
+    t === 'voltar ao inicio' ||
+    t === 'ver as opcoes'
   )
 }
 
@@ -668,6 +673,78 @@ async function telemedicinaDaClinica(
     ativa: Boolean(data?.telemedicine_enabled),
     informacoes: (data?.telemedicine_info_text ?? '').trim(),
   }
+}
+
+/** Quantos dias a frente a agenda abre (clinic_settings.schedule_horizon_days). */
+async function horizonteDaAgenda(admin: Admin, clinicId: string): Promise<number> {
+  try {
+    const { data, error } = await admin
+      .from('clinic_settings')
+      .select('schedule_horizon_days')
+      .eq('clinic_id', clinicId)
+      .maybeSingle()
+    if (error) throw error
+    const dias = Number((data as { schedule_horizon_days?: number } | null)?.schedule_horizon_days)
+    return Number.isFinite(dias) && dias > 0 ? dias : 15
+  } catch (erro) {
+    console.warn('Nao consegui ler o horizonte da agenda; usando 15 dias', erro)
+    return 15
+  }
+}
+
+const NUMERO_POR_EXTENSO: Record<string, number> = {
+  um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6,
+  sete: 7, oito: 8, nove: 9, dez: 10, onze: 11, doze: 12,
+}
+
+/**
+ * Pedido de retorno para alem do que a agenda mostra (05/10/2026).
+ *
+ * O Ben respondeu ao acompanhamento "Dr. pediu para agendar retorno em 3
+ * meses. Gostaria de deixar agendado". O robo abriu a agenda - que so mostra
+ * 15 dias - e ele desistiu sem marcar e sem ninguem saber.
+ *
+ * So conta com marca de prazo ("em 3 meses", "daqui a 2 meses", "dentro de 6
+ * semanas"): "meu filho tem 6 meses, quero marcar" fala da idade, nao do
+ * retorno, e precisa da agenda de sempre.
+ */
+export function retornoAlemDaAgenda(
+  texto: string,
+  horizonteDias: number,
+  agora = new Date(),
+): { dias: number; mes: string } | null {
+  const t = normalizar(texto)
+  const m = t.match(
+    /(?:\bem|\bdaqui a|\bdaqui|\bdentro de|\bapos|\bdepois de|\bpara daqui a)\s+(\d{1,2}|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze)\s+(mes|meses|semana|semanas|ano|anos)\b/,
+  )
+  if (!m) return null
+  const n = /^\d+$/.test(m[1]) ? Number(m[1]) : NUMERO_POR_EXTENSO[m[1]]
+  const porUnidade = m[2].startsWith('mes') ? 30 : m[2].startsWith('semana') ? 7 : 365
+  const dias = n * porUnidade
+  if (!dias || dias <= horizonteDias) return null
+  const alvo = new Date(agora.getTime() + dias * 86400000)
+  const mes = alvo.toLocaleDateString('pt-BR', { month: 'long', timeZone: 'America/Sao_Paulo' })
+  return { dias, mes }
+}
+
+/** Resposta ao retorno distante: explica a agenda e passa o pedido para a equipe. */
+async function pedirRetornoDistante(
+  admin: Admin,
+  conversationId: string,
+  pedido: { dias: number; mes: string },
+  horizonteDias: number,
+  jaNaFila: boolean,
+): Promise<Resultado> {
+  registrar('retorno_distante', String(pedido.dias))
+  const texto =
+    `🗓️ Anotei seu pedido de retorno para *${pedido.mes}*.\n\n` +
+    `Nossa agenda abre só ${horizonteDias} dias à frente, então esse horário a nossa equipe ` +
+    'reserva para você e confirma a data por aqui.\n\n' +
+    avisoDeHorario() + '\n\n' + VOLTA
+  // Na fila da equipe ja: so responde, sem mexer no estado.
+  if (jaNaFila) return { resposta: texto, atencao: 'atendente' }
+  const chamada = await chamarEquipe(admin, conversationId)
+  return { ...chamada, resposta: texto }
 }
 
 /**
@@ -2922,7 +2999,11 @@ export async function tratarConversa(opcoes: {
     // Ela escreveu "nao estou conseguindo marcar" e esperou 35 minutos. O
     // titulo exato do item so chega por toque (quem digita escreve outra
     // coisa), entao isto nao atropela conversa nenhuma: e pedido explicito.
-    if (normalizar(texto) === 'marcar uma consulta') {
+    // O botao oferecido logo abaixo tem id proprio (MARCAR_AGORA), e nao "2"
+    // (05/10/2026). Com id "2", o toque chegava como "2", que aqui e pedido de
+    // marcar - e o robo oferecia o mesmo botao de novo. O Conrado tocou tres
+    // vezes, ouviu tres vezes "toque em Marcar uma consulta" e desistiu.
+    if (['marcar uma consulta', 'marcar_agora'].includes(normalizar(texto))) {
       registrar('opcao_escolhida', '2')
       return await iniciarAgendamento(
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
@@ -2974,6 +3055,16 @@ export async function tratarConversa(opcoes: {
     // espera continua valendo, para nao virar eco.
     const querMarcar = pediuAgendamento(texto) || texto.trim() === '2'
     if (querMarcar && jaRespondidas < LIMITE_NA_ESPERA) {
+      // Na fila, retorno para daqui a meses: o botao de marcar levaria a uma
+      // agenda que nao chega la. Ver retornoAlemDaAgenda.
+      const distante = await retornoDistante()
+      if (distante) {
+        await admin
+          .from('whatsapp_conversations')
+          .update({ auto_replies_while_waiting: jaRespondidas + 1 })
+          .eq('id', conversationId)
+        return await pedirRetornoDistante(admin, conversationId, distante.pedido, distante.horizonte, true)
+      }
       const lista = await carregarRespostas(admin, clinicId)
       // "Marca consulta pra minha filha, e valor da consulta": as duas coisas.
       const junto = acharResposta(texto, lista, 2)
@@ -2986,7 +3077,7 @@ export async function tratarConversa(opcoes: {
           (junto ? `${junto.resposta}\n\n` : '') +
           '📅 Para ver os horários livres e marcar agora, toque em *Marcar uma consulta*. ' +
           'Sua conversa continua na fila da equipe.',
-        botoes: [{ id: '2', titulo: 'Marcar uma consulta' }],
+        botoes: [{ id: 'MARCAR_AGORA', titulo: 'Marcar uma consulta' }],
       }
     }
 
@@ -3072,8 +3163,25 @@ export async function tratarConversa(opcoes: {
     )
   }
 
+
+  /** Pedido de retorno (ou de marcar) para daqui a meses? Ver retornoAlemDaAgenda. */
+  async function retornoDistante(): Promise<{ pedido: { dias: number; mes: string }; horizonte: number } | null> {
+    if (!pediuAgendamento(texto) && !/\bretorno\b/.test(normalizar(texto))) return null
+    const horizonte = await horizonteDaAgenda(admin, clinicId)
+    const pedido = retornoAlemDaAgenda(texto, horizonte)
+    return pedido ? { pedido, horizonte } : null
+  }
+
   // ---- Sem etapa em andamento ----
   if (!estadoAtual) {
+    // Retorno para daqui a meses (05/10/2026): a agenda nao chega la, entao a
+    // equipe reserva. Antes do atalho de agendamento, que abriria uma agenda de
+    // 15 dias para quem pediu 3 meses.
+    if (opcoes.podeIniciarMenu || opcoes.posAcompanhamento) {
+      const distante = await retornoDistante()
+      if (distante) return await pedirRetornoDistante(admin, conversationId, distante.pedido, distante.horizonte, false)
+    }
+
     // Atalho de agendamento so depois que a pessoa viu o menu.
     //
     // O botao do site manda "Vim pelo site e gostaria de agendar uma consulta"
@@ -3334,6 +3442,12 @@ export async function tratarConversa(opcoes: {
     // queria marcar" e as duas coisas: o robo diz que nao orienta sobre sintoma
     // e mostra o menu, de onde a pessoa marca pelo *2*. Pular essa frase seria
     // o robo fingir que nao leu a parte que mais importava.
+    // Retorno para daqui a meses, com o menu na tela (05/10/2026).
+    if (opcoes.podeIniciarMenu) {
+      const distante = await retornoDistante()
+      if (distante) return await pedirRetornoDistante(admin, conversationId, distante.pedido, distante.horizonte, false)
+    }
+
     if (pediuAgendamento(texto) && !assuntoClinico(texto)) {
       return await iniciarAgendamento(
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,

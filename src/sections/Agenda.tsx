@@ -21,6 +21,7 @@ import {
   archiveUnit,
   cancelAppointment,
   MOTIVOS_DE_CANCELAMENTO,
+  MOTIVO_CORRECAO_INTERNA,
   type ResultadoDoCancelamento,
   createAppointment,
   createAvailabilityRule,
@@ -398,6 +399,8 @@ function CaixaDeCancelamento({
 
   const personalizado = motivo === 'Outro motivo'
   const texto = personalizado ? outro.trim() : motivo
+  // Correcao interna nunca avisa: a consulta "de verdade" continua marcada.
+  const interno = motivo === MOTIVO_CORRECAO_INTERNA
 
   async function confirmar() {
     if (!texto) {
@@ -407,7 +410,7 @@ function CaixaDeCancelamento({
     setErro('')
     setEnviando(true)
     try {
-      setResultado(await onCancelar(texto, avisar, sugerir))
+      setResultado(await onCancelar(texto, avisar && !interno, sugerir && !interno))
     } catch (causa) {
       setErro(causa instanceof Error ? causa.message : 'Não foi possível cancelar.')
     } finally {
@@ -455,7 +458,7 @@ function CaixaDeCancelamento({
               Motivo
             </p>
             <div className="mt-2 space-y-1.5">
-              {[...MOTIVOS_DE_CANCELAMENTO, 'Outro motivo'].map((opcao) => (
+              {[...MOTIVOS_DE_CANCELAMENTO, MOTIVO_CORRECAO_INTERNA, 'Outro motivo'].map((opcao) => (
                 <label
                   key={opcao}
                   className={`flex cursor-pointer items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-[11px] font-bold transition ${
@@ -487,6 +490,17 @@ function CaixaDeCancelamento({
               />
             )}
 
+            {interno && (
+              <p className="mt-3 flex items-start gap-2 rounded-xl bg-[#ebf4fd] px-3.5 py-3 text-[11px] font-bold leading-relaxed text-[#1a5079]">
+                <MessageCircleOff className="mt-px h-4 w-4 shrink-0" />
+                <span>
+                  O paciente não recebe aviso: é só uma correção na agenda. Confira se a consulta
+                  certa continua marcada.
+                </span>
+              </p>
+            )}
+
+            {!interno && (
             <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-xl bg-[#f8f7f4] px-3.5 py-3 text-[11px] font-bold text-slate-600">
               <input
                 type="checkbox"
@@ -501,10 +515,11 @@ function CaixaDeCancelamento({
                 </span>
               </span>
             </label>
+            )}
 
             {/* So faz sentido dentro do aviso: sugerir horario a quem nao vai
                 receber mensagem nenhuma seria conversa com a parede. */}
-            {avisar && (
+            {avisar && !interno && (
               <label className="mt-1.5 flex cursor-pointer items-start gap-2.5 rounded-xl bg-[#f8f7f4] px-3.5 py-3 text-[11px] font-bold text-slate-600">
                 <input
                   type="checkbox"

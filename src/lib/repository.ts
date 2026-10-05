@@ -1471,6 +1471,15 @@ export const MOTIVOS_DE_CANCELAMENTO = [
   'A pedido do paciente',
 ] as const
 
+/**
+ * Cancelamento que e so arrumacao da agenda (05/10/2026): consulta duplicada,
+ * marcada errada, refeita para ligar a ficha. Nao vai para o paciente - nao ha
+ * nada para ele saber. Ate aqui a recepcao escolhia "A pedido do paciente"
+ * para isso, e a Ana Vitoria recebeu "foi cancelada, conforme voce pediu" de
+ * uma consulta que continuava de pe.
+ */
+export const MOTIVO_CORRECAO_INTERNA = 'Correção na agenda (marcação duplicada ou errada)'
+
 export interface ResultadoDoCancelamento {
   avisado: boolean
   enviadoPara?: string | null
@@ -2365,8 +2374,62 @@ export async function createPatient(clinicId: string, draft: PatientDraft) {
     .single()
 
   if (error) fail(error)
+  // Consulta marcada antes do cadastro ganha a ficha nova (05/10/2026). Ver
+  // vincularConsultasSemFicha. Falhar aqui nao desfaz o cadastro.
+  try {
+    await vincularConsultasSemFicha(clinicId, data.id, data.name, data.phone)
+  } catch (erro) {
+    console.warn('Cadastro salvo, mas nao consegui ligar as consultas ja marcadas a ficha', erro)
+  }
   const followups = await followupsForPatient(clinicId, data.id)
   return mapPatient(data as PatientRow, followups)
+}
+
+/**
+ * Liga a ficha recem-criada as consultas futuras marcadas so com nome e
+ * telefone (05/10/2026).
+ *
+ * Caso da Ana Vitoria: a recepcao marcou 14/10 15:20 com nome e WhatsApp
+ * (13:01), criou o cadastro (13:04) e, para a consulta "pegar" a ficha,
+ * cancelou e marcou de novo no mesmo horario (13:05). O cancelamento mandou
+ * "foi cancelada, conforme voce pediu" para uma mae que nao tinha pedido nada.
+ * Com o vinculo automatico, cadastrar basta.
+ *
+ * Mesma regra de irmaos de marcarComparecimento: pelo nome casa sempre; pelo
+ * telefone, so se for a UNICA consulta sem ficha daquele numero - com dois
+ * filhos no mesmo celular, o telefone nao diz qual e qual.
+ */
+async function vincularConsultasSemFicha(clinicId: string, patientId: string, nome: string, telefone: string | null) {
+  const digitos = (telefone ?? '').replace(/\D/g, '')
+  const finalDoTelefone = digitos.length >= 8 ? digitos.slice(-8) : ''
+  const nomeLimpo = (nome ?? '').trim().toLowerCase()
+  if (!finalDoTelefone && !nomeLimpo) return
+
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('id,contact_name,contact_phone')
+    .eq('clinic_id', clinicId)
+    .is('patient_id', null)
+    .neq('status', 'cancelled')
+    .gte('starts_at', new Date(Date.now() - 12 * 3600 * 1000).toISOString())
+  if (error) throw error
+
+  const semFicha = data ?? []
+  const ids = new Set<string>()
+  for (const a of semFicha) {
+    if (nomeLimpo && (a.contact_name ?? '').trim().toLowerCase() === nomeLimpo) ids.add(a.id)
+  }
+  const peloTelefone = semFicha.filter(
+    (a) => Boolean(finalDoTelefone) && (a.contact_phone ?? '').replace(/\D/g, '').endsWith(finalDoTelefone),
+  )
+  if (peloTelefone.length === 1) ids.add(peloTelefone[0].id)
+  if (ids.size === 0) return
+
+  const { error: erroDoVinculo } = await supabase
+    .from('appointments')
+    .update({ patient_id: patientId })
+    .in('id', [...ids])
+  if (erroDoVinculo) throw erroDoVinculo
 }
 
 export async function listConsultations(clinicId: string, patientId: string) {

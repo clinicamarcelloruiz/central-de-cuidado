@@ -170,6 +170,14 @@ Deno.serve(async (req) => {
       return json({ ok: true, avisado: false, motivoDoSilencio: 'A equipe escolheu não avisar.' })
     }
 
+    // Correcao interna da agenda nunca vira mensagem (05/10/2026), venha a
+    // tela que vier. Ver MOTIVO_CORRECAO_INTERNA em src/lib/repository.ts: a
+    // Ana Vitoria recebeu "foi cancelada, conforme voce pediu" de uma consulta
+    // que a recepcao so tinha refeito para ligar a ficha.
+    if (/^corre[cç][aã]o na agenda/i.test(motivo)) {
+      return json({ ok: true, avisado: false, motivoDoSilencio: 'Correção na agenda: o paciente não é avisado.' })
+    }
+
     // ---- Aviso ao paciente ----
 
     /**
