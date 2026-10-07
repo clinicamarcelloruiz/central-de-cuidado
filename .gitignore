@@ -65,3 +65,6 @@ tests/aviso-da-equipe.build.mjs
 tests/rajada.build.mjs
 tests/ficha-pendente.build.mjs
 tests/conteudo.build.mjs
+
+# Saida do SIMULAR CONVERSAS.bat
+simulacao-do-robo.txt

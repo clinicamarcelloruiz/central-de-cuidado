@@ -1100,6 +1100,24 @@ async function responderPergunta(
  * estava. A etapa continua de pe: a pergunta e repetida logo abaixo, e quem
  * quiser gente digita 3 ou 9, como o robo diz.
  */
+/**
+ * O que o robo diz quando a mensagem fala de sintoma, exame ou remedio.
+ *
+ * Reescrita em 07/10/2026. O Lucas perguntou, na opcao de informacoes, "o Dr.
+ * Marcello costuma solicitar exames para investigar dor abdominal cronica?" -
+ * uma pergunta sobre o atendimento, e nao um pedido de conduta - e recebeu
+ * "Sobre sintomas, remedios e o que fazer... nao posso orientar" seguido de
+ * "responda com o numero da unidade". Soou como fora de assunto. Agora a frase
+ * diz o que acontece de fato (o medico avalia na consulta e decide o que
+ * investigar) e aponta o caminho: marcar ou falar com a equipe.
+ */
+function fraseClinica(clinicId: string) {
+  return (
+    `Essa é uma avaliação para a consulta: é lá que ${quemAtende(clinicId).o} examina a criança e decide ` +
+    'o que precisa investigar. Por aqui eu não posso orientar sobre sintomas, exames ou remédios.'
+  )
+}
+
 async function naoEntendi(
   admin: Admin,
   clinicId: string,
@@ -1111,8 +1129,7 @@ async function naoEntendi(
   registrar('nao_entendi')
   if (assuntoClinico(texto)) {
     return (
-      `Sobre sintomas, remédios e o que fazer, quem responde é ${quemAtende(clinicId).o} ou alguém ` +
-      'da equipe - por aqui eu não posso orientar. Digite *9* para falar com a equipe.\n\n' +
+      fraseClinica(clinicId) + ' Digite *9* para falar com a equipe.\n\n' +
       pergunta
     )
   }
@@ -3379,8 +3396,7 @@ export async function tratarConversa(opcoes: {
         admin,
         conversationId,
         saudacao,
-        `Sobre sintomas, remédios e o que fazer, quem responde é ${quemAtende(clinicId).o} ou alguém da equipe - ` +
-          'por aqui eu não posso orientar. Digite *3* para falar com a equipe, ou escolha:',
+        fraseClinica(clinicId) + ' Digite *2* para marcar uma consulta ou *3* para falar com a equipe, ou escolha:',
       )
     }
 
@@ -3561,8 +3577,7 @@ export async function tratarConversa(opcoes: {
         admin,
         conversationId,
         saudacao,
-        `Sobre sintomas, remédios e o que fazer, quem responde é ${quemAtende(clinicId).o} ou alguém da equipe - ` +
-          'por aqui eu não posso orientar. Digite *3* para falar com a equipe, ou escolha:',
+        fraseClinica(clinicId) + ' Digite *2* para marcar uma consulta ou *3* para falar com a equipe, ou escolha:',
       )
     }
 
@@ -3845,6 +3860,32 @@ export async function tratarConversa(opcoes: {
     const indice = escolha(texto, ids.length)
     if (indice === null) {
       if (pediuVoltar(texto)) return await mostrarMenu(admin, conversationId, saudacao)
+      // Duvida escrita depois de tocar em "Duvidas sobre a consulta" (07/10/2026,
+      // Lucas). Ele tocou 1, escreveu a pergunta - "o Dr. Marcello costuma pedir
+      // exames para investigar dor abdominal cronica?" - e ouviu "nao posso
+      // orientar" e "responda com o numero da unidade". Quem escolheu DUVIDAS
+      // e escreveu a duvida ja fez o que o robo pediu: o que o robo nao sabe
+      // responder vai para a equipe, sem mais um passo. (Ele mesmo acabou
+      // digitando 9 em seguida.)
+      //
+      // Resposta pronta continua primeiro: se a clinica ja cadastrou aquilo,
+      // a familia recebe na hora. Frase curta ("oi", "sim") segue no "nao
+      // entendi" de sempre.
+      const palavrasDaDuvida = normalizar(texto).replace(/[^a-z\s]/g, ' ').trim().split(/\s+/).filter((p) => p.length > 1)
+      if (palavrasDaDuvida.length >= 3) {
+        const clinica = assuntoClinico(texto)
+        const pronta = clinica ? null : acharResposta(texto, await carregarRespostas(admin, clinicId))
+        if (pronta) return { resposta: `${pronta.resposta}\n\n${VOLTA}` }
+        registrar(clinica ? 'assunto_clinico' : 'duvida_para_equipe')
+        const chamada = await chamarEquipe(admin, conversationId)
+        return {
+          ...chamada,
+          resposta:
+            (clinica ? fraseClinica(clinicId) + '\n\n' : '') +
+            'Passei sua pergunta para a nossa equipe, que responde por aqui.\n\n' +
+            avisoDeHorario() + '\n\n' + VOLTA,
+        }
+      }
       return {
         resposta: await naoEntendi(
           admin,

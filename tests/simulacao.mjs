@@ -450,6 +450,26 @@ await conversar('20. Foto do documento recusado no lugar da explicação', [
   '[ANEXO]',
 ], { pacientes: [ANA] })
 
+// Casos reais de 06 e 07/10/2026, para ler depois dos ajustes.
+await conversar('21a. Opção 1 do jeito esperado: escolhe a unidade e recebe valor e endereço', [
+  'Bom dia',
+  '1',
+  '1',
+])
+
+await conversar('21b. Real 07/10 (Lucas): escreve uma pergunta em vez de escolher a unidade', [
+  'Bom dia',
+  '1',
+  'Dr. Marcello costuma solicitar exames para investigar dor abdominal crônica?',
+])
+
+await conversar('22. Real 06/10 (Julio): o telefone da ficha é de outra pessoa', ['Nao sou o Julio'])
+
+await conversar('23. Real 03/10 (Ben): retorno para daqui a 3 meses', [
+  'Oi',
+  'Dr. pediu para agendar retorno em 3 meses. Gostaria de deixar agendado.',
+])
+
 console.log('\n' + linha('━'))
 console.log('  fim da simulação')
 console.log(linha('━') + '\n')

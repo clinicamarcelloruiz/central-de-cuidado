@@ -756,7 +756,7 @@ await caso(
 // Sem o contexto do acompanhamento, frase longa continua no caminho de sempre.
 await caso(
   'Sem acompanhamento recente, sintoma continua recebendo a orientação de sempre',
-  [['meu filho está com dor de barriga desde ontem', 'quem responde é o Dr. Marcello']],
+  [['meu filho está com dor de barriga desde ontem', 'o Dr. Marcello examina a criança']],
 )
 
 // ---------------------------------------------------------------
@@ -1230,11 +1230,11 @@ await caso('Depois da resposta pronta o 2 ainda marca consulta', [
 ], { respostasProntas: RESPOSTAS })
 
 await caso('Pergunta clínica não é respondida, mas recebe o caminho certo', [
-  ['Meu filho está com dor de barriga, posso dar dipirona?', ['quem responde é o Dr. Marcello', 'Digite *3*']],
+  ['Meu filho está com dor de barriga, posso dar dipirona?', ['o Dr. Marcello examina a criança', '*3* para falar com a equipe']],
 ], { respostasProntas: RESPOSTAS })
 
 await caso('Palavra de valor junto de sintoma não recebe o preço', [
-  ['Ele está com febre, quanto custa a consulta?', 'quem responde é o Dr. Marcello'],
+  ['Ele está com febre, quanto custa a consulta?', 'o Dr. Marcello examina a criança'],
 ], { respostasProntas: RESPOSTAS })
 
 await caso('Assunto que ninguém cadastrou cai no menu, sem inventar', [
@@ -1242,7 +1242,7 @@ await caso('Assunto que ninguém cadastrou cai no menu, sem inventar', [
 ], { respostasProntas: RESPOSTAS })
 
 await caso('Sintoma junto de "quero marcar" continua podendo marcar pelo menu', [
-  ['oi, meu filho tem refluxo, queria marcar uma consulta', 'quem responde é o Dr. Marcello'],
+  ['oi, meu filho tem refluxo, queria marcar uma consulta', 'o Dr. Marcello examina a criança'],
   ['2', 'Em qual unidade'],
 ], { respostasProntas: RESPOSTAS })
 
@@ -2180,6 +2180,36 @@ await caso('Pergunta comum depois do acompanhamento segue o caminho de sempre', 
     else passou++
   },
 })
+
+// Real 07/10/2026 (Lucas): pergunta clínica na opção de informações. Antes:
+// "Sobre sintomas, remédios... não posso orientar" + "responda com o número da
+// unidade". Agora explica que é avaliação de consulta e volta ao menu, de onde
+// ele marca (2) ou fala com a equipe (3).
+await caso('Real 07/10: dúvida escrita depois de tocar "Dúvidas" vai para a equipe', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['Dr. Marcello costuma solicitar exames para investigar dor abdominal crônica?', ['avaliação para a consulta', 'Passei sua pergunta para a nossa equipe']],
+], {
+  telemedicina: TELE,
+  verificar: ({ transcricao, ultimoToque, conversa, titulo }) => {
+    if (transcricao.join('').includes('número da unidade da lista acima')) falhas.push(`${titulo} | ainda pediu o número da unidade`)
+    else passou++
+    if (ultimoToque.atencao !== 'atendente' || conversa.booking_state !== 'atendente') falhas.push(`${titulo} | não foi para a equipe`)
+    else passou++
+  },
+})
+
+await caso('Dúvida não clínica nas informações também vai para a equipe', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['Vocês emitem nota fiscal no nome da empresa?', 'Passei sua pergunta para a nossa equipe'],
+], { telemedicina: TELE })
+
+await caso('Palavra solta nas informações continua pedindo o número', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['santos?', 'número da unidade'],
+], { telemedicina: TELE })
 
 // "Marca consulta pra minha filha, e valor da consulta" (24/09/2026): recebia
 // so o valor, porque "marca" nao era "marcar".
