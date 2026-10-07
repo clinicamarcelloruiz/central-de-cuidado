@@ -16,6 +16,7 @@ declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined
 import {
   avisoDaResposta,
   depoisDoAcompanhamento,
+  lembreteRecente,
   respostaAoAcompanhamento,
   equipeFalouRecentemente as equipeFalouHaPouco,
   interpretarResposta,
@@ -539,8 +540,11 @@ Deno.serve(async (req) => {
           // A conversa ainda e a do acompanhamento pos-consulta (03/10/2026).
           // Ver depoisDoAcompanhamento em _shared/lembrete.ts.
           let acompanhamentoRecente = false
+          // Lembrete de consulta nas ultimas 48h, ainda que nao seja a ultima
+          // mensagem nossa (06/10/2026). Ver lembreteRecente em lembrete.ts.
+          let comLembreteRecente = false
           if (conversaAnterior?.id) {
-            const [ultimoNossoResult, ultimoHumanoResult, ultimoAcompanhamentoResult] = await Promise.all([
+            const [ultimoNossoResult, ultimoHumanoResult, ultimoAcompanhamentoResult, ultimoLembreteResult] = await Promise.all([
               admin
                 .from('whatsapp_messages')
                 .select('followup_id,appointment_id,created_at,external_message_id')
@@ -567,6 +571,15 @@ Deno.serve(async (req) => {
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .maybeSingle(),
+              admin
+                .from('whatsapp_messages')
+                .select('created_at')
+                .eq('conversation_id', conversaAnterior.id)
+                .eq('direction', 'outbound')
+                .not('appointment_id', 'is', null)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle(),
             ])
 
             respondendoEnvioNosso = dentroDaJanelaDeResposta(ultimoNossoResult.data)
@@ -577,6 +590,10 @@ Deno.serve(async (req) => {
               console.warn('Nao consegui ler o ultimo acompanhamento da conversa', ultimoAcompanhamentoResult.error)
             }
             acompanhamentoRecente = depoisDoAcompanhamento(ultimoAcompanhamentoResult.data)
+            if (ultimoLembreteResult.error) {
+              console.warn('Nao consegui ler o ultimo lembrete da conversa', ultimoLembreteResult.error)
+            }
+            comLembreteRecente = lembreteRecente(ultimoLembreteResult.data)
             ultimoEnvioId = (ultimoNossoResult.data as { external_message_id?: string | null } | null)?.external_message_id ?? null
             // Coluna nova (01/10/2026) em consulta propria: sem ela, perde-se
             // so o "Destravar" valendo contra a regra das 12h - nao a conversa.
@@ -614,7 +631,7 @@ Deno.serve(async (req) => {
               : idDoToque(message) || body
           // Uma chamada so, e a regra mora em _shared/lembrete.ts, coberta por
           // testes. Aqui ficou apenas o desempacotar.
-          const resposta = interpretarResposta(escolhido, respondendoEnvioNosso)
+          const resposta = interpretarResposta(escolhido, respondendoEnvioNosso, comLembreteRecente)
           const { respondeuLembrete, optedOut, isWell, pediuAjuda, motivoAtencao } = resposta
           const receivedAt = message.timestamp
             ? new Date(Number(message.timestamp) * 1000).toISOString()

@@ -2112,6 +2112,75 @@ await caso('Retorno em 10 dias cabe na agenda e abre a agenda normal', [
   else passou++
 }
 
+// Número errado (real 06/10/2026, Julio). O telefone da ficha é de outra
+// pessoa; ela respondeu "Nao sou o Julio" a dois lembretes e o robô ficou
+// calado nas duas.
+await caso('Real 06/10: "Nao sou o Julio" pede desculpas e marca número errado', [
+  ['Nao sou o Julio', 'desculpe o engano'],
+], {
+  podeIniciarMenu: false,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.atencao !== 'numero_errado') falhas.push(`${titulo} | atenção ${ultimoToque.atencao}`)
+    else passou++
+  },
+})
+
+await caso('"Número errado" também', [['Acho que é número errado', 'desculpe o engano']], { podeIniciarMenu: false })
+
+await caso('"Não sou a mãe, sou a avó" é da família, não engano', [
+  ['Não sou a mãe dele, sou a avó, queria marcar uma consulta', 'Em qual unidade'],
+], {
+  podeIniciarMenu: false,
+  verificar: ({ transcricao, titulo }) => {
+    if (transcricao.join('').includes('engano')) falhas.push(`${titulo} | tratou a avó como número errado`)
+    else passou++
+  },
+})
+
+// Real 06/10/2026 (Marjorie): tocou "É urgência" por engano e corrigiu.
+await caso('Real 06/10: "Não é urgência" não volta a gritar urgência', [
+  ['Nao é urgência. Gostaria de informações a respeito do valor da consulta', null],
+], {
+  estadoInicial: { booking_state: 'atendente' },
+  podeIniciarMenu: false,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (/urgente|urgência/i.test(ultimoToque.resposta ?? '')) falhas.push(`${titulo} | tratou como urgência`)
+    else passou++
+  },
+})
+
+await caso('Mas "é urgente" continua sendo urgência', [
+  ['é urgente, ele está passando mal', 'de que é urgente'],
+], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false })
+
+// Real 06/10/2026 (Marjorie): nas datas, tocou o nome de outra unidade numa
+// lista de cima e recebeu "Não entendi".
+await caso('Real 06/10: tocar outra unidade numa lista antiga troca a unidade', [
+  ['agendar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis em Liferty'],
+  ['Telemedicina (por vídeo)', 'Datas disponíveis para telemedicina'],
+], { telemedicina: TELE, slots: SLOTS_DUAS })
+
+// Real 06/10/2026 (Marjorie): pergunta longa na fila não é pedido de marcar.
+await caso('Real 06/10: pergunta longa na fila não recebe o botão de marcar', [
+  ['Tenho gêmeas idênticas de 3 anos e meio. Poderia agendar a consulta pro valor de 450 para as duas?', null],
+], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false })
+
+// Real 06/10/2026 (Isaque): 3 dias depois do acompanhamento, sintoma vira recado.
+await caso('Real 06/10: sintoma depois do acompanhamento vai para a equipe', [
+  ['Isaque ele faz cocô todos dias, porém tem dia que faz as bolinhas mais duras, depois faz 4 vez no dia', 'Obrigado por nos contar'],
+], { posAcompanhamento: true })
+
+await caso('Pergunta comum depois do acompanhamento segue o caminho de sempre', [
+  ['Qual o valor da consulta?', 'consultório'],
+], {
+  posAcompanhamento: true,
+  verificar: ({ transcricao, titulo }) => {
+    if (transcricao.join('').includes('Obrigado por nos contar')) falhas.push(`${titulo} | virou recado`)
+    else passou++
+  },
+})
+
 // "Marca consulta pra minha filha, e valor da consulta" (24/09/2026): recebia
 // so o valor, porque "marca" nao era "marcar".
 await caso('"Marca consulta" conta como pedido de agendamento', [

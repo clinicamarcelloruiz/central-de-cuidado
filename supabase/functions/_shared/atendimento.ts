@@ -88,6 +88,7 @@ export type MotivoAtencao =
   | 'anexo'
   | 'documento'
   | 'farmacia'
+  | 'numero_errado'
 
 /**
  * A telemedicina como "unidade" do fluxo.
@@ -310,6 +311,26 @@ export function soCumprimento(texto: string): boolean {
   return t.split(/\s+/).every((palavra) => cumprimento.has(palavra))
 }
 
+/**
+ * "Nao sou o Julio", "numero errado", "foi engano" (06/10/2026).
+ *
+ * O telefone da ficha e de outra pessoa. Ela respondeu "Nao sou o Julio" a
+ * dois lembretes, e nas duas o robo ficou calado - quem recebe mensagem por
+ * engano merece um pedido de desculpas na hora, e a equipe precisa saber que
+ * o problema e o cadastro, nao uma conversa.
+ *
+ * "Nao sou o/a X" so conta em frase curta: "nao sou a mae, sou a avo dele" e
+ * outra coisa, e quem escreve isso e da familia.
+ */
+export function numeroErrado(texto: string): boolean {
+  const t = normalizar(texto).replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (/\b(numero|telefone|contato|whatsapp) (errado|trocado)\b/.test(t)) return true
+  if (/\b(foi|e|deve ser|mandou|enviou|enviaram|mandaram) (por |para o |pro )?engano\b/.test(t) || t === 'engano') return true
+  if (/\bnao conheco (esse|essa|nenhum|nenhuma|ninguem)\b/.test(t)) return true
+  const palavras = t.split(' ').filter(Boolean)
+  return /^(oi |ola |bom dia |boa tarde |boa noite )?nao sou (o|a) [a-z]+( [a-z]+)?$/.test(t) && palavras.length <= 7
+}
+
 /** A saida de emergencia. Vale em qualquer etapa, inclusive com a equipe. */
 function pediuMenu(texto: string) {
   const t = normalizar(texto)
@@ -359,7 +380,12 @@ function pediuAtendente(texto: string) {
 
 /** "Urgente", "é urgência", ou a linha URGENCIA tocada na lista. */
 function pediuUrgencia(texto: string) {
-  return /urgen/.test(normalizar(texto))
+  const t = normalizar(texto)
+  // "Nao e urgencia" (06/10/2026): a Marjorie tocou "E urgencia" por engano,
+  // escreveu "Nao e urgencia. Gostaria de informacoes sobre o valor..." e
+  // recebeu de novo "Avisei a nossa equipe de que e urgente".
+  if (/\b(nao|nem) (e|eh|era|foi|tem|ha|sou|estou)? ?(nada )?(de )?urgen/.test(t) || /\bsem urgen/.test(t)) return false
+  return /urgen/.test(t)
 }
 
 function desistiu(texto: string) {
@@ -1484,6 +1510,22 @@ async function iniciarAgendamento(
     booking_patient_id: pacientes[0]?.id ?? null,
   })
   return await perguntarUnidade(admin, clinicId, conversationId)
+}
+
+/**
+ * A unidade pelo nome escrito ou tocado (06/10/2026).
+ *
+ * Toque em lista ANTIGA chega como o titulo do item (ver oQueFoiEscolhido).
+ * A Marjorie estava nas datas da telemedicina, rolou a conversa, tocou
+ * "Telemedicina (por video)" na lista de unidades de cima e recebeu "Nao
+ * entendi. Responda com o numero do dia". Quem toca o nome de uma unidade
+ * quer aquela unidade.
+ */
+async function unidadePeloNome(admin: Admin, clinicId: string, texto: string): Promise<Unidade | null> {
+  const t = normalizar(texto)
+  if (!t || /^\d+$/.test(t)) return null
+  const unidades = await opcoesDeAtendimento(admin, clinicId)
+  return unidades.find((u) => normalizar(u.name) === t || normalizar(tituloCurto(u.name)) === t) ?? null
 }
 
 async function perguntarUnidade(
@@ -2929,6 +2971,24 @@ export async function tratarConversa(opcoes: {
     return await mostrarMenu(admin, conversationId, saudacao)
   }
 
+  // Mensagem para a pessoa errada (06/10/2026). Ver numeroErrado. Vale em
+  // qualquer etapa e ate respondendo lembrete: e o caso tipico.
+  if (numeroErrado(texto)) {
+    registrar('numero_errado')
+    await salvarEstado(admin, conversationId, {
+      booking_state: 'atendente',
+      booking_options: null,
+      booking_unit_id: null,
+      auto_replies_while_waiting: 0,
+    })
+    return {
+      resposta:
+        'Obrigado por avisar, e desculpe o engano! 🙏 Vamos corrigir o cadastro. ' +
+        'Se este número não é de um paciente do consultório, pode desconsiderar a mensagem.',
+      atencao: 'numero_errado',
+    }
+  }
+
   // Anexo: foto, documento, audio ou video.
   //
   // O robo nao le nada disso, e fingir que leu seria pior. Quem manda a foto de
@@ -3053,7 +3113,14 @@ export async function tratarConversa(opcoes: {
     // Vale mesmo com gente conversando: e so um botao, e em geral e a propria
     // atendente que mandou a familia marcar pelo menu. O limite de respostas na
     // espera continua valendo, para nao virar eco.
-    const querMarcar = pediuAgendamento(texto) || texto.trim() === '2'
+    // Pergunta de verdade nao e pedido de marcar (06/10/2026): "Tenho gemeas
+    // de 3 anos. Poderia agendar a consulta pro valor de 450 para as duas?"
+    // recebeu "toque em Marcar uma consulta" - ela queria uma resposta da
+    // equipe, que ja estava com a conversa. Frase longa com cara de pergunta
+    // fica para a equipe.
+    const perguntaLonga =
+      parecePergunta(texto) && normalizar(texto).split(/\s+/).filter(Boolean).length >= 10
+    const querMarcar = !perguntaLonga && (pediuAgendamento(texto) || texto.trim() === '2')
     if (querMarcar && jaRespondidas < LIMITE_NA_ESPERA) {
       // Na fila, retorno para daqui a meses: o botao de marcar levaria a uma
       // agenda que nao chega la. Ver retornoAlemDaAgenda.
@@ -3224,8 +3291,13 @@ export async function tratarConversa(opcoes: {
         .trim()
         .split(/\s+/)
         .filter((p) => p.length > 1)
+      // Pergunta que nao e clinica ("qual o valor da consulta?") segue para a
+      // resposta pronta, mais abaixo: a janela agora e de 7 dias, e nela a
+      // familia tambem pergunta coisas que o robo sabe responder.
+      const perguntaComum = parecePergunta(texto) && !assuntoClinico(texto)
       const recado =
         palavrasDoRecado.length >= 3 &&
+        !perguntaComum &&
         !soCumprimento(texto) &&
         !pediuNotaFiscal(texto) &&
         !(pediuAgendamento(texto) && !assuntoClinico(texto))
@@ -4063,6 +4135,10 @@ export async function tratarConversa(opcoes: {
       return await perguntarUnidade(admin, clinicId, conversationId)
     }
 
+    // Tocou o nome de uma unidade numa lista de cima: troca de unidade.
+    const outraUnidade = await unidadePeloNome(admin, clinicId, texto)
+    if (outraUnidade) return await perguntarConvenioOuDia(admin, clinicId, conversationId, outraUnidade)
+
     const dias = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
 
     // "31/08" e uma resposta natural. Aqui nao ha o risco do horario - uma data
@@ -4106,6 +4182,11 @@ export async function tratarConversa(opcoes: {
 
   // ---- Escolha do horario ----
   if (estadoAtual === 'aguardando_horario') {
+    // Mesma troca de unidade do passo do dia (ver unidadePeloNome).
+    {
+      const outraUnidade = await unidadePeloNome(admin, clinicId, texto)
+      if (outraUnidade) return await perguntarConvenioOuDia(admin, clinicId, conversationId, outraUnidade)
+    }
     if (pediuVoltar(texto)) {
       if (!unidadeEmAndamento) {
         return await perguntarUnidade(admin, clinicId, conversationId)

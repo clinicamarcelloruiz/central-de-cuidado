@@ -1702,6 +1702,7 @@ export interface Conversation {
     | 'urgencia'
     | 'documento'
     | 'farmacia'
+    | 'numero_errado'
     | null
   /** Etapa em que o robo parou nesta conversa. Nulo quando nao ha nada aberto. */
   bookingState: string | null
@@ -2473,6 +2474,55 @@ function semConteudoClinico(linha: ConsultationRow) {
     linha.weight_kg === null &&
     linha.height_cm === null
   )
+}
+
+/** Atendimento escrito e ainda sem assinatura digital. */
+export interface AtendimentoSemAssinatura {
+  id: string
+  patientId: string
+  paciente: string
+  data: string
+}
+
+/**
+ * Atendimentos escritos e nao assinados, do mais recente para o mais antigo
+ * (06/10/2026).
+ *
+ * Pedido do Dr. Marcello: "consegue colocar obrigatorio a assinatura digital no
+ * prontuario? estou esquecendo". Em vez de travar o prontuario, uma lista do
+ * que falta e um botao que assina tudo de uma vez - a aprovacao no VIDaaS vale
+ * para o turno inteiro (ver assinar-consulta), entao e um toque no celular para
+ * o dia todo.
+ *
+ * Fica de fora o esqueleto que o cadastro cria (consulta sem nada escrito) e o
+ * que esta no futuro. 90 dias para tras: assinatura atrasada continua
+ * aparecendo ate ser feita, mas a consulta nao fica pesada.
+ */
+export async function listAtendimentosSemAssinatura(clinicId: string): Promise<AtendimentoSemAssinatura[]> {
+  const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+  const desde = new Date(Date.now() - 90 * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+  const { data, error } = await supabase
+    .from('consultations')
+    .select('*, patients(name)')
+    .eq('clinic_id', clinicId)
+    .is('archived_at', null)
+    .is('signed_at', null)
+    .gte('consultation_date', desde)
+    .lte('consultation_date', hoje)
+    .order('consultation_date', { ascending: false })
+  if (error) fail(error)
+  type Linha = ConsultationRow & { patients?: { name?: string } | { name?: string }[] | null }
+  return ((data ?? []) as unknown as Linha[])
+    .filter((linha) => !semConteudoClinico(linha))
+    .map((linha) => {
+      const paciente = Array.isArray(linha.patients) ? linha.patients[0] : linha.patients
+      return {
+        id: linha.id,
+        patientId: linha.patient_id,
+        paciente: paciente?.name ?? 'Paciente',
+        data: linha.consultation_date,
+      }
+    })
 }
 
 export async function createConsultation(

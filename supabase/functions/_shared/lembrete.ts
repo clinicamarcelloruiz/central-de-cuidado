@@ -63,7 +63,10 @@ export function respondendoEnvioNosso(
  * acendeu para ninguem. A Eloah agradeceu ("Obrigada🙏🏻🌹") e recebeu a
  * apresentacao inteira do consultorio.
  *
- * Aqui vale o ACOMPANHAMENTO mais recente (followup_id), dentro de 48h.
+ * Aqui vale o ACOMPANHAMENTO mais recente (followup_id), dentro de 7 dias.
+ * Eram 48h ate 06/10/2026: o pai do Isaque respondeu "Estou bem" tres dias
+ * depois do envio e, em seguida, descreveu como estavam as fezes do filho - e
+ * recebeu "sobre sintomas eu nao posso orientar", sem ninguem avisado.
  */
 export function depoisDoAcompanhamento(
   ultimoAcompanhamento: { created_at?: string | null } | null,
@@ -71,6 +74,29 @@ export function depoisDoAcompanhamento(
 ) {
   if (!ultimoAcompanhamento?.created_at) return false
   const idade = agora - new Date(ultimoAcompanhamento.created_at).getTime()
+  return idade >= 0 && idade < JANELA_DO_ACOMPANHAMENTO_MS
+}
+
+/** Familia responde acompanhamento com dias de atraso; o contexto dura uma semana. */
+const JANELA_DO_ACOMPANHAMENTO_MS = 7 * 24 * 3600 * 1000
+
+/**
+ * Houve lembrete de consulta para esta conversa nas ultimas 48h, mesmo que
+ * NAO seja a ultima mensagem nossa (06/10/2026)?
+ *
+ * O Conrado recebeu o lembrete as 9:20; a equipe escreveu as 16:08; ele
+ * respondeu "Confirmado" - e nada aconteceu, porque o lembrete ja nao era a
+ * ultima mensagem. A equipe confirmou a mao. Ver interpretarResposta: so a
+ * PALAVRA de confirmar usa isto. Numero ("1") e cancelamento continuam
+ * exigindo que o lembrete seja a ultima mensagem - "1" pode ser opcao de
+ * menu, e cancelar por engano apaga a vaga da familia.
+ */
+export function lembreteRecente(
+  ultimoLembrete: { created_at?: string | null } | null,
+  agora = Date.now(),
+) {
+  if (!ultimoLembrete?.created_at) return false
+  const idade = agora - new Date(ultimoLembrete.created_at).getTime()
   return idade >= 0 && idade < JANELA_RESPOSTA_MS
 }
 
@@ -105,7 +131,12 @@ export function equipeFalouRecentemente(
  * `escolhido` e o id do botao quando ela tocou, ou o proprio texto quando ela
  * digitou - os dois entram pelo mesmo caminho de proposito.
  */
-export function interpretarResposta(escolhido: string, dentroDaJanela: boolean): Resposta {
+export function interpretarResposta(
+  escolhido: string,
+  dentroDaJanela: boolean,
+  /** Lembrete nas ultimas 48h, mesmo que nao seja a ultima mensagem. Ver lembreteRecente. */
+  comLembreteRecente = false,
+): Resposta {
   const r = normalizarResposta(escolhido)
 
   // Palavra CONTIDA na resposta, e nao a resposta inteira.
@@ -159,7 +190,9 @@ export function interpretarResposta(escolhido: string, dentroDaJanela: boolean):
 
   // O numero so vale dentro da janela para nao roubar as opcoes do menu.
   const confirma =
-    dentroDaJanela && !duvida && (r === '1' || semNegacao('confirmar', 'confirmo', 'confirmado'))
+    !duvida &&
+    ((dentroDaJanela && r === '1') ||
+      ((dentroDaJanela || comLembreteRecente) && semNegacao('confirmar', 'confirmo', 'confirmado')))
   const remarca =
     dentroDaJanela &&
     (r === '2' || semNegacao('remarcar', 'reagendar', 'trocar a data', 'outro horario'))

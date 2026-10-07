@@ -10,6 +10,7 @@ import {
   MessageCircle,
   MessageCircleHeart,
   MessagesSquare,
+  PenLine,
   Plus,
   RefreshCw,
   Settings2,
@@ -21,7 +22,9 @@ import { useDb } from '@/lib/store'
 import {
   conversasEsperandoEquipe,
   getCurrentMembership,
+  listAtendimentosSemAssinatura,
   listPendingRequests,
+  type AtendimentoSemAssinatura,
   PENDING_ACCESS_MESSAGE,
   type EsperaDaEquipe,
   type PendingRequest,
@@ -43,6 +46,7 @@ import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco
 import { registrarServiceWorker } from '@/lib/notificacoes'
 import ConviteParaAvisos from '@/components/ConviteParaAvisos'
 import QuemEstaOnline from '@/components/QuemEstaOnline'
+import { AssinaturaEmLote } from '@/components/AssinaturaEmLote'
 import { enviarMinhaFoto, useEquipeOnline } from '@/lib/equipe-online'
 import { ligarModoWhatsApp } from '@/lib/modo-whatsapp'
 
@@ -327,9 +331,37 @@ export default function Home() {
   }, [espera.total, tituloDaAba])
   const esperaLonga = espera.longa
 
+  // Atendimentos escritos e sem assinatura digital (06/10/2026). Ver
+  // listAtendimentosSemAssinatura. So para quem assina: dono e medico.
+  const podeAssinar = role === 'owner' || role === 'clinician'
+  const [semAssinatura, setSemAssinatura] = useState<AtendimentoSemAssinatura[]>([])
+  const [assinandoEmLote, setAssinandoEmLote] = useState(false)
+  const carregarSemAssinatura = useCallback(async () => {
+    if (!podeAssinar || !clinicaId) return
+    try {
+      setSemAssinatura(await listAtendimentosSemAssinatura(clinicaId))
+    } catch (erro) {
+      // Lembrete, nao trava: sem a lista, o resto do sistema segue inteiro.
+      console.warn('Nao consegui listar os atendimentos sem assinatura', erro)
+    }
+  }, [podeAssinar, clinicaId])
+  useEffect(() => {
+    // Dentro de uma funcao assincrona, como carregarSolicitacoes: o estado so
+    // muda depois do await.
+    void (async () => {
+      await carregarSemAssinatura()
+    })()
+    const timer = window.setInterval(() => void carregarSemAssinatura(), 5 * 60_000)
+    return () => window.clearInterval(timer)
+    // A troca de aba tambem recarrega: quem assinou um prontuario e voltou
+    // para a Agenda nao deve ver o aviso velho.
+  }, [carregarSemAssinatura, tab])
+  const hojeLocal = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+  const semAssinaturaHoje = semAssinatura.filter((a) => a.data === hojeLocal).length
+
   // O sino do celular (ver o cabecalho mais abaixo).
   const [avisosAbertos, setAvisosAbertos] = useState(false)
-  const totalDeAvisos = espera.total + solicitacoes.length + pendentes
+  const totalDeAvisos = espera.total + solicitacoes.length + pendentes + semAssinatura.length
   const { perguntar } = useDialogos()
   // Pergunta antes: no celular o botao fica ao lado do sino, e um toque
   // errado derrubava a sessao no meio do atendimento.
@@ -753,6 +785,29 @@ export default function Home() {
                           </button>
                         </li>
                       ))}
+                    {semAssinatura.length > 0 && (
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAvisosAbertos(false)
+                            setAssinandoEmLote(true)
+                          }}
+                          className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[#f4f8f7]"
+                        >
+                          <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-[#1f4f78] px-1.5 text-[11px] font-extrabold text-white">
+                            {semAssinatura.length}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-bold">
+                              {semAssinatura.length === 1 ? 'atendimento sem assinatura' : 'atendimentos sem assinatura'}
+                            </span>
+                            <span className="mt-0.5 block text-[10px] text-slate-400">Toque para assinar todos de uma vez</span>
+                          </span>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+                        </button>
+                      </li>
+                    )}
                   </ul>
                 )}
               </div>
@@ -812,6 +867,40 @@ export default function Home() {
               </button>
             </div>
           </div>
+
+          {/* Lembrete de assinatura (06/10/2026): pedido do Dr. Marcello, que
+              esquecia de assinar. Fica no topo de qualquer aba ate zerar. */}
+          {podeAssinar && semAssinatura.length > 0 && (
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-[#2f7fc1]/20 bg-[#eef5fd] px-4 py-3">
+              <p className="flex items-center gap-2.5 text-xs font-bold text-[#16456b]">
+                <PenLine className="h-4 w-4 shrink-0 text-[#2f7fc1]" />
+                <span>
+                  {semAssinatura.length === 1
+                    ? '1 atendimento sem assinatura digital'
+                    : `${semAssinatura.length} atendimentos sem assinatura digital`}
+                  {semAssinaturaHoje > 0 && semAssinaturaHoje < semAssinatura.length && (
+                    <span className="font-semibold text-[#3c6b91]"> · {semAssinaturaHoje} de hoje</span>
+                  )}
+                </span>
+              </p>
+              <button
+                type="button"
+                onClick={() => setAssinandoEmLote(true)}
+                className="rounded-xl bg-[#081b2c] px-4 py-2 text-[11px] font-extrabold text-white transition hover:bg-[#102d47]"
+              >
+                Assinar todos
+              </button>
+            </div>
+          )}
+          {assinandoEmLote && (
+            <AssinaturaEmLote
+              pendentes={semAssinatura}
+              onFechar={() => {
+                setAssinandoEmLote(false)
+                void carregarSemAssinatura()
+              }}
+            />
+          )}
 
           <div key={tab} className="animate-enter">
             {tab === 'dashboard' && (

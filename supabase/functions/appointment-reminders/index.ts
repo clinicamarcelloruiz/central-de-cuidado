@@ -208,7 +208,7 @@ Deno.serve(async (req) => {
         // uma segunda, e a resposta da familia chegava na outra.
         const { data: conversaAtual } = await admin
           .from('whatsapp_conversations')
-          .select('status,wa_id')
+          .select('status,wa_id,needs_attention,attention_reason')
           .eq('clinic_id', clinica.clinic_id)
           .in('wa_id', variantesDoTelefone(telefone))
           .order('last_message_at', { ascending: false })
@@ -219,6 +219,25 @@ Deno.serve(async (req) => {
         if (conversaAtual?.status === 'opted_out') {
           resumo.pulados += 1
           detalhes.push({ appointmentId: consulta.id, resultado: 'opt-out' })
+          continue
+        }
+
+        // Numero que respondeu "nao sou o Julio" (06/10/2026): o telefone da
+        // ficha e de outra pessoa. Mandar de novo e incomodar um estranho e
+        // deixar o paciente sem lembrete do mesmo jeito. O lembrete fica como
+        // FALHOU na Agenda, com o motivo - barulho para alguem corrigir o
+        // cadastro, e nao silencio. Corrigido o telefone (ou concluida a
+        // conversa), volta a sair.
+        if (conversaAtual?.needs_attention && conversaAtual?.attention_reason === 'numero_errado') {
+          resumo.pulados += 1
+          detalhes.push({ appointmentId: consulta.id, resultado: 'numero errado' })
+          await admin
+            .from('appointments')
+            .update({
+              reminder_failed_at: new Date().toISOString(),
+              reminder_failure_reason: 'O telefone do cadastro é de outra pessoa (respondeu que não é o paciente). Corrija o telefone.',
+            })
+            .eq('id', consulta.id)
           continue
         }
         const { dataBR, hora } = formatarDataHora(consulta.starts_at, clinica.timezone)

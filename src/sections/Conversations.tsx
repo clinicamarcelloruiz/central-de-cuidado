@@ -210,6 +210,13 @@ const MOTIVO_ATENCAO: Record<
   },
   // Pediu urgencia na telemedicina: uma crianca passando mal e alguem
   // esperando ligacao. E a unica bandeira que precisa gritar mais que a falha.
+  // Telefone da ficha e de outra pessoa (06/10/2026): quem resolve e o
+  // cadastro, nao a conversa. Ambar, como os pedidos com tarefa para fazer.
+  numero_errado: {
+    rotulo: '☎️ Número errado no cadastro',
+    classe: 'bg-[#fef3c7] text-[#92400e]',
+    borda: 'border-[#f59e0b]',
+  },
   urgencia: {
     rotulo: '🚨 Urgência: ligar agora',
     classe: 'bg-[#b42318] text-white',
@@ -255,6 +262,7 @@ const ORDEM_DOS_MOTIVOS: NonNullable<Conversation['attentionReason']>[] = [
   'atendente',
   'documento',
   'farmacia',
+  'numero_errado',
   'remarcacao',
   'cancelamento',
   'cancelou_sozinho',

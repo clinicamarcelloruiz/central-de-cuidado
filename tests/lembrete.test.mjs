@@ -8,6 +8,7 @@
 import {
   avisoDaResposta,
   depoisDoAcompanhamento,
+  lembreteRecente,
   respostaAoAcompanhamento,
   equipeFalouRecentemente,
   interpretarResposta,
@@ -432,7 +433,17 @@ conferir(
 // acompanhamento mais recente, nao a ultima mensagem nossa.
 conferir('Acompanhamento de 1h atrás ainda vale', depoisDoAcompanhamento({ created_at: quando(1) }, AGORA) === true)
 conferir('Acompanhamento de 47h atrás ainda vale', depoisDoAcompanhamento({ created_at: quando(47) }, AGORA) === true)
-conferir('Acompanhamento de 3 dias atrás já não vale', depoisDoAcompanhamento({ created_at: quando(72) }, AGORA) === false)
+// 7 dias desde 06/10/2026: o pai do Isaque respondeu 3 dias depois.
+conferir('Real 06/10: acompanhamento de 3 dias atrás ainda vale', depoisDoAcompanhamento({ created_at: quando(72) }, AGORA) === true)
+conferir('Acompanhamento de 8 dias atrás já não vale', depoisDoAcompanhamento({ created_at: quando(8 * 24) }, AGORA) === false)
+
+// Lembrete que já não é a última mensagem (real 06/10/2026, Conrado).
+conferir('Lembrete de 7h atrás é recente', lembreteRecente({ created_at: quando(7) }, AGORA) === true)
+conferir('Lembrete de 3 dias atrás não é recente', lembreteRecente({ created_at: quando(72) }, AGORA) === false)
+conferir('Real 06/10: "Confirmado" com lembrete recente confirma', interpretarResposta('Confirmado', false, true).confirma === true)
+conferir('Mas "1" sem o lembrete ser a última mensagem continua sendo menu', interpretarResposta('1', false, true).confirma === false)
+conferir('E "cancelar" fora da janela não cancela a consulta', interpretarResposta('cancelar', false, true).cancela === false)
+conferir('Sem lembrete recente, "Confirmado" solto não confirma nada', interpretarResposta('Confirmado', false, false).confirma === false)
 conferir('Sem acompanhamento, não vale', depoisDoAcompanhamento(null, AGORA) === false)
 conferir('Relógio torto (no futuro) não vale', depoisDoAcompanhamento({ created_at: quando(-2) }, AGORA) === false)
 
