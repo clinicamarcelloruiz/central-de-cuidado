@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda } from './atendimento.build.mjs'
+import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 import { montarMensagens } from './conteudo.build.mjs'
 
@@ -258,6 +258,9 @@ const achados = []
  *   - array   -> precisa conter todos
  *   - null    -> o robo precisa ficar em silencio
  */
+const QUARTA_10H = new Date('2026-10-07T13:00:00Z')
+const SEXTA_23H = new Date('2026-10-10T02:00:00Z')
+
 async function caso(titulo, passos, opcoes = {}) {
   const { admin, conversa, marcadas, canceladas, fichas } = fazerAdmin({
     unidades: opcoes.unidades ?? TRES_UNIDADES,
@@ -338,6 +341,9 @@ async function caso(titulo, passos, opcoes = {}) {
       pacientes: opcoes.pacientes ?? [],
       nomeDoPerfil: opcoes.nomeDoPerfil ?? 'Paula Medina',
       textos: opcoes.textos ?? TEXTOS,
+      // Relogio fixo numa quarta as 10h (Brasilia): a resposta de urgencia muda
+      // fora do expediente, e o teste nao pode depender da hora em que roda.
+      agora: opcoes.agora ?? QUARTA_10H,
     })
 
     const resposta = r?.resposta ?? null
@@ -449,7 +455,7 @@ await caso('Texto próprio da unidade vence o texto geral', [
 
 await caso('Opção 3 chama a equipe e sinaliza', [
   ['Oi', 'Como podemos ajudar'],
-  ['3', ['direcionando você para um atendente', 'segunda a sexta']],
+  ['3', ['direcionando você para alguém da nossa equipe', 'segunda a sexta']],
   ['tenho uma dúvida', null],
 ])
 
@@ -1178,12 +1184,12 @@ achados.push('Responder "08:40" em vez de "2":\n' + r3.transcricao.slice(-1).joi
 
 await caso('O 9 chama a equipe a partir do menu', [
   ['Oi', 'Como podemos ajudar'],
-  ['9', 'atendente da clínica'],
+  ['9', 'alguém da nossa equipe'],
 ])
 
 await caso('O 9 chama a equipe no meio do agendamento', [
   ['agendar', 'Em qual unidade'],
-  ['9', 'atendente da clínica'],
+  ['9', 'alguém da nossa equipe'],
 ])
 
 await caso('Unidade de nome longo continua com botão e sem estourar o limite', [
@@ -2632,7 +2638,7 @@ await caso('Número sem atendimento não entra no fluxo do paciente', [
 await caso('Quem diz ser o responsável vai para a equipe', [
   ['Oi', 'Como podemos ajudar'],
   ['5', 'não localizei atendimento'],
-  ['1', 'direcionando você para um atendente'],
+  ['1', 'direcionando você para alguém da nossa equipe'],
 ])
 
 await caso('Farmácia registra o pedido sem receber dado de paciente', [
@@ -2897,7 +2903,7 @@ await caso('Meio da ficha não é conclusão', [
 // robô fecharia a conversa de quem está esperando uma pessoa.
 await caso('Pedido de atendente não é fechado pelo robô', [
   ['Oi', 'Como podemos ajudar'],
-  ['3', 'direcionando você para um atendente'],
+  ['3', 'direcionando você para alguém da nossa equipe'],
 ], {
   verificar: ({ ultimoToque, titulo }) => {
     if (ultimoToque.concluida) falhas.push(`${titulo} | fechou a conversa de quem pediu gente`)
@@ -2999,7 +3005,7 @@ function exigirEvento(lista, evento, titulo, detalhe = undefined) {
 {
   const eventos = await eventosDe('Evento: a opção escolhida no menu fica registrada', [
     ['Oi', 'Como podemos ajudar'],
-    ['3', 'direcionando você para um atendente'],
+    ['3', 'direcionando você para alguém da nossa equipe'],
   ])
   exigirEvento(eventos, 'opcao_escolhida', 'Evento da opção', '3')
 }
@@ -3206,6 +3212,81 @@ await caso('"preciso do recibo da consulta" também é pedido', [
   if ((transcricao.at(-1) ?? '').includes('Anotei o pedido')) falhas.push('"confirmar" virou pedido de nota')
   else passou++
 }
+
+// ---------------------------------------------------------------------------
+// Revisao das mensagens (07/10/2026)
+// ---------------------------------------------------------------------------
+
+// Urgencia numa sexta as 23h: nada de "vamos entrar em contato com urgencia",
+// que ninguem cumpre ate segunda. Diz quando a equipe volta e poe o
+// pronto-socorro em primeiro plano. Continua marcada como urgencia.
+await caso('Urgência fora do expediente diz a verdade sobre o horário', [
+  ['socorro, é urgente, meu filho está muito mal', ['é urgência', 'fora do horário', 'não espere a nossa resposta', '192']],
+], {
+  agora: SEXTA_23H,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.atencao !== 'urgencia') falhas.push(`${titulo} | atenção ${ultimoToque.atencao}`)
+    else passou++
+    if (/vai entrar em contato com urgência/.test(ultimoToque.resposta)) falhas.push(`${titulo} | prometeu contato urgente de madrugada`)
+    else passou++
+  },
+})
+
+await caso('Urgência na fila, fora do expediente, também', [
+  ['Oi', 'Como podemos ajudar'],
+  ['3', 'alguém da nossa equipe'],
+  ['é urgente, ele está muito mal', ['fora do horário', 'não espere a nossa resposta']],
+], { agora: SEXTA_23H })
+
+await caso('No expediente a urgência continua igual', [
+  ['é urgente, meu filho está muito mal', ['transferindo você para um atendente', 'com urgência por aqui']],
+])
+
+// Pergunta clinica: alem de "nao posso orientar", o caminho se a crianca piorar.
+await caso('Pergunta clínica aponta a saída de urgência', [
+  ['Oi', 'Como podemos ajudar'],
+  ['meu filho está com dor de barriga há 3 dias, posso dar dipirona?', ['não posso orientar', 'digite *URGÊNCIA*']],
+])
+
+// "Quero remarcar" vai direto para a consulta, em vez do menu.
+await caso('"Quero remarcar" mostra a consulta', [
+  ['quero remarcar', ['Sua consulta', 'REMARCAR']],
+], { consultas: [CONSULTA_ANA], pacientes: [] })
+
+await caso('"Preciso desmarcar a consulta" na primeira mensagem também, com a apresentação', [
+  ['preciso desmarcar a consulta de quinta', ['Aqui é o consultório', 'Sua consulta', 'CANCELAR']],
+], { consultas: [CONSULTA_ANA], primeiraMensagem: true })
+
+await caso('Com o menu na tela, "queria trocar a data" é a opção 4', [
+  ['Oi', 'Como podemos ajudar'],
+  ['queria trocar a data da consulta', 'Sua consulta'],
+], { consultas: [CONSULTA_ANA] })
+
+{
+  const { transcricao } = await caso('Sem consulta marcada, "quero remarcar" segue para o menu', [
+    ['quero remarcar', 'Como podemos ajudar'],
+  ])
+  if ((transcricao.at(-1) ?? '').includes('Não encontrei nenhuma consulta')) falhas.push('"quero remarcar" sem consulta virou beco')
+  else passou++
+}
+
+for (const [frase, esperado] of [
+  ['quero remarcar', true],
+  ['preciso cancelar a consulta da Helena', true],
+  ['dá para mudar o horário?', true],
+  ['não quero cancelar, só confirmar', false],
+  ['nao precisa remarcar', false],
+  ['cancelar', false],
+  ['quero marcar uma consulta', false],
+]) {
+  if (pediuMudarConsulta(frase) === esperado) passou++
+  else falhas.push(`pediuMudarConsulta("${frase}") deveria ser ${esperado}`)
+}
+
+// Ficha: sem "dele(a)" de formulario.
+await caso('Data de nascimento pergunta pela criança, sem "dele(a)"', [
+  ['Helena Souza Lima', '*data de nascimento* da criança'],
+], { consultas: CONSULTA_SEM_FICHA, fichas: FICHA_VAZIA, estadoInicial: NO_MENU })
 
 console.log('\n============================================')
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)

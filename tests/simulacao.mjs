@@ -7,9 +7,14 @@
 //
 // Como rodar:  npm run simular
 //
-// Os textos abaixo são cópia fiel do que a migration grava no banco. Se a
-// clínica editar na tela, o que vale é o banco - isto aqui é o ponto de
-// partida.
+// Os textos abaixo são cópia do que estava no banco de produção em 07/10/2026
+// (unidades, respostas prontas, telemedicina). Se a clínica editar na tela, o
+// que vale é o banco - atualize aqui quando a diferença atrapalhar a leitura.
+//
+// As datas andam com o calendário (próximas quartas e sextas). Com datas fixas
+// em setembro, a partir de outubro toda consulta da simulação "já tinha
+// passado", e o comprovante do fim do cadastro sumia - a simulação mostrava
+// uma conversa que nenhuma família recebe.
 
 import { tratarConversa } from './atendimento.build.mjs'
 import { montarMensagens } from './conteudo.build.mjs'
@@ -25,13 +30,15 @@ const FECHO =
 
 const SANTOS =
   '💙 *Consulta em Santos: R$ 450,00.* Inclui retorno em até 30 dias.\n\n' +
-  '💳 Pagamento somente em pix ou dinheiro. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n' +
-  '📍 Liferty · Santos — Al. Armênio Mendes, 66, sala 2912, Aparecida. Estacionamento particular no local.\n\n' +
+  '💳 Pagamento online: antes da consulta, você recebe da Livance um link de pagamento. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n' +
+  '📍 Livance · Santos — Av. Anna Costa, 228, 20º andar, Gonzaga. Estacionamento no próprio prédio, com entrada ao lado da portaria.\n\n' +
+  '🖥️ Ao chegar, faça o check-in no totem digitando o nome do paciente. O Dr. Marcello recebe o aviso e vem chamar vocês na sala de espera assim que terminar a consulta anterior.\n\n' +
+  '🎥 Veja como funciona a chegada: https://www.instagram.com/reels/DYmuhB1xqJf/\n\n' +
   '📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.'
 
 const SAO_PAULO =
-  '💙 *Consulta em São Paulo: R$ 550,00.* Inclui retorno em até 30 dias.\n\n' +
-  '💳 Pagamento somente em pix ou dinheiro. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n' +
+  '💙 *Consulta em São Paulo: R$ 600,00.* Inclui retorno em até 30 dias.\n\n' +
+  '💳 Pagamento online: antes da consulta, você recebe da Livance um link de pagamento. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n' +
   '📍 Livance · Ibirapuera — R. Agostinho Rodrigues Filho, 550, Vila Clementino. Estacionamento particular no local.\n\n' +
   '📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.'
 
@@ -42,43 +49,57 @@ const TELE_TEXTO =
   '📋 Tenha em mãos a carteirinha de vacinação da criança e os exames anteriores, se houver.'
 
 const UNIDADES = [
-  { id: 'u-santos', name: 'Liferty · Santos', address: 'Al. Armênio Mendes, 66, sala 2912', info_text: SANTOS },
-  { id: 'u-sp', name: 'Livance · Ibirapuera', address: 'R. Agostinho Rodrigues Filho, 550', info_text: SAO_PAULO },
+  { id: 'u-santos', name: 'Livance · Santos', address: 'Av. Anna Costa, 228, 20º andar, Gonzaga, Santos - SP', info_text: SANTOS },
+  { id: 'u-sp', name: 'Livance Ibirapuera - São Paulo', address: 'Rua Agostinho Rodrigues Filho, 550, Vila Clementino - CEP 04026-040', info_text: SAO_PAULO },
 ]
 
 const RESPOSTAS_PRONTAS = [
   {
     id: 'r1',
     subject: 'Valor e pagamento',
-    keywords: ['valor', 'valores', 'preco', 'preço', 'custa', 'custo', 'quanto', 'pagamento', 'pagar', 'pix', 'cartao', 'recibo', 'reembolso', 'particular'],
-    answer: 'Santos R$ 450, São Paulo R$ 550, telemedicina R$ 450.',
+    keywords: ['credito', 'parcela', 'nota', 'pix', 'valor', 'pagamento', 'preco', 'preços', 'pagar', 'quanto', 'reembolso', 'recibo', 'cartao', 'custa', 'totem', 'link', 'debito', 'custo', 'preço', 'particular', 'valores'],
+    answer:
+      '💙 *Valores da consulta:*\n\n• Santos: R$ 450,00\n• São Paulo: R$ 600,00\n• Telemedicina: R$ 450,00\n\n' +
+      'Todas incluem retorno em até 30 dias (na telemedicina, o retorno é presencial).\n\n' +
+      '💳 Pagamento: em Santos e em São Paulo, online, pelo link de pagamento que a Livance envia antes da consulta; na telemedicina, pix. Emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.',
     ask_unit: true,
+  },
+  {
+    id: 'r5',
+    subject: 'Idade atendida',
+    keywords: ['bebe', 'bebê', 'bebes', 'bebês', 'recem', 'recém', 'nascido', 'nascidos', 'neném', 'nenem', 'idade', 'idades', 'meses', 'mes', 'mês', 'crianca', 'criança', 'criancas', 'crianças', 'adolescente', 'adolescentes', 'adulto', 'adultos', 'anos'],
+    answer:
+      '👶 *Idade atendida*\n\nO Dr. Marcello atende desde *recém-nascidos até 19 anos*.\n\n' +
+      'Se a sua dúvida for sobre um caso específico, digite *9* e alguém da equipe responde.',
+    ask_unit: false,
   },
   {
     id: 'r2',
     subject: 'Convênios',
-    keywords: ['convenio', 'convênio', 'convenios', 'plano', 'planos', 'unimed', 'bradesco', 'amil', 'sulamerica', 'porto', 'notredame', 'carteirinha', 'credenciado'],
+    keywords: ['convenio', 'convênio', 'convenios', 'convênios', 'plano', 'planos', 'saude', 'saúde', 'aceita', 'aceitam', 'cobertura', 'coberto', 'credenciado', 'credenciada', 'carteirinha', 'reembolso', 'particular', 'unimed', 'bradesco', 'amil', 'sulamerica', 'sulamérica', 'porto', 'notredame', 'notre', 'hapvida', 'trasmontano', 'bluemed', 'blue', 'omint', 'careplus', 'golden', 'prevent', 'seguros'],
     answer:
-      'Não atendemos convênio: o atendimento é particular, com pagamento em pix ou dinheiro.\n\n' +
+      '💳 *Convênios*\n\nNão atendemos convênio: a consulta é particular, em todas as unidades e na telemedicina.\n\n' +
       'Emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano. O valor devolvido depende do seu contrato.',
     ask_unit: false,
   },
   {
     id: 'r3',
     subject: 'Endereço e estacionamento',
-    keywords: ['endereco', 'endereço', 'onde', 'local', 'chegar', 'estacionamento', 'estacionar', 'mapa'],
+    keywords: ['local', 'endereco', 'carro', 'localizacao', 'onde', 'mapa', 'localização', 'referência', 'estacionamento', 'endereço', 'gonzaga', 'fica', 'livance', 'chegar', 'referencia', 'estacionar', 'rua', 'bairro'],
     answer:
       'Atendemos em duas unidades, as duas com estacionamento particular no local:\n\n' +
       '📍 *Livance · Ibirapuera* — R. Agostinho Rodrigues Filho, 550, Vila Clementino, São Paulo.\n\n' +
-      '📍 *Liferty · Santos* — Al. Armênio Mendes, 66, sala 2912, Aparecida, Santos.',
+      '📍 *Livance · Santos* — Av. Anna Costa, 228, 20º andar, Gonzaga, Santos.\n🎥 Como funciona a chegada: https://www.instagram.com/reels/DYmuhB1xqJf/',
     ask_unit: false,
   },
   {
     id: 'r4',
     subject: 'O que levar e como é a consulta',
-    keywords: ['levar', 'documento', 'documentos', 'exame', 'exames', 'vacina', 'vacinacao', 'retorno', 'duracao', 'demora'],
+    keywords: ['levar', 'documento', 'documentos', 'exame', 'exames', 'carteirinha', 'vacina', 'vacinacao', 'vacinação', 'primeira', 'duracao', 'duração', 'demora', 'tempo', 'retorno', 'preparo', 'jejum'],
     answer:
       'Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.\n\n' +
+      '⏱️ A consulta dura de 40 minutos a 1 hora.\n\n' +
+      '✅ Não precisa de jejum nem de preparo: é só a consulta.\n\n' +
       'O retorno está incluído e pode ser feito em até 30 dias.',
     ask_unit: false,
   },
@@ -86,7 +107,7 @@ const RESPOSTAS_PRONTAS = [
 
 const TEXTOS = {
   saudacao: 'Olá! 👋 Aqui é o consultório do Dr. Marcello Ruiz, Gastroenterologista Pediátrico.',
-  saudacaoConhecida: 'Olá, {nome}! 👋 Aqui é o consultório do Dr. Marcello Ruiz.',
+  saudacaoConhecida: 'Olá, {nome}! 👋 Aqui é o consultório do Dr. Marcello Ruiz, Gastroenterologista Pediátrico.',
   informacoes: FECHO,
 }
 
@@ -94,9 +115,20 @@ const TEXTOS = {
 const slots = (dias, horas) =>
   dias.flatMap((d) => horas.map((h) => ({ slot_start: `${d}T${h}:00Z`, slot_end: `${d}T${h}:40Z` })))
 
+// Proxima quarta (3) ou sexta (5) a partir de amanha, mais `semanas`.
+const proxima = (diaDaSemana, semanas = 0) => {
+  const d = new Date()
+  d.setUTCHours(12, 0, 0, 0)
+  d.setUTCDate(d.getUTCDate() + 1)
+  while (d.getUTCDay() !== diaDaSemana) d.setUTCDate(d.getUTCDate() + 1)
+  d.setUTCDate(d.getUTCDate() + 7 * semanas)
+  return d.toISOString().slice(0, 10)
+}
+const QUARTA = proxima(3)
+
 const SLOTS = {
-  'u-santos': slots(['2026-09-16', '2026-09-23'], ['11:00', '11:40', '12:20', '13:00']),
-  'u-sp': slots(['2026-09-18', '2026-09-25'], ['17:00', '17:40', '18:20']),
+  'u-santos': slots([QUARTA, proxima(3, 1)], ['11:00', '11:40', '12:20', '13:00']),
+  'u-sp': slots([proxima(5), proxima(5, 1)], ['17:00', '17:40', '18:20']),
 }
 
 // ---------------------------------------------------------------
@@ -182,7 +214,7 @@ function fazerAdmin({ pacientes = [], teleAtiva = true }) {
                 const unidade = UNIDADES.find((u) => u.id === ultima?.unit_id) ?? UNIDADES[0]
                 return {
                   reschedule_count: 0,
-                  starts_at: ultima?.starts_at ?? '2026-09-16T11:00:00Z',
+                  starts_at: ultima?.starts_at ?? `${QUARTA}T11:00:00Z`,
                   modality: ultima?.modality ?? 'presencial',
                   clinic_units: { name: unidade.name, address: unidade.address },
                 }
@@ -267,6 +299,7 @@ async function conversar(titulo, mensagens, opcoes = {}) {
       pacientes: opcoes.pacientes ?? [],
       nomeDoPerfil: opcoes.nomeDoPerfil ?? 'Marina',
       textos: TEXTOS,
+      agora: opcoes.agora,
     })
 
     if (!r) {
@@ -361,9 +394,9 @@ await conversar('8. Paciente conhecido vê e cancela a consulta', ['Olá', '4', 
   consultas: [
     {
       id: 'c-1',
-      inicio: '2026-09-16T11:00:00Z',
-      unidade: 'Liferty · Santos',
-      endereco: 'Al. Armênio Mendes, 66',
+      inicio: `${QUARTA}T11:00:00Z`,
+      unidade: 'Livance · Santos',
+      endereco: 'Av. Anna Costa, 228, 20º andar, Gonzaga',
       paciente: 'Ana Paula Souza',
       confirmada: true,
     },
@@ -469,6 +502,31 @@ await conversar('23. Real 03/10 (Ben): retorno para daqui a 3 meses', [
   'Oi',
   'Dr. pediu para agendar retorno em 3 meses. Gostaria de deixar agendado.',
 ])
+
+// Revisao de 07/10/2026: jejum, remarcar por extenso e urgencia fora do horario.
+await conversar('26. "Precisa de jejum?" e "quanto tempo demora a consulta?"', [
+  'Oi',
+  'precisa de jejum para a consulta?',
+  'e quanto tempo demora a consulta?',
+])
+
+await conversar('24. "Quero remarcar" de quem já tem consulta marcada', ['quero remarcar'], {
+  pacientes: [ANA],
+  consultas: [
+    {
+      id: 'c-1',
+      inicio: `${QUARTA}T11:00:00Z`,
+      unidade: 'Livance · Santos',
+      endereco: 'Av. Anna Costa, 228, 20º andar, Gonzaga',
+      paciente: 'Ana Paula Souza',
+      confirmada: true,
+    },
+  ],
+})
+
+await conversar('25. Urgência numa sexta às 23h', ['socorro, é urgente, meu filho está muito mal'], {
+  agora: new Date(`${proxima(5)}T23:00:00-03:00`),
+})
 
 console.log('\n' + linha('━'))
 console.log('  fim da simulação')

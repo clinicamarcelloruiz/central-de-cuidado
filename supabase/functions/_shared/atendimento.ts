@@ -18,7 +18,7 @@
  * meta-webhook, que ja tem o token e o numero em maos.
  */
 
-import { avisoDeHorario } from './expediente.ts'
+import { avisoDeHorario, dentroDoExpediente } from './expediente.ts'
 import { dataDeNascimentoIso } from './datas.ts'
 import type { adminClient } from './whatsapp.ts'
 import { cadastrarDaFicha, type ConsultaParaCadastro } from './cadastro.ts'
@@ -220,6 +220,27 @@ export type ConsultaMarcada = {
 
 function normalizar(texto: string) {
   return texto.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase()
+}
+
+/**
+ * "Quero remarcar", "preciso desmarcar a consulta de quinta", "tem como mudar
+ * a data?" (07/10/2026).
+ *
+ * pediuAgendamento recusa essas frases de proposito (quem remarca ja tem
+ * consulta), mas nada as levava a lugar nenhum: caiam no menu, e a familia
+ * tinha de adivinhar que "Ver, remarcar ou cancelar" era a opcao 4. Agora vao
+ * direto para a consulta dela, quando ha uma.
+ *
+ * "Nao quero cancelar" e "nao precisa remarcar" nao contam. A palavra
+ * "cancelar" sozinha tambem nao: em qualquer etapa ela e "desisti daqui", e
+ * quem usa assim nao quer ver a consulta.
+ */
+export function pediuMudarConsulta(texto: string) {
+  const t = normalizar(texto)
+  if (t === 'cancelar') return false
+  const pedido = /\b(remarc|desmarc|cancel)\w*/.test(t) || /\b(mudar|trocar|alterar)\s+(a\s+|o\s+|de\s+)?(data|dia|horario)\b/.test(t)
+  if (!pedido) return false
+  return !/\bnao\b(\s+\w+){0,2}\s+(remarc|desmarc|cancel|mudar|trocar|alterar)/.test(t)
 }
 
 /** Frases que abrem o agendamento sem passar pelo menu. */
@@ -1111,10 +1132,15 @@ async function responderPergunta(
  * diz o que acontece de fato (o medico avalia na consulta e decide o que
  * investigar) e aponta o caminho: marcar ou falar com a equipe.
  */
+// A saida de urgencia entrou em 07/10/2026. "Meu filho esta com dor de barriga
+// ha 3 dias, posso dar dipirona?" recebia "nao posso orientar" e o menu, sem
+// dizer o que fazer se a crianca piorasse. A palavra URGENCIA ja funcionava de
+// qualquer etapa; so ninguem contava isso a quem descrevia um sintoma.
 function fraseClinica(clinicId: string) {
   return (
     `Essa é uma avaliação para a consulta: é lá que ${quemAtende(clinicId).o} examina a criança e decide ` +
-    'o que precisa investigar. Por aqui eu não posso orientar sobre sintomas, exames ou remédios.'
+    'o que precisa investigar. Por aqui eu não posso orientar sobre sintomas, exames ou remédios. ' +
+    'Se for urgente, digite *URGÊNCIA*.'
   )
 }
 
@@ -1270,7 +1296,9 @@ async function chamarEquipe(admin: Admin, conversationId: string): Promise<Resul
   // Sem os tres, "vou te transferir" vira promessa vaga.
   return {
     resposta:
-      'Estou direcionando você para um atendente da clínica.\n\n' +
+      // "Da equipe", como no menu e no resto das mensagens; "atendente da
+      // clinica" era a unica frase que chamava o consultorio de clinica.
+      'Estou direcionando você para alguém da nossa equipe.\n\n' +
       'Pode já escrever sua dúvida por aqui: a pessoa que assumir o atendimento ' +
       'vai ler tudo antes de responder.\n\n' +
       avisoDeHorario() + '\n\n' + VOLTA,
@@ -1781,13 +1809,16 @@ async function perguntarDia(
  * uma crianca passando mal e precisa ouvir que alguem vai ligar agora - e a
  * conversa precisa saltar na lista da recepcao com uma bandeira propria.
  */
-async function transferirUrgencia(admin: Admin, conversationId: string): Promise<Resultado> {
+async function transferirUrgencia(admin: Admin, conversationId: string, agora: Date): Promise<Resultado> {
   await salvarEstado(admin, conversationId, {
     booking_state: 'atendente',
     booking_options: null,
     booking_unit_id: null,
     booking_modality: null,
   })
+  if (!dentroDoExpediente(agora)) {
+    return { resposta: urgenciaForaDoExpediente(agora), atencao: 'urgencia' }
+  }
   return {
     resposta:
       '🚨 Entendi que é urgência. Estou transferindo você para um atendente do ' +
@@ -1797,6 +1828,26 @@ async function transferirUrgencia(admin: Admin, conversationId: string): Promise
       'Se for uma emergência com risco de vida, procure o pronto-socorro mais próximo ou ligue 192.',
     atencao: 'urgencia',
   }
+}
+
+/**
+ * Urgencia fora do expediente (07/10/2026).
+ *
+ * Ate aqui a resposta era a mesma a qualquer hora: "a nossa equipe vai entrar
+ * em contato com urgencia por aqui". Numa sexta as 23h isso e uma promessa que
+ * ninguem cumpre ate segunda as 8h - e uma mae com a crianca passando mal fica
+ * esperando o WhatsApp tocar. Fora do horario o robo diz a verdade (quando a
+ * equipe volta) e poe o pronto-socorro em primeiro plano, em vez de rodape.
+ * A conversa continua marcada como urgencia, para saltar na lista de manha.
+ */
+function urgenciaForaDoExpediente(agora: Date): string {
+  return (
+    '🚨 Entendi que é urgência, e já deixei avisado para a nossa equipe.\n\n' +
+    avisoDeHorario(agora) + '\n\n' +
+    '*Se a criança está mal agora, não espere a nossa resposta: procure o ' +
+    'pronto-socorro mais próximo ou ligue 192.*\n\n' +
+    'Se quiser, já escreva o que está acontecendo: quem assumir o atendimento lê tudo antes de responder.'
+  )
 }
 
 /** Segunda etapa: a que horas, dentro do dia escolhido. */
@@ -2146,7 +2197,9 @@ const PERGUNTAS: {
     obrigatoria: true,
     coluna: 'intake_birth_date',
     colunaDoCadastro: 'birth_date',
-    texto: '🎂 Qual é a *data de nascimento* dele(a)? (dia/mês/ano)',
+    // "da crianca" e nao "dele(a)": o parentese de formulario no meio de uma
+    // conversa soava como cadastro de reparticao.
+    texto: '🎂 Qual é a *data de nascimento* da criança? (dia/mês/ano)',
     // Guarda o que a pessoa escreveu quando nao e uma data redonda: "março de
     // 2019" diz muito mais para o medico do que um campo vazio.
     ler: (t) => (t.trim().length >= 3 ? t.trim().slice(0, 60) : null),
@@ -2955,8 +3008,14 @@ export async function tratarConversa(opcoes: {
   /** Nome que a pessoa usa no WhatsApp. Vazio quando o evento nao trouxe. */
   nomeDoPerfil: string
   textos: { saudacao: string; saudacaoConhecida: string; informacoes: string }
+  /**
+   * O relogio da conversa. Ausente vale agora; os testes passam um horario
+   * fixo, porque a resposta de urgencia muda fora do expediente.
+   */
+  agora?: Date
 }): Promise<Resultado> {
   const { admin, clinicId, conversationId, estadoAtual, texto } = opcoes
+  const agora = opcoes.agora ?? new Date()
 
   // De quem sao os eventos daqui para baixo. Ver EventoDoRobo, la em cima.
   focar(conversationId)
@@ -3088,6 +3147,8 @@ export async function tratarConversa(opcoes: {
     }
 
     if (pediuUrgencia(texto)) {
+      // Na fila tambem: fora do horario, "o mais rapido possivel" seria segunda.
+      if (!dentroDoExpediente(agora)) return { resposta: urgenciaForaDoExpediente(agora), atencao: 'urgencia' }
       return {
         resposta:
           '🚨 Avisei a nossa equipe de que é urgente. Alguém entra em contato o mais rápido possível.\n\n' +
@@ -3229,7 +3290,7 @@ export async function tratarConversa(opcoes: {
   // esta vomitando sangue" - a transferencia vale, e o pedido perder-se ali e
   // o menor dos problemas.
   if (pediuUrgencia(texto) && (!noPedidoDeDocumento || assuntoClinico(texto))) {
-    return await transferirUrgencia(admin, conversationId)
+    return await transferirUrgencia(admin, conversationId, agora)
   }
 
   // "Cancelar" muda de sentido dentro de "minha consulta": ali nao e desistir
@@ -3379,6 +3440,19 @@ export async function tratarConversa(opcoes: {
           'Já separei a agenda para você 👇 Se antes quiser saber valores ou tirar uma dúvida, digite *0* para ver todas as opções.\n\n' +
           agenda.resposta,
       }
+    }
+
+    // Remarcar ou desmarcar por extenso vai direto para a consulta, com a
+    // apresentacao em cima - o mesmo cuidado do atalho de agendamento. Sem
+    // consulta marcada neste numero, segue o caminho de sempre (o menu): a
+    // consulta pode estar no telefone do outro responsavel, e "nao encontrei
+    // nada" sem mais nada seria um beco. Ver pediuMudarConsulta.
+    if (pediuMudarConsulta(texto) && !assuntoClinico(texto) && opcoes.consultas.length > 0) {
+      registrar('opcao_escolhida', '4')
+      const minha = await mostrarMinhaConsulta(admin, clinicId, conversationId, opcoes.consultas)
+      // Conta como menu visto, como no atalho de agendamento.
+      await salvarEstado(admin, conversationId, { menu_sent_at: new Date().toISOString() })
+      if (minha) return { ...minha, resposta: `${saudacao}\n\n${minha.resposta}` }
     }
 
     // A pergunta vem antes do menu. Quem escreveu uma duvida que a clinica ja
@@ -3540,6 +3614,12 @@ export async function tratarConversa(opcoes: {
       return await iniciarAgendamento(
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
       )
+    }
+
+    // Com o menu na tela, "quero remarcar" e a opcao 4 escrita. Ver pediuMudarConsulta.
+    if (pediuMudarConsulta(texto) && !assuntoClinico(texto) && opcoes.consultas.length > 0) {
+      registrar('opcao_escolhida', '4')
+      return await mostrarMinhaConsulta(admin, clinicId, conversationId, opcoes.consultas)
     }
 
     // Com alguem da equipe conversando, o robo para por aqui.
