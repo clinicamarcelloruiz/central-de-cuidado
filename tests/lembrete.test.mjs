@@ -17,6 +17,7 @@ import {
   janelaDeLembrete,
   fimDoDiaLocal,
   oQueFoiEscolhido,
+  unidadeNoLembrete,
 } from './lembrete.build.mjs'
 
 let passou = 0
@@ -450,6 +451,25 @@ conferir('Relógio torto (no futuro) não vale', depoisDoAcompanhamento({ create
 conferir(
   'Botao "Estamos bem" do acompanhamento v2 e resposta positiva',
   interpretarResposta('Estamos bem', true).isWell === true,
+)
+
+// Endereco no lembrete e na confirmacao (09/10/2026): duas familias foram ao
+// endereco antigo de Santos com o lembrete dizendo so o nome da unidade.
+conferir(
+  'Lembrete leva o endereço junto do nome da unidade',
+  unidadeNoLembrete('presencial', 'Livance · Santos', 'Av. Anna Costa, 228, 20º andar, Gonzaga, Santos - SP') ===
+    'Livance · Santos (Av. Anna Costa, 228, 20º andar, Gonzaga, Santos - SP)',
+)
+conferir(
+  'CEP e quebra de linha saem do endereço do lembrete',
+  unidadeNoLembrete('presencial', 'Livance Ibirapuera', 'Rua Agostinho Rodrigues Filho, 550,\nVila Clementino - CEP 04026-040') ===
+    'Livance Ibirapuera (Rua Agostinho Rodrigues Filho, 550, Vila Clementino)',
+)
+conferir('Telemedicina continua "virtual"', unidadeNoLembrete('telemedicina', 'Telemedicina', '') === 'virtual (consulta por vídeo)')
+conferir('Sem endereço, só o nome', unidadeNoLembrete('presencial', 'Livance · Santos', '') === 'Livance · Santos')
+conferir(
+  'Confirmação repete onde é a consulta',
+  avisoDaResposta(interpretarResposta('1', true), 'Livance · Santos (Av. Anna Costa, 228)').includes('📍 Livance · Santos (Av. Anna Costa, 228)'),
 )
 
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)

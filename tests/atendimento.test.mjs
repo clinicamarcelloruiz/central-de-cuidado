@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta } from './atendimento.build.mjs'
+import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 import { montarMensagens } from './conteudo.build.mjs'
 
@@ -259,6 +259,7 @@ const achados = []
  *   - null    -> o robo precisa ficar em silencio
  */
 const QUARTA_10H = new Date('2026-10-07T13:00:00Z')
+const VAZIO = Symbol('vazio')
 const SEXTA_23H = new Date('2026-10-10T02:00:00Z')
 
 async function caso(titulo, passos, opcoes = {}) {
@@ -344,6 +345,7 @@ async function caso(titulo, passos, opcoes = {}) {
       // Relogio fixo numa quarta as 10h (Brasilia): a resposta de urgencia muda
       // fora do expediente, e o teste nao pode depender da hora em que roda.
       agora: opcoes.agora ?? QUARTA_10H,
+      consultaHoje: ajustes.consultaHoje ?? opcoes.consultaHoje ?? false,
     })
 
     const resposta = r?.resposta ?? null
@@ -365,6 +367,14 @@ async function caso(titulo, passos, opcoes = {}) {
     }
     ultimoToque = { resposta: r?.resposta ?? '', botoes: r?.botoes, lista: r?.lista, concluida: r?.concluida, atencao: r?.atencao }
     transcricao.push(`  > ${texto}\n    ${resposta ? resposta.replace(/\n/g, '\n    ') : '(silêncio)'}`)
+
+    // Resposta vazia de proposito: o robo processou e decidiu nao dizer nada
+    // (resposta automatica do WhatsApp Business da familia).
+    if (esperado === VAZIO) {
+      if (resposta === '') passou++
+      else falhas.push(`${titulo} | "${texto}" deveria ser resposta vazia, veio: ${String(resposta).slice(0, 60)}`)
+      continue
+    }
 
     if (esperado === null) {
       if (resposta !== null) {
@@ -1490,7 +1500,7 @@ const RESPOSTAS_POR_UNIDADE = [
 ]
 
 await caso('"Quanto custa" pergunta onde antes de responder', [
-  ['Quanto custa a consulta?', ['Para qual atendimento', 'Liferty · Santos', 'Telemedicina']],
+  ['Quanto custa a consulta?', ['custa R$ 450,00', 'Escolha o atendimento', 'Liferty · Santos', 'Telemedicina']],
   ['4', 'Retorno presencial em 30 dias'],
 ], { respostasProntas: RESPOSTAS_POR_UNIDADE, telemedicina: TELE })
 
@@ -2211,10 +2221,18 @@ await caso('Dúvida não clínica nas informações também vai para a equipe', 
   ['Vocês emitem nota fiscal no nome da empresa?', 'Passei sua pergunta para a nossa equipe'],
 ], { telemedicina: TELE })
 
-await caso('Palavra solta nas informações continua pedindo o número', [
+// Ate 09/10/2026 "santos?" pedia o numero. Passou a escolher a unidade: o nome
+// do lugar e a resposta a "para qual atendimento?" (Mayara, ver unidadePeloNome).
+await caso('O nome da cidade nas informações escolhe a unidade', [
   ['Oi', 'Como podemos ajudar'],
   ['1', 'Para qual atendimento'],
-  ['santos?', 'número da unidade'],
+  ['santos?', 'outra unidade'],
+], { telemedicina: TELE })
+
+await caso('Palavra solta que não é unidade continua pedindo o número', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['ok?', 'número da unidade'],
 ], { telemedicina: TELE })
 
 // "Marca consulta pra minha filha, e valor da consulta" (24/09/2026): recebia
@@ -3287,6 +3305,152 @@ for (const [frase, esperado] of [
 await caso('Data de nascimento pergunta pela criança, sem "dele(a)"', [
   ['Helena Souza Lima', '*data de nascimento* da criança'],
 ], { consultas: CONSULTA_SEM_FICHA, fichas: FICHA_VAZIA, estadoInicial: NO_MENU })
+
+// ---------------------------------------------------------------------------
+// Conversas de 07 a 09/10/2026
+// ---------------------------------------------------------------------------
+
+// Laura: a secretaria entrou na escolha do dia; a resposta para ela nao pode
+// receber "Nao entendi" do robo. Resposta que o robo entende continua valendo.
+await caso('Com a equipe conversando, "não entendi" na etapa vira silêncio', [
+  ['agendar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['10:40h', null, { podeIniciarMenu: false }],
+  ['1', 'Horários'],
+])
+await caso('Sem a equipe, a mesma resposta ainda recebe "não entendi"', [
+  ['agendar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['10:40h', 'Não entendi'],
+])
+
+// Laura: "Sexta pela manha" com a lista de datas na tela.
+await caso('Dia escrito por nome escolhe a data', [
+  ['agendar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['terça pela manhã', 'Horários de terça, 01/09'],
+])
+await caso('Dia da semana sem vaga diz que não há vaga nesse dia', [
+  ['agendar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['sexta pela manhã', 'não temos horário livre na sexta'],
+  ['VOLTAR', 'Em qual unidade'],
+])
+for (const [frase, esperado] of [
+  ['quarta', 2], ['segunda de manhã', 0], ['dia 7', 3], ['sexta', -1], ['segunda ou terça', -1], ['quero o primeiro', -1],
+]) {
+  const r = diaPeloNome(frase, diasSantos, QUARTA_10H)
+  if (r === esperado) passou++
+  else falhas.push(`diaPeloNome("${frase}") deveria ser ${esperado}, veio ${r}`)
+}
+
+// Mayara: tocou o NOME da unidade numa lista antiga e recebeu o endereco.
+await caso('Nome da unidade na escolha das informações é escolha, não resposta pronta', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['Liferty · Santos', 'Consulta em Santos'],
+], {
+  respostasProntas: [{ id: 'e', subject: 'Endereço', keywords: ['livance', 'liferty', 'endereco'], answer: 'Atendemos em duas unidades: X e Y.' }],
+  unidades: [{ ...TRES_UNIDADES[0], info_text: '*Consulta em Santos: R$ 450,00.*' }, TRES_UNIDADES[1], TRES_UNIDADES[2]],
+})
+await caso('"Santos" sozinho também escolhe a unidade', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['santos', 'Consulta em Santos'],
+], { unidades: [{ ...TRES_UNIDADES[0], info_text: '*Consulta em Santos: R$ 450,00.*' }, TRES_UNIDADES[1], TRES_UNIDADES[2]] })
+await caso('"Bom dia" na escolha das informações repete a pergunta, com lista', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['Bom dia', 'Para qual atendimento'],
+], {
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.lista) passou++
+    else falhas.push(`${titulo} | sem lista`)
+  },
+})
+await caso('"Não entendi" na escolha das informações volta com a lista', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['228', 'Não entendi'],
+], {
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.lista) passou++
+    else falhas.push(`${titulo} | sem lista`)
+  },
+})
+
+// Veronica: "400,00 a consulta, certo?" e pergunta de valor.
+await caso('Valor escrito em número casa com a resposta de valor', [
+  ['Oi', 'Como podemos ajudar'],
+  ['Confirmando, 400,00 a consulta, certo', 'custa R$ 450,00'],
+], { respostasProntas: RESPOSTAS })
+
+// Veronica e Cinthia: o WhatsApp Business da familia respondendo sozinho.
+for (const frase of [
+  'Oie. No momento, estou fora do meu horário de atendimento. Retorno sua mensagem assim que possível 😊',
+  'Cinthia Esteves agradece seu contato. Como podemos ajudar?',
+]) {
+  await caso(`Resposta automática da família não recebe nada: ${frase.slice(0, 30)}`, [
+    ['Oi', 'Como podemos ajudar'],
+    ['3', 'alguém da nossa equipe'],
+    [frase, VAZIO],
+  ], {
+    verificar: ({ ultimoToque, titulo }) => {
+      if (ultimoToque.resposta === '' && !ultimoToque.atencao) passou++
+      else falhas.push(`${titulo} | respondeu: ${ultimoToque.resposta.slice(0, 60)}`)
+    },
+  })
+}
+for (const [frase, esperado] of [
+  ['vocês estão fora do horário de atendimento?', false],
+  ['retorno para o Anthony', false],
+  ['Esta é uma mensagem automática', true],
+]) {
+  if (respostaAutomaticaDaFamilia(frase) === esperado) passou++
+  else falhas.push(`respostaAutomaticaDaFamilia("${frase}") deveria ser ${esperado}`)
+}
+
+// Veronica e Dani: atraso e chegada no dia da consulta.
+await caso('"Vou atrasar" no dia da consulta vai para a equipe, sem menu', [
+  ['Apenas para avisar que pode ser que o Martin atrase uns 15 min', ['Obrigado por avisar', 'avisa o Dr. Marcello']],
+], {
+  consultaHoje: true,
+  primeiraMensagem: true,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.atencao === 'atendente') passou++
+    else falhas.push(`${titulo} | atenção ${ultimoToque.atencao}`)
+  },
+})
+await caso('"Estamos aqui na recepção" avisa a equipe', [
+  ['Sou a mãe do Martín, estamos aqui na recepção', 'Obrigado por avisar que chegaram'],
+], { primeiraMensagem: true })
+await caso('"Atraso de fala" não é aviso de atraso', [
+  ['Oi', 'Como podemos ajudar'],
+  ['meu filho tem atraso na fala, vocês atendem?', ''],
+], {
+  consultaHoje: true,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (/Obrigado por avisar/.test(ultimoToque.resposta)) falhas.push(`${titulo} | virou aviso de atraso`)
+    else passou++
+  },
+})
+await caso('Aviso de atraso com a equipe conversando: silêncio', [
+  ['estamos a caminho, pegamos trânsito', null],
+], { consultaHoje: true, podeIniciarMenu: false })
+for (const [frase, esperado] of [
+  ['vamos atrasar uns 10 minutos', 'atraso'],
+  ['chegamos em 5 min', 'atraso'],
+  ['cheguei', 'chegada'],
+  ['ele tem atraso no crescimento', null],
+]) {
+  if (avisoDoDiaDaConsulta(frase) === esperado) passou++
+  else falhas.push(`avisoDoDiaDaConsulta("${frase}") deveria ser ${esperado}`)
+}
+
+// Dani: dois dias depois da consulta, "ele segue com dores", com o menu na tela.
+await caso('Relato de evolução depois da consulta vira recado, com o menu na tela', [
+  ['Recebi sim, já estamos aplicando os medicamentos, mas o Martín segue com dores abdominais à noite', ['Obrigado por nos contar', 'URGÊNCIA']],
+], { posAcompanhamento: true, estadoInicial: { booking_state: 'menu' } })
 
 console.log('\n============================================')
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)

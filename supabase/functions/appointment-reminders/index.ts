@@ -1,7 +1,7 @@
 import { adminClient, corsHeaders, json, toBrazilE164 } from '../_shared/whatsapp.ts'
 import { textoDoModelo } from '../_shared/modelos.ts'
 import { cadastrarDaFicha } from '../_shared/cadastro.ts'
-import { janelaDeLembrete } from '../_shared/lembrete.ts'
+import { janelaDeLembrete, unidadeNoLembrete } from '../_shared/lembrete.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
 import { chaveDoWhatsApp, foraDaListaDeTeste, listaDeTeste } from '../_shared/whatsapp-teste.ts'
 
@@ -117,7 +117,7 @@ Deno.serve(async (req) => {
 
       const { data: consultas, error: consultasError } = await admin
         .from('appointments')
-        .select('id,patient_id,starts_at,unit_id,modality,contact_name,contact_phone,clinic_units(name),' +
+        .select('id,patient_id,starts_at,unit_id,modality,contact_name,contact_phone,clinic_units(name,address),' +
           'intake_patient_name,intake_birth_date,intake_guardian,intake_cpf,intake_email,reminder_failed_at')
         .eq('clinic_id', clinica.clinic_id)
         .eq('status', 'scheduled')
@@ -250,9 +250,8 @@ Deno.serve(async (req) => {
         // "telemedicina (por vídeo)", e a familia lia "na unidade telemedicina
         // (por vídeo)". Com "virtual", a frase fecha: "na unidade virtual
         // (consulta por vídeo)".
-        const unidade = consulta.modality === 'telemedicina'
-          ? 'virtual (consulta por vídeo)'
-          : (consulta.clinic_units as { name?: string } | null)?.name || 'a clínica'
+        const lugar = consulta.clinic_units as { name?: string; address?: string } | null
+        const unidade = unidadeNoLembrete(consulta.modality, lugar?.name, lugar?.address)
 
         const { data: conversa, error: conversaError } = await admin
           .from('whatsapp_conversations')

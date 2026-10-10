@@ -233,9 +233,16 @@ export function mudancaDaConsulta(resposta: Resposta, quando: string) {
  * Ate 31/08/2026 o sistema anotava a resposta e nao dizia nada: quem confirmava
  * ficava sem saber se tinha dado certo.
  */
-export function avisoDaResposta(resposta: Resposta) {
+export function avisoDaResposta(
+  resposta: Resposta,
+  /**
+   * Unidade com endereco (unidadeNoLembrete), repetida em quem confirmou
+   * (09/10/2026): a confirmacao e a mensagem que a familia guarda para o dia.
+   */
+  onde = '',
+) {
   const aviso = resposta.confirma
-    ? 'Consulta confirmada, obrigado! Até lá.'
+    ? 'Consulta confirmada, obrigado! Até lá.' + (onde ? `\n\n📍 ${onde}` : '')
     : resposta.cancela
       ? // Com botao desde 22/09/2026. "Digite 2" sozinho nem funcionava: sem
         // etapa aberta, o 2 caia no menu, e a pessoa precisava mandar 2 de
@@ -388,4 +395,37 @@ export function oQueFoiEscolhido(toque: {
     toque.respondeA && toque.ultimoEnvio && toque.respondeA !== toque.ultimoEnvio,
   )
   return antigo && toque.titulo ? toque.titulo : toque.id
+}
+
+/**
+ * O lugar como vai no lembrete da vespera ("na unidade {{4}}").
+ *
+ * Com o endereco junto desde 09/10/2026. Duas familias com consulta marcada
+ * antes da mudanca foram ao endereco antigo de Santos (Praiamar) - o lembrete
+ * dizia so "Livance · Santos", e o endereco que elas tinham era o da
+ * confirmacao de setembro. Uma delas so percebeu na recepcao do predio errado,
+ * e a consulta acabou nao sendo cobrada. O modelo aprovado nao muda sem nova
+ * aprovacao da Meta; o parametro muda: "na unidade Livance · Santos (Av. Anna
+ * Costa, 228, 20º andar, Gonzaga, Santos - SP)".
+ *
+ * CEP sai (ninguem procura o predio pelo CEP, e alonga a frase). Quebra de
+ * linha e espaco repetido saem porque a Meta recusa parametro com eles.
+ */
+export function unidadeNoLembrete(
+  modalidade: string | null | undefined,
+  nome: string | null | undefined,
+  endereco: string | null | undefined,
+): string {
+  // Na telemedicina a frase fecha com "virtual (consulta por video)" - ver o
+  // comentario no appointment-reminders.
+  if (modalidade === 'telemedicina') return 'virtual (consulta por vídeo)'
+  const lugar = (nome ?? '').trim() || 'a clínica'
+  const limpo = (endereco ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s*[-·,]?\s*CEP:?\s*[\d.-]+/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .replace(/[,·-]\s*$/, '')
+    .trim()
+  return limpo ? `${lugar} (${limpo})` : lugar
 }

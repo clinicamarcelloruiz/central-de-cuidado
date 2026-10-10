@@ -243,6 +243,50 @@ export function pediuMudarConsulta(texto: string) {
   return !/\bnao\b(\s+\w+){0,2}\s+(remarc|desmarc|cancel|mudar|trocar|alterar)/.test(t)
 }
 
+/**
+ * Resposta automatica do WhatsApp Business da PROPRIA familia (09/10/2026).
+ *
+ * "No momento, estou fora do meu horario de atendimento. Retorno sua mensagem
+ * assim que possivel" chegou em resposta a secretaria, e o robo leu "retorno"
+ * como pedido de marcar e ofereceu o botao de agenda - um robo respondendo ao
+ * outro, por cima da equipe. "Fulana agradece seu contato. Como podemos
+ * ajudar?" e o mesmo caso. Primeira pessoa de proposito: a mae que pergunta
+ * "voces estao fora do horario?" nao pode ser calada.
+ */
+export function respostaAutomaticaDaFamilia(texto: string) {
+  const t = normalizar(texto)
+  return (
+    /\bagradece (o |seu |o seu |pelo |pela sua )?(contato|mensagem)\b/.test(t) ||
+    /\b(estou|estamos) fora do (meu |nosso )?horario de atendimento\b/.test(t) ||
+    /\b(mensagem|resposta) automatica\b/.test(t) ||
+    /\bretorno (sua mensagem|seu contato|o contato|a mensagem) (assim que|em breve|o mais breve)/.test(t) ||
+    /\bresponderei (assim que|em breve|o mais breve)/.test(t)
+  )
+}
+
+/**
+ * Aviso do dia da consulta: atraso ou chegada (09/10/2026).
+ *
+ * "Pode ser que o Martin atrase uns 15 min, pegaram fila na balsa" recebeu o
+ * menu inteiro e depois "nao consegui entender"; "Sou a mae do Martin, estamos
+ * aqui na recepcao", o mesmo. E recado para a equipe, que avisa o medico -
+ * nao inicio de conversa. So formas de verbo em "atraso": o substantivo solto
+ * aparece em "atraso de fala", que e outra conversa.
+ */
+export function avisoDoDiaDaConsulta(texto: string): 'atraso' | 'chegada' | null {
+  const t = normalizar(texto)
+  if (
+    /\batras(e|em|ar|ada|ado|adas|ados|amos|aremos|ando|aria|ariamos|ei|ou)\b/.test(t) ||
+    /\b(vou|vamos) chegar\b.{0,25}\b(tarde|atrasad)/.test(t) ||
+    /\b(a caminho|no transito|fila (na|da) balsa|estamos chegando|estou chegando|(chego|chegamos|chegaremos) (em|daqui a) \d+)\b/.test(t)
+  ) return 'atraso'
+  if (
+    /\b(cheguei|chegamos|ja estou aqui|ja estamos aqui)\b/.test(t) ||
+    /\b(estou|estamos) (aqui )?(na recepcao|no consultorio|na sala de espera|na portaria)\b/.test(t)
+  ) return 'chegada'
+  return null
+}
+
 /** Frases que abrem o agendamento sem passar pelo menu. */
 export function pediuAgendamento(texto: string) {
   const t = normalizar(texto)
@@ -1059,7 +1103,11 @@ async function responderPergunta(
   if (achada.perguntarUnidade) {
     const lugares = await opcoesDeAtendimento(admin, clinicId)
     if (lugares.length > 1) {
-      return await perguntarLocalDasInformacoes(admin, clinicId, conversationId, textoGeral)
+      // A resposta vem junto da pergunta (09/10/2026). A Mayara perguntou o
+      // valor duas vezes, recebeu duas vezes "para qual atendimento?" e foi
+      // embora sem o preco. A resposta cadastrada ja traz o valor de cada
+      // lugar; a escolha da unidade fica para quem quer o endereco e o resto.
+      return await perguntarLocalDasInformacoes(admin, clinicId, conversationId, textoGeral, achada.resposta)
     }
   }
 
@@ -1171,6 +1219,8 @@ async function perguntarLocalDasInformacoes(
   clinicId: string,
   conversationId: string,
   textoGeral: string,
+  /** Resposta pronta que vai em cima da pergunta (ver responderPergunta). */
+  antes = '',
 ): Promise<Resultado> {
   const lugares = await opcoesDeAtendimento(admin, clinicId)
 
@@ -1186,7 +1236,9 @@ async function perguntarLocalDasInformacoes(
   })
   return {
     resposta:
-      `💬 Para qual atendimento você quer informações?\n\n${linhas}\n\n` +
+      (antes
+        ? `${antes}\n\n📍 Quer ver endereço e o que levar? Escolha o atendimento:\n\n${linhas}\n\n`
+        : `💬 Para qual atendimento você quer informações?\n\n${linhas}\n\n`) +
       `Responda com o número. ${SAIDAS}`,
     lista: {
       rotulo: 'Escolher',
@@ -1566,11 +1618,57 @@ async function iniciarAgendamento(
  * entendi. Responda com o numero do dia". Quem toca o nome de uma unidade
  * quer aquela unidade.
  */
+const DIAS_DA_SEMANA = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado']
+
+/**
+ * O dia pelo nome: "sexta pela manha", "quarta", "amanha", "dia 14"
+ * (09/10/2026).
+ *
+ * A Laura escreveu "Sexta pela manha" com a lista de datas na tela e ouviu
+ * "Nao entendi"; a secretaria teve de entrar. Com mais de uma sexta na lista,
+ * vale a mais proxima - a tela seguinte mostra a data por extenso, e VOLTAR
+ * continua ali. Devolve o indice na lista, ou -1.
+ */
+export function diaPeloNome(texto: string, dias: string[], agora = new Date()): number {
+  const t = normalizar(texto)
+  const semana = (chave: string) => new Date(`${chave}T12:00:00Z`).getUTCDay()
+  const citados = DIAS_DA_SEMANA.filter((d) => new RegExp(`\\b${d}\\b`).test(t))
+  if (citados.length === 1) {
+    const alvo = DIAS_DA_SEMANA.indexOf(citados[0])
+    return dias.findIndex((chave) => semana(chave) === alvo)
+  }
+  if (citados.length > 1) return -1
+  const hoje = agora.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+  if (/\bhoje\b/.test(t)) return dias.indexOf(hoje)
+  if (/\bamanha\b/.test(t) && !/\bdepois de amanha\b/.test(t)) {
+    const d = new Date(`${hoje}T12:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + 1)
+    return dias.indexOf(d.toISOString().slice(0, 10))
+  }
+  const m = t.match(/\bdia\s+(\d{1,2})\b/)
+  if (m) {
+    const doDia = dias.filter((chave) => Number(chave.slice(8, 10)) === Number(m[1]))
+    return doDia.length === 1 ? dias.indexOf(doDia[0]) : -1
+  }
+  return -1
+}
+
 async function unidadePeloNome(admin: Admin, clinicId: string, texto: string): Promise<Unidade | null> {
   const t = normalizar(texto)
   if (!t || /^\d+$/.test(t)) return null
   const unidades = await opcoesDeAtendimento(admin, clinicId)
-  return unidades.find((u) => normalizar(u.name) === t || normalizar(tituloCurto(u.name)) === t) ?? null
+  const exata = unidades.find((u) => normalizar(u.name) === t || normalizar(tituloCurto(u.name)) === t)
+  if (exata) return exata
+  // "Santos", "sao paulo", "telemedicina" (09/10/2026): parte do nome tambem
+  // vale, desde que aponte uma unidade so. Palavras de 3 letras ou mais, para
+  // "de" e "a" nao casarem com tudo.
+  const palavras = t.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((p) => p.length >= 3)
+  if (palavras.length === 0 || palavras.length > 4) return null
+  const candidatas = unidades.filter((u) => {
+    const nome = normalizar(u.name).replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+    return palavras.every((p) => nome.includes(p))
+  })
+  return candidatas.length === 1 ? candidatas[0] : null
 }
 
 async function perguntarUnidade(
@@ -2944,7 +3042,31 @@ async function iniciarDocumento(
  * porque a equipe assumiu, porque a mensagem e resposta a um acompanhamento,
  * ou porque o menu ja foi mostrado ha pouco.
  */
-export async function tratarConversa(opcoes: {
+/**
+ * Com a equipe conversando, "nao entendi" vira silencio (09/10/2026).
+ *
+ * A Laura estava escolhendo o dia; a secretaria entrou na conversa ("nessa
+ * sexta temos 8h ou 10:40, qual fica melhor?"), a mae respondeu "10:40h" - para
+ * a secretaria - e o robo, ainda na etapa do dia, mandou "Nao entendi. Responda
+ * com o numero do dia". Resposta que o robo entende continua valendo (a
+ * familia pode muito bem tocar no dia da lista); a que ele NAO entende, com
+ * gente conversando, era para a gente. O silencio acende a conversa na tela.
+ */
+export async function tratarConversa(
+  opcoes: Parameters<typeof tratarConversaPorDentro>[0],
+): Promise<Resultado | null> {
+  const antes = (eventosEmCurso.get(opcoes.conversationId) ?? []).length
+  const resultado = await tratarConversaPorDentro(opcoes)
+  const novos = (eventosEmCurso.get(opcoes.conversationId) ?? []).slice(antes)
+  const naoEntendeu = novos.some((e) => e.evento === 'nao_entendi')
+  if (resultado && naoEntendeu && opcoes.estadoAtual && !opcoes.podeIniciarMenu) {
+    registrar('calou_com_equipe')
+    return null
+  }
+  return resultado
+}
+
+async function tratarConversaPorDentro(opcoes: {
   admin: Admin
   clinicId: string
   conversationId: string
@@ -3013,6 +3135,11 @@ export async function tratarConversa(opcoes: {
    * fixo, porque a resposta de urgencia muda fora do expediente.
    */
   agora?: Date
+  /**
+   * Ha consulta deste telefone hoje (marcada ou ja atendida). E o que faz
+   * "vou atrasar" virar aviso para a equipe. Ausente vale falso.
+   */
+  consultaHoje?: boolean
 }): Promise<Resultado> {
   const { admin, clinicId, conversationId, estadoAtual, texto } = opcoes
   const agora = opcoes.agora ?? new Date()
@@ -3062,6 +3189,36 @@ export async function tratarConversa(opcoes: {
         'Obrigado por avisar, e desculpe o engano! 🙏 Vamos corrigir o cadastro. ' +
         'Se este número não é de um paciente do consultório, pode desconsiderar a mensagem.',
       atencao: 'numero_errado',
+    }
+  }
+
+  // O WhatsApp Business da familia respondendo sozinho: nada a dizer, e nada
+  // para a equipe ver. Ver respostaAutomaticaDaFamilia.
+  if (respostaAutomaticaDaFamilia(texto)) {
+    registrar('resposta_automatica_da_familia')
+    return { resposta: '' }
+  }
+
+  // Atraso ou chegada no dia da consulta. Ver avisoDoDiaDaConsulta.
+  {
+    const aviso = avisoDoDiaDaConsulta(texto)
+    const noMeioDaFicha = Boolean(estadoAtual?.startsWith('dados_') || estadoAtual?.startsWith('documento_'))
+    if (aviso && (aviso === 'chegada' || opcoes.consultaHoje) && !noMeioDaFicha && !assuntoClinico(texto)) {
+      registrar('aviso_do_dia', aviso)
+      // Com a equipe conversando, quem responde e ela: o silencio acende a conversa.
+      if (!opcoes.podeIniciarMenu) return null
+      await salvarEstado(admin, conversationId, {
+        booking_state: 'atendente',
+        booking_options: null,
+        booking_unit_id: null,
+        auto_replies_while_waiting: 0,
+      })
+      return {
+        resposta:
+          (aviso === 'chegada' ? 'Obrigado por avisar que chegaram! 🙏 ' : 'Obrigado por avisar! 🙏 ') +
+          `Já passei o recado para a nossa equipe, que avisa ${quemAtende(clinicId).o}.`,
+        atencao: 'atendente',
+      }
     }
   }
 
@@ -3388,6 +3545,8 @@ export async function tratarConversa(opcoes: {
           resposta:
             'Obrigado por nos contar! 💙 Sua mensagem já está com a nossa equipe, e ' +
             `${quemAtende(clinicId).o} fica sabendo. Se for preciso, alguém responde por aqui.\n\n` +
+            // Relato de sintoma ganha a saida de urgencia (09/10/2026).
+            (assuntoClinico(texto) ? 'Se a criança piorar, digite *URGÊNCIA*.\n\n' : '') +
             avisoDeHorario() + '\n\n' + VOLTA,
         }
       }
@@ -3647,6 +3806,22 @@ export async function tratarConversa(opcoes: {
     // número da opção" - a mãe corrigida sobre a forma de responder, e ninguém
     // avisado. A frase existia, mas só valia para quem escrevia antes de o
     // menu aparecer, o que na prática é só a primeira mensagem da vida dela.
+    // Quem foi atendido ha poucos dias (ou respondeu o acompanhamento) e conta
+    // como a crianca esta: recado para o medico, com o menu na tela tambem.
+    // Ver consultouHaPouco no webhook.
+    if (opcoes.posAcompanhamento && assuntoClinico(texto)) {
+      registrar('acompanhamento_recado')
+      const chamada = await chamarEquipe(admin, conversationId)
+      return {
+        ...chamada,
+        resposta:
+          'Obrigado por nos contar! 💙 Sua mensagem já está com a nossa equipe, e ' +
+          `${quemAtende(clinicId).o} fica sabendo. Se for preciso, alguém responde por aqui.\n\n` +
+          'Se a criança piorar, digite *URGÊNCIA*.\n\n' +
+          avisoDeHorario() + '\n\n' + VOLTA,
+      }
+    }
+
     if (assuntoClinico(texto)) {
       // Nao e "nao entendi": o robo entendeu muito bem, e a resposta certa e
       // nao opinar. Contar isto como falha do menu esconderia o que interessa -
@@ -3937,9 +4112,25 @@ export async function tratarConversa(opcoes: {
   // ---- Informacoes: de qual unidade? ----
   if (estadoAtual === 'informacoes_unidade') {
     const ids = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
-    const indice = escolha(texto, ids.length)
+    let indice = escolha(texto, ids.length)
+    // A unidade pelo nome (09/10/2026). A Mayara tocou em "Livance · Santos"
+    // numa lista que ja nao era a ultima mensagem: o toque chega como o texto
+    // do titulo, "livance" casou com a resposta pronta de endereco, e ela
+    // recebeu os dois enderecos em vez do valor que tinha pedido. Saiu sem
+    // saber o preco. Nome de unidade e escolha de unidade.
+    if (indice === null) {
+      const pelaNome = await unidadePeloNome(admin, clinicId, texto)
+      const posicao = pelaNome ? ids.indexOf(pelaNome.id) : -1
+      if (posicao >= 0) indice = posicao
+    }
     if (indice === null) {
       if (pediuVoltar(texto)) return await mostrarMenu(admin, conversationId, saudacao)
+      // "Bom dia" no meio da escolha: cumprimento, e nao resposta errada. A
+      // pergunta volta inteira, com a lista - tocar na lista nova evita o toque
+      // na antiga, que foi o que deu errado acima.
+      if (soCumprimento(texto)) {
+        return await perguntarLocalDasInformacoes(admin, clinicId, conversationId, opcoes.textos.informacoes)
+      }
       // Duvida escrita depois de tocar em "Duvidas sobre a consulta" (07/10/2026,
       // Lucas). Ele tocou 1, escreveu a pergunta - "o Dr. Marcello costuma pedir
       // exames para investigar dor abdominal cronica?" - e ouviu "nao posso
@@ -3966,13 +4157,19 @@ export async function tratarConversa(opcoes: {
             avisoDeHorario() + '\n\n' + VOLTA,
         }
       }
+      // A lista volta junto do "nao entendi": sem ela, o unico botao na tela
+      // era o da mensagem anterior - o mesmo toque antigo de cima.
+      const lugares = (await opcoesDeAtendimento(admin, clinicId)).filter((u) => ids.includes(u.id))
       return {
         resposta: await naoEntendi(
           admin,
           clinicId,
           texto,
-          'Responda com o número da unidade da lista acima.\n\n' + VOLTA,
+          'Responda com o número da unidade ou toque em *Escolher*.\n\n' + VOLTA,
         ),
+        ...(lugares.length > 0
+          ? { lista: { rotulo: 'Escolher', linhas: comVoltar(lugares.map((u, i) => ({ id: String(i + 1), titulo: u.name }))) } }
+          : {}),
       }
     }
     return await responderInformacoes(admin, clinicId, conversationId, ids[indice], opcoes.textos.informacoes)
@@ -4272,7 +4469,24 @@ export async function tratarConversa(opcoes: {
         })
       : -1
 
-    const indice = porData >= 0 ? porData : escolha(texto, dias.length)
+    const porNome = porData >= 0 ? -1 : diaPeloNome(texto, dias, agora)
+    const indice = porData >= 0 ? porData : porNome >= 0 ? porNome : escolha(texto, dias.length)
+    // Dia da semana sem vaga: "sexta" quando a unidade nao atende sexta. Dizer
+    // isso e mais util que "nao entendi" - a pessoa foi entendida.
+    const diaCitado = indice === null ? DIAS_DA_SEMANA.find((d) => new RegExp(`\\b${d}\\b`).test(normalizar(texto))) : undefined
+    if (indice === null && diaCitado) {
+      const nome = { domingo: 'no domingo', segunda: 'na segunda', terca: 'na terça', quarta: 'na quarta', quinta: 'na quinta', sexta: 'na sexta', sabado: 'no sábado' }[diaCitado]
+      return {
+        resposta:
+          `Nesta unidade não temos horário livre ${nome}. Escolha um dos dias da lista acima.\n` +
+          'Digite VOLTAR para ver outra unidade, *9* se precisar de outra data, ou 0 para o início.',
+        botoes: [
+          { id: 'VOLTAR', titulo: 'Outra unidade' },
+          { id: '9', titulo: 'Falar com a equipe' },
+          { id: '0', titulo: 'Voltar ao menu' },
+        ],
+      }
+    }
     if (indice === null) {
       return {
         resposta: await naoEntendi(

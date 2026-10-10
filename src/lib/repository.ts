@@ -2078,7 +2078,18 @@ export async function markConversationSeen(conversationId: string) {
  * mensagem do paciente comecar do menu. Nao apaga mensagem, consulta nem
  * cadastro: so o rascunho do atendimento automatico.
  */
-export async function resetConversationBot(conversationId: string) {
+export async function resetConversationBot(
+  conversationId: string,
+  /**
+   * Grava a hora do Destravar, que faz o robo ignorar o que a equipe escreveu
+   * antes. Falso no Concluir (09/10/2026): a equipe tem o costume de escrever
+   * "Em que posso ajudar?" e concluir em seguida para limpar a lista. Com a
+   * hora gravada, a resposta da familia - que era para a equipe - recebia o
+   * menu do robo (Fernanda e Mayara, 08 e 09/10). Concluir limpa a etapa presa;
+   * so o Destravar devolve a conversa ao robo antes das 12h.
+   */
+  liberarRobo = true,
+) {
   const { error } = await supabase
     .from('whatsapp_conversations')
     .update({
@@ -2105,6 +2116,7 @@ export async function resetConversationBot(conversationId: string) {
   // A hora do Destravar (01/10/2026): o robo deixa de contar o que a equipe
   // escreveu antes dela. Update separado porque a coluna e nova - se o banco
   // ainda nao a tem, o destravar de cima continua valendo e so isto se perde.
+  if (!liberarRobo) return
   const { error: erroDaHora } = await (supabase as unknown as SupabaseClient)
     .from('whatsapp_conversations')
     .update({ robo_liberado_em: new Date().toISOString() })
@@ -2278,7 +2290,7 @@ export async function sendConversationReply(
 export async function resolveConversation(conversationId: string) {
   // Primeiro o robo: se isto falhar, a conversa nao fica "concluida" com o
   // robo ainda preso, que e o estado que gerou a pergunta.
-  await resetConversationBot(conversationId)
+  await resetConversationBot(conversationId, false)
   const { error } = await supabase
     .from('whatsapp_conversations')
     .update({ status: 'resolved', needs_attention: false, attention_reason: null, unread_count: 0 })

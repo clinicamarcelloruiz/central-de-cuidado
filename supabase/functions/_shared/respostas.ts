@@ -177,6 +177,12 @@ export function acharResposta(
   if (assuntoClinico(texto)) return null
 
   const daMensagem = new Set(palavrasDe(texto))
+  // Valor escrito em numero conta como pergunta de valor (09/10/2026): "400,00
+  // a consulta, certo?" nao tem palavra-chave nenhuma, e a mae recebeu o menu
+  // inteiro em vez dos valores - que diriam a ela que o certo era outro.
+  if (/r\$\s*\d|\b\d{3}(?:[.,]00)?\s*(?:reais|a consulta|pela consulta)|\b\d{3},00\b/i.test(texto)) {
+    daMensagem.add('valor')
+  }
   if (daMensagem.size === 0) return null
 
   let melhor: RespostaPronta | null = null

@@ -17,6 +17,7 @@ import {
   avisoDaResposta,
   depoisDoAcompanhamento,
   lembreteRecente,
+  unidadeNoLembrete,
   respostaAoAcompanhamento,
   equipeFalouRecentemente as equipeFalouHaPouco,
   interpretarResposta,
@@ -389,6 +390,39 @@ Deno.serve(async (req) => {
             confirmada: Boolean(a.confirmed_by_clinic),
           }))
 
+          // Consulta de hoje e consulta recente (09/10/2026), em consulta propria
+          // e dentro de try/catch: falhar aqui custa so os dois tratamentos
+          // abaixo, nunca a conversa.
+          //  - consultaHoje: "vou atrasar" vira recado para a equipe.
+          //  - consultouHaPouco: atendido nos ultimos 10 dias. O que a familia
+          //    escreve contando como a crianca esta e recado para o medico, como
+          //    a resposta ao acompanhamento - e nao "isso e avaliacao para a
+          //    consulta". A mae do Martin contou, dois dias depois da consulta,
+          //    que ele seguia com dor, e ouviu exatamente isso.
+          let consultaHoje = false
+          let consultouHaPouco = false
+          try {
+            const agoraMs = Date.now()
+            const diaSP = (iso: string | Date) =>
+              new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+            const hoje = diaSP(new Date(agoraMs))
+            const { data: recentes, error: erroRecentes } = await admin
+              .from('appointments')
+              .select('starts_at,status')
+              .eq('clinic_id', clinicId)
+              .in('status', ['scheduled', 'attended'])
+              .gte('starts_at', new Date(agoraMs - 10 * 24 * 3600 * 1000).toISOString())
+              .lte('starts_at', new Date(agoraMs + 24 * 3600 * 1000).toISOString())
+              .in('contact_phone', grafias)
+            if (erroRecentes) throw erroRecentes
+            for (const r of recentes ?? []) {
+              if (diaSP(r.starts_at as string) === hoje) consultaHoje = true
+              if (r.status === 'attended' && new Date(r.starts_at as string).getTime() <= agoraMs) consultouHaPouco = true
+            }
+          } catch (erro) {
+            console.warn('Nao consegui ler as consultas recentes deste telefone', erro)
+          }
+
           // Estado da conversa ANTES de gravar esta mensagem. E o que diz se a
           // pessoa e nova: depois do upsert a linha ja existe sempre.
           //
@@ -631,7 +665,17 @@ Deno.serve(async (req) => {
               : idDoToque(message) || body
           // Uma chamada so, e a regra mora em _shared/lembrete.ts, coberta por
           // testes. Aqui ficou apenas o desempacotar.
-          const resposta = interpretarResposta(escolhido, respondendoEnvioNosso, comLembreteRecente)
+          // O lembrete de ontem nao vale com a equipe conversando (09/10/2026).
+          // A Iara remarcou com a secretaria, que escreveu "sua consulta foi
+          // remarcada"; ela respondeu "pode confirmar amanha 09h20" e o robo leu
+          // como resposta ao lembrete da vespera - "essa consulta nao aparece
+          // mais como marcada" - no meio da conversa das duas. A janela curta
+          // (lembrete como ultima mensagem nossa) continua valendo.
+          const resposta = interpretarResposta(
+            escolhido,
+            respondendoEnvioNosso,
+            comLembreteRecente && !equipeFalouRecentemente,
+          )
           const { respondeuLembrete, optedOut, isWell, pediuAjuda, motivoAtencao } = resposta
           const receivedAt = message.timestamp
             ? new Date(Number(message.timestamp) * 1000).toISOString()
@@ -800,7 +844,9 @@ Deno.serve(async (req) => {
               podeIniciarMenu: !respondendoEnvioNosso && !equipeFalouRecentemente,
               // Com a equipe ja conversando, quem responde e ela - o robo nao
               // entra nem para dizer "passei sua mensagem".
-              posAcompanhamento: acompanhamentoRecente && !equipeFalouRecentemente,
+              // Consulta atendida ha poucos dias conta igual (ver consultouHaPouco).
+              posAcompanhamento: (acompanhamentoRecente || consultouHaPouco) && !equipeFalouRecentemente,
+              consultaHoje,
               texto: escolhido,
               telefone: waId,
               pacientes,
@@ -1032,6 +1078,9 @@ Deno.serve(async (req) => {
             // conferido: se a clinica ja tinha cancelado, o UPDATE nao mudava
             // nada e mesmo assim a familia lia "Consulta confirmada!" - e vinha.
             let consultaValida = false
+            // Onde e a consulta, para repetir o endereco na confirmacao (ver
+            // unidadeNoLembrete em lembrete.ts).
+            let ondeConfirmado = ''
             if (ultimoLembrete?.appointment_id) {
               // Cancelar muda o status: o indice unico de horario ignora
               // canceladas, entao a vaga volta a aparecer como livre na hora.
@@ -1042,8 +1091,14 @@ Deno.serve(async (req) => {
                 .update(mudanca)
                 .eq('id', ultimoLembrete.appointment_id)
                 .eq('status', 'scheduled')
-                .select('id')
+                .select('id,modality,clinic_units(name,address)')
               consultaValida = (mudou ?? []).length > 0
+              const linha = (mudou ?? [])[0] as unknown as
+                | { modality?: string; clinic_units?: { name?: string; address?: string } | null }
+                | undefined
+              if (linha && linha.modality !== 'telemedicina' && linha.clinic_units?.name) {
+                ondeConfirmado = unidadeNoLembrete(linha.modality, linha.clinic_units.name, linha.clinic_units.address)
+              }
             }
 
             if (!consultaValida) {
@@ -1073,7 +1128,7 @@ Deno.serve(async (req) => {
                 })
                 .eq('id', conversation.id)
             }
-            await responder(avisoDaResposta(resposta), null, {
+            await responder(avisoDaResposta(resposta, ondeConfirmado), null, {
               botoes: resposta.cancela ? [{ id: '2', titulo: 'Escolher nova data' }] : undefined,
             })
 

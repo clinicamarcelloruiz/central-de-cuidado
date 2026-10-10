@@ -300,6 +300,8 @@ async function conversar(titulo, mensagens, opcoes = {}) {
       nomeDoPerfil: opcoes.nomeDoPerfil ?? 'Marina',
       textos: TEXTOS,
       agora: opcoes.agora,
+      consultaHoje: opcoes.consultaHoje ?? false,
+      posAcompanhamento: opcoes.posAcompanhamento ?? false,
     })
 
     if (!r) {
@@ -527,6 +529,23 @@ await conversar('24. "Quero remarcar" de quem já tem consulta marcada', ['quero
 await conversar('25. Urgência numa sexta às 23h', ['socorro, é urgente, meu filho está muito mal'], {
   agora: new Date(`${proxima(5)}T23:00:00-03:00`),
 })
+
+// Conversas reais de 07 a 09/10/2026.
+await conversar('27. Real 09/10 (Mayara): pergunta o valor', [
+  'Olá! Vim pelo site do Dr. Marcello e gostaria de saber o valor da consulta.',
+  'Bom dia',
+  'Livance · Santos',
+])
+
+await conversar('28. Real 07/10 (Laura): "sexta pela manhã" na escolha do dia', ['Oi', '2', '1', 'Sexta pela manhã'])
+
+await conversar('29. Real 07/10 (Verônica): aviso de atraso no dia da consulta', [
+  'Olá, boa tarde :) Apenas para avisar que pode ser que o Martin atrase uns 15 min',
+], { consultaHoje: true })
+
+await conversar('30. Real 09/10 (Dani): conta como a criança está, dias depois da consulta', [
+  'Recebi sim, obrigada. Já estamos aplicando os medicamentos, mas o Martín segue com dores abdominais, principalmente à noite.',
+], { posAcompanhamento: true })
 
 console.log('\n' + linha('━'))
 console.log('  fim da simulação')
