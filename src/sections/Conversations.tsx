@@ -31,6 +31,7 @@ import { linhaDoTempo } from '@/lib/linha-do-tempo'
 import { CHAVE_DO_VISUAL, EVENTO_MODO_WHATSAPP } from '@/lib/modo-whatsapp'
 import { VisualizadorDeArquivo, type ArquivoAberto } from '@/components/VisualizadorDeArquivo'
 import { marcaSemClinicaConhecida } from '@/lib/marca'
+import { CLINICA_DE_TESTE } from '@/lib/clinica-de-teste'
 import {
   getAutoReply,
   getCurrentMembership,
@@ -1891,17 +1892,32 @@ export default function Conversations({
                   </button>
 
                   {/* Etapa do robo + botao de soltar. Aparece so quando ha
-                      algo preso: sem etapa aberta, nao ha o que destravar. */}
-                  {conversation.bookingState && (
+                      algo preso: sem etapa aberta, nao ha o que destravar.
+
+                      Na conta de teste aparece sempre (14/10/2026). Quem testa
+                      o robo escreve como equipe e responde do proprio celular;
+                      com a equipe tendo escrito, o robo fica calado por 12h e,
+                      sem etapa aberta, nao havia botao nenhum para solta-lo.
+                      Na clinica real continua so com etapa presa: la, soltar o
+                      robo no meio de uma conversa da recepcao e ele falar por
+                      cima dela. */}
+                  {(conversation.bookingState || clinicId === CLINICA_DE_TESTE) && (
                     <div className="mt-2 flex items-center justify-between gap-2 rounded-[12px] bg-[#f6f4f1] px-2.5 py-1.5">
                       <span className="truncate text-[9px] font-bold text-slate-500">
-                        Robô: {ETAPA_DO_ROBO[conversation.bookingState] ?? conversation.bookingState}
+                        Robô:{' '}
+                        {conversation.bookingState
+                          ? (ETAPA_DO_ROBO[conversation.bookingState] ?? conversation.bookingState)
+                          : 'conta de teste'}
                       </span>
                       <button
                         type="button"
                         onClick={() => void destravar(conversation.id)}
                         disabled={destravando === conversation.id}
-                        title="Zera a etapa do robô. Não apaga mensagens nem consultas."
+                        title={
+                          conversation.bookingState
+                            ? 'Zera a etapa do robô. Não apaga mensagens nem consultas.'
+                            : 'Conta de teste: devolve a conversa ao robô agora, mesmo com a equipe tendo escrito. Não apaga mensagens nem consultas.'
+                        }
                         className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white px-2 py-1 text-[9px] font-extrabold text-[#081b2c] transition hover:bg-[#081b2c] hover:text-white disabled:opacity-40"
                       >
                         <RotateCcw className="h-3 w-3" />

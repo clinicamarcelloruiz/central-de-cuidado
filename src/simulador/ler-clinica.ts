@@ -12,12 +12,10 @@
  * inteira por causa dela, nao.
  */
 import { supabase } from '@/lib/supabase'
+import { CLINICA_DE_TESTE } from '@/lib/clinica-de-teste'
 import type { Linha } from './banco-falso'
 import { diaDeBrasilia } from './agenda'
 import type { LinhasDaClinica } from './da-clinica'
-
-/** A clinica de teste, a mesma da identidade demo (ver dados.ts e quem-atende.ts). */
-export const CLINICA_DE_TESTE = 'f392fe85-ef6e-4729-bd2c-54dbfc9901b9'
 
 type Resposta = { data: unknown; error: { message: string } | null }
 type Consulta = PromiseLike<Resposta> & {
