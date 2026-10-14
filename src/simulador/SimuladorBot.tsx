@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Bot,
   CalendarCheck2,
+  CalendarDays,
   CalendarX2,
   Camera,
   CheckCheck,
@@ -13,6 +14,7 @@ import {
   Headset,
   List,
   LogOut,
+  MessageSquareText,
   Mic,
   Paperclip,
   Phone,
@@ -31,9 +33,41 @@ import { useAuth } from '@/auth/AuthProvider'
 import logoCentral from '@/assets/logo-central-de-cuidado.webp'
 import logoDrMarcello from '@/assets/logo.webp'
 import { FAMILIAS, IDENTIDADES, type ChaveFamilia, type ChaveIdentidade } from './dados'
+import { agendaValida, copiarAgenda, type AgendaDaClinica } from './agenda'
+import ConfiguracaoDaAgenda from './ConfiguracaoDaAgenda'
 import { ROTEIROS, type Roteiro } from './roteiros'
 import { ETAPAS, MOTIVOS, Simulacao, type Mensagem, type Registro, type Situacao, type Tom } from './sessao'
 import type { Toque } from './motor.js'
+
+/**
+ * A agenda configurada fica neste navegador, uma por identidade: quem monta a
+ * agenda de um cliente antes da reuniao nao pode perde-la ao recarregar. E
+ * conveniencia de quem apresenta, nao dado da clinica - por isso localStorage,
+ * e por isso tudo em try/catch: sem armazenamento, vale a agenda padrao.
+ */
+const CHAVE_DA_AGENDA = (c: ChaveIdentidade) => `simuladorbot.agenda.${c}`
+
+function carregarAgendas(): Record<ChaveIdentidade, AgendaDaClinica> {
+  const ler = (c: ChaveIdentidade) => {
+    try {
+      const salva: unknown = JSON.parse(window.localStorage.getItem(CHAVE_DA_AGENDA(c)) ?? 'null')
+      if (agendaValida(salva)) return salva
+    } catch {
+      // armazenamento bloqueado ou agenda de outra versao: fica a padrao
+    }
+    return copiarAgenda(IDENTIDADES[c].agendaPadrao)
+  }
+  return { demo: ler('demo'), marcello: ler('marcello') }
+}
+
+function guardarAgenda(c: ChaveIdentidade, agenda: AgendaDaClinica | null) {
+  try {
+    if (agenda) window.localStorage.setItem(CHAVE_DA_AGENDA(c), JSON.stringify(agenda))
+    else window.localStorage.removeItem(CHAVE_DA_AGENDA(c))
+  } catch {
+    // sem armazenamento a agenda vale ate recarregar a pagina
+  }
+}
 
 /** O mesmo fundo da conversa na tela de Respostas (Conversations.tsx). */
 const FUNDO_WHATSAPP = {
@@ -325,7 +359,10 @@ export default function SimuladorBot() {
   const { signOut, user } = useAuth()
   const [chaveIdentidade, setChaveIdentidade] = useState<ChaveIdentidade>('demo')
   const [chaveFamilia, setChaveFamilia] = useState<ChaveFamilia>('nova')
-  const [sim, setSim] = useState(() => new Simulacao(IDENTIDADES.demo, FAMILIAS.nova))
+  const [agendas, setAgendas] = useState(carregarAgendas)
+  const [aba, setAba] = useState<'respostas' | 'agenda'>('respostas')
+  const [avisoDoRoteiro, setAvisoDoRoteiro] = useState<string | null>(null)
+  const [sim, setSim] = useState(() => new Simulacao(IDENTIDADES.demo, FAMILIAS.nova, { agenda: agendas.demo }))
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [registros, setRegistros] = useState<Registro[]>([])
   const [digitando, setDigitando] = useState(false)
@@ -371,7 +408,7 @@ export default function SimuladorBot() {
 
   function recomecar(ci: ChaveIdentidade = chaveIdentidade, cf: ChaveFamilia = chaveFamilia): Simulacao {
     geracao.current += 1
-    const nova = new Simulacao(IDENTIDADES[ci], FAMILIAS[cf])
+    const nova = new Simulacao(IDENTIDADES[ci], FAMILIAS[cf], { agenda: agendas[ci] })
     simAtual.current = nova
     setSim(nova)
     setChaveIdentidade(ci)
@@ -385,7 +422,16 @@ export default function SimuladorBot() {
     setListaAberta(null)
     setDestaque(null)
     setRoteiroAtivo(null)
+    setAvisoDoRoteiro(null)
     return nova
+  }
+
+  /** Agenda nova vale na hora, na conversa aberta, e fica salva neste navegador. */
+  function mudarAgenda(nova: AgendaDaClinica, ehPadrao = false) {
+    setAgendas((a) => ({ ...a, [chaveIdentidade]: nova }))
+    simAtual.current.aplicarAgenda(nova)
+    guardarAgenda(chaveIdentidade, ehPadrao ? null : nova)
+    setVersao((v) => v + 1)
   }
 
   /**
@@ -489,7 +535,13 @@ export default function SimuladorBot() {
       } else if ('toque' in passo) {
         const opcao = ultimaComToques?.toques?.opcoes.find((o) => o.id === passo.toque)
         if (!opcao || !ultimaComToques) {
+          // Com a agenda mexida, o dia ou o horario que o roteiro tocaria pode
+          // nao existir. Para aqui e diz o motivo, em vez de sumir calado.
           setRoteiroAtivo(null)
+          setAvisoDoRoteiro(
+            `O roteiro "${roteiro.titulo}" parou: a opção que ele tocaria não apareceu. ` +
+              'Se a agenda foi alterada, pode faltar dia ou horário; restaure a agenda padrão ou continue a conversa à mão.',
+          )
           return
         }
         if (ultimaComToques.toques?.tipo === 'lista') {
@@ -600,6 +652,15 @@ export default function SimuladorBot() {
           Roteiro em andamento: {roteiroAtivo.titulo}
           <button type="button" onClick={() => recomecar()} className="ml-auto flex items-center gap-1 rounded-lg bg-[#081b2c] px-2.5 py-1 text-[12px] text-white">
             <Square className="h-3 w-3" /> Parar
+          </button>
+        </div>
+      )}
+
+      {avisoDoRoteiro && (
+        <div className="flex items-center gap-3 bg-amber-100 px-4 py-2 text-[13px] font-semibold text-amber-900 lg:px-6">
+          <span className="min-w-0 flex-1">{avisoDoRoteiro}</span>
+          <button type="button" onClick={() => setAvisoDoRoteiro(null)} aria-label="Fechar aviso" className="rounded-lg p-1 hover:bg-amber-200">
+            <X className="h-4 w-4" />
           </button>
         </div>
       )}
@@ -734,12 +795,40 @@ export default function SimuladorBot() {
 
         {/* ---------------- Tela da clinica ---------------- */}
         <section className="flex min-h-[640px] flex-col overflow-hidden rounded-[24px] border border-slate-200/80 bg-white shadow-[0_18px_45px_rgba(8,27,44,.08)] lg:min-h-0">
-          <div className="flex items-center gap-3 border-b border-slate-100 bg-[#081b2c] px-5 py-3 text-white">
-            <img src={logoCentral} alt="" className="h-5 w-auto brightness-0 invert" />
-            <span className="text-[12px] font-bold uppercase tracking-[0.14em] text-white/60">Respostas</span>
-            <span className="ml-auto text-[11.5px] text-white/50">O que a equipe vê, ao mesmo tempo</span>
+          <div className="flex items-center gap-1 border-b border-slate-100 bg-[#081b2c] px-4 py-2 text-white">
+            <img src={logoCentral} alt="" className="mr-3 h-5 w-auto brightness-0 invert" />
+            {(
+              [
+                ['respostas', 'Respostas', <MessageSquareText key="r" className="h-4 w-4" />],
+                ['agenda', 'Agenda', <CalendarDays key="a" className="h-4 w-4" />],
+              ] as const
+            ).map(([chave, rotulo, icone]) => (
+              <button
+                key={chave}
+                type="button"
+                onClick={() => setAba(chave)}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-bold transition ${
+                  aba === chave ? 'bg-white/15 text-white' : 'text-white/55 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                {icone} {rotulo}
+              </button>
+            ))}
+            <span className="ml-auto hidden text-[11.5px] text-white/50 sm:block">
+              {aba === 'agenda' ? 'Configure aqui; o robô usa na hora' : 'O que a equipe vê, ao mesmo tempo'}
+            </span>
           </div>
 
+          {aba === 'agenda' ? (
+            <ConfiguracaoDaAgenda
+              key={chaveIdentidade}
+              agenda={agendas[chaveIdentidade]}
+              onMudar={(nova) => mudarAgenda(nova)}
+              onRestaurar={() => mudarAgenda(copiarAgenda(identidade.agendaPadrao), true)}
+              previa={(id) => sim.horariosLivres(id)}
+              alterada={JSON.stringify(agendas[chaveIdentidade]) !== JSON.stringify(identidade.agendaPadrao)}
+            />
+          ) : (
           <div className="grid min-h-0 flex-1 xl:grid-cols-[1fr_340px]">
             {/* Conversa, como na tela de Respostas */}
             <div className="flex min-h-[420px] flex-col xl:min-h-0">
@@ -880,6 +969,7 @@ export default function SimuladorBot() {
               </Cartao>
             </aside>
           </div>
+          )}
         </section>
       </main>
     </div>

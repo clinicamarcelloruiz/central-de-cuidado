@@ -11,7 +11,8 @@
  * tests/simulador.test.mjs.
  */
 import { BancoFalso, type Escrita, type Linha } from './banco-falso'
-import { bancoInicial, horariosLivres, type Familia, type Identidade } from './dados'
+import { horariosLivres, tabelasDaAgenda, type AgendaDaClinica } from './agenda'
+import { bancoInicial, type Familia, type Identidade } from './dados'
 import { colherEventos, montarMensagens, tratarConversa, type Toque } from './motor.js'
 
 export type Autor = 'familia' | 'robo' | 'equipe'
@@ -145,22 +146,18 @@ export class Simulacao {
   private contador = 0
   private relogio: () => Date
 
-  constructor(identidade: Identidade, familia: Familia, relogio: () => Date = () => new Date()) {
+  constructor(
+    identidade: Identidade,
+    familia: Familia,
+    opcoes: { agenda?: AgendaDaClinica; relogio?: () => Date } = {},
+  ) {
     this.identidade = identidade
     this.familia = familia
-    this.relogio = relogio
-    const agora = relogio()
-    this.banco = new BancoFalso(bancoInicial(identidade, familia, agora), {
+    this.relogio = opcoes.relogio ?? (() => new Date())
+    const agora = this.relogio()
+    this.banco = new BancoFalso(bancoInicial(identidade, opcoes.agenda ?? identidade.agendaPadrao, familia, agora), {
       liberar_reservas_vencidas: () => 0,
-      available_slots: (args, banco) => {
-        const ocupados = new Set(
-          banco
-            .linhas('appointments')
-            .filter((c) => c.status === 'scheduled')
-            .map((c) => `${c.unit_id}|${new Date(String(c.starts_at)).toISOString()}`),
-        )
-        return horariosLivres(identidade, String(args.p_unit_id), ocupados, this.relogio())
-      },
+      available_slots: (args) => this.horariosLivres(String(args.p_unit_id)),
     })
     this.banco.linhas('whatsapp_conversations').push({
       id: CONVERSA,
@@ -178,6 +175,35 @@ export class Simulacao {
 
   get conversa(): Linha {
     return this.banco.linhas('whatsapp_conversations')[0]
+  }
+
+  /** O available_slots do banco falso: a agenda de agora menos o que ja foi marcado. */
+  horariosLivres(unidadeId: string): { slot_start: string; slot_end: string }[] {
+    const b = this.banco
+    return horariosLivres(
+      {
+        clinic_units: b.linhas('clinic_units'),
+        availability_rules: b.linhas('availability_rules'),
+        schedule_exceptions: b.linhas('schedule_exceptions'),
+        clinic_settings: b.linhas('clinic_settings'),
+        appointments: b.linhas('appointments'),
+      },
+      unidadeId,
+      this.relogio(),
+    )
+  }
+
+  /**
+   * A clinica mudou a agenda com a conversa aberta. Vale na proxima mensagem,
+   * como no sistema: o robo le unidades e horarios do banco a cada passo. As
+   * consultas ja marcadas ficam onde estao.
+   */
+  aplicarAgenda(agenda: AgendaDaClinica) {
+    const t = tabelasDaAgenda(agenda, this.identidade.clinicId)
+    this.banco.tabelas.clinic_units = t.clinic_units
+    this.banco.tabelas.availability_rules = t.availability_rules
+    this.banco.tabelas.schedule_exceptions = t.schedule_exceptions
+    for (const s of this.banco.linhas('clinic_settings')) Object.assign(s, t.configuracoes)
   }
 
   get etapa(): string | null {

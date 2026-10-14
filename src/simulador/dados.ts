@@ -16,8 +16,12 @@
  * Os textos aqui nao sao lidos do banco. Se a clinica editar uma resposta na
  * tela, o simulador continua com a copia: a demonstracao precisa funcionar
  * igual na reuniao, sem depender de rede nem do que mudou ontem.
+ *
+ * A agenda (unidades e horarios) e so o ponto de partida: a aba "Agenda" do
+ * simulador edita uma copia dela, e "Restaurar" volta para esta.
  */
 import type { Linha } from './banco-falso'
+import { horariosLivres, tabelasDaAgenda, type AgendaDaClinica } from './agenda'
 
 export type ChaveIdentidade = 'demo' | 'marcello'
 
@@ -28,13 +32,16 @@ export type Identidade = {
   /** Como a clinica aparece no topo da conversa, no celular da familia. */
   nomeNoWhatsApp: string
   medico: string
-  unidades: Linha[]
   respostas: Linha[]
   telemedicina: string
   textos: { saudacao: string; saudacaoConhecida: string; informacoes: string }
-  /** Dias da semana (0 = domingo) e horarios de cada unidade, hora de Brasilia. */
-  agenda: Record<string, { dias: number[]; horas: string[] }>
+  agendaPadrao: AgendaDaClinica
 }
+
+/** Um periodo semanal da agenda padrao, hora de Brasilia (0 = domingo). */
+const periodo = (id: string, weekday: number, inicio: string, fim: string) => ({ id, weekday, inicio, fim })
+
+const PREFERENCIAS = { duracao: 40, janela: 21, antecedencia: 2 }
 
 const FECHO =
   '⚡ *Agendar por aqui é mais rápido*: digite *2* e escolha unidade, dia e horário na hora.\n\n' +
@@ -87,33 +94,42 @@ const DEMO: Identidade = {
   clinicId: DEMO_ID,
   nomeNoWhatsApp: 'Consultório Central de Cuidado',
   medico: 'Dra. Ana Ribeiro',
-  unidades: [
-    {
-      id: 'unidade-moema',
-      clinic_id: DEMO_ID,
-      archived_at: null,
-      name: 'Moema',
-      address: 'Rua das Acácias, 1000, 10º andar, Moema',
-      info_text:
-        '💙 *Consulta em Moema: R$ 450,00.* Inclui retorno em até 30 dias.\n\n' +
-        '💳 Pagamento na recepção, na chegada: pix, débito ou crédito à vista. Não atendemos convênio, mas emitimos recibo para você pedir reembolso ao seu plano.\n\n' +
-        '📍 Moema: Rua das Acácias, 1000, 10º andar. Estacionamento conveniado no prédio.\n\n' +
-        '🖥️ Ao chegar, faça o check-in na recepção com o nome do paciente. A Dra. Ana recebe o aviso e chama vocês na sala de espera.\n\n' +
-        '📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.',
-    },
-    {
-      id: 'unidade-pinheiros',
-      clinic_id: DEMO_ID,
-      archived_at: null,
-      name: 'Pinheiros',
-      address: 'Rua das Flores, 250, Pinheiros',
-      info_text:
-        '💙 *Consulta em Pinheiros: R$ 550,00.* Inclui retorno em até 30 dias.\n\n' +
-        '💳 Pagamento em pix ou cartão. Não atendemos convênio, mas emitimos recibo para você pedir reembolso ao seu plano.\n\n' +
-        '📍 Pinheiros: Rua das Flores, 250. Estacionamento particular no local.\n\n' +
-        '📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.',
-    },
-  ],
+  agendaPadrao: {
+    versao: 1,
+    unidades: [
+      {
+        id: 'unidade-moema',
+        nome: 'Moema',
+        endereco: 'Rua das Acácias, 1000, 10º andar, Moema',
+        convenio: '',
+        telemedicina: false,
+        periodos: [periodo('moema-ter', 2, '08:00', '12:00'), periodo('moema-qui', 4, '08:00', '12:00')],
+        informacoes:
+          '💙 *Consulta em Moema: R$ 450,00.* Inclui retorno em até 30 dias.\n\n' +
+          '💳 Pagamento na recepção, na chegada: pix, débito ou crédito à vista. Não atendemos convênio, mas emitimos recibo para você pedir reembolso ao seu plano.\n\n' +
+          '📍 Moema: Rua das Acácias, 1000, 10º andar. Estacionamento conveniado no prédio.\n\n' +
+          '🖥️ Ao chegar, faça o check-in na recepção com o nome do paciente. A Dra. Ana recebe o aviso e chama vocês na sala de espera.\n\n' +
+          '📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.',
+      },
+      {
+        id: 'unidade-pinheiros',
+        nome: 'Pinheiros',
+        endereco: 'Rua das Flores, 250, Pinheiros',
+        convenio: '',
+        telemedicina: false,
+        periodos: [periodo('pinheiros-qua', 3, '14:00', '18:00')],
+        informacoes:
+          '💙 *Consulta em Pinheiros: R$ 550,00.* Inclui retorno em até 30 dias.\n\n' +
+          '💳 Pagamento em pix ou cartão. Não atendemos convênio, mas emitimos recibo para você pedir reembolso ao seu plano.\n\n' +
+          '📍 Pinheiros: Rua das Flores, 250. Estacionamento particular no local.\n\n' +
+          '📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.',
+      },
+    ],
+    datasExtras: [],
+    bloqueios: [],
+    preferencias: PREFERENCIAS,
+    telemedicinaAtiva: true,
+  },
   respostas: respostas(DEMO_ID, [
     {
       subject: 'Valor e pagamento',
@@ -145,10 +161,6 @@ const DEMO: Identidade = {
     saudacaoConhecida: 'Olá, {nome}! 👋 Aqui é o Consultório Central de Cuidado.',
     informacoes: FECHO,
   },
-  agenda: {
-    'unidade-moema': { dias: [2, 4], horas: ['08:00', '08:40', '09:20', '10:00', '10:40', '11:20'] },
-    'unidade-pinheiros': { dias: [3], horas: ['14:00', '14:40', '15:20', '16:00', '16:40', '17:20'] },
-  },
 }
 
 const MARCELLO: Identidade = {
@@ -157,33 +169,43 @@ const MARCELLO: Identidade = {
   clinicId: MARCELLO_ID,
   nomeNoWhatsApp: 'Dr. Marcello Ruiz',
   medico: 'Dr. Marcello Ruiz',
-  unidades: [
-    {
-      id: 'unidade-santos',
-      clinic_id: MARCELLO_ID,
-      archived_at: null,
-      name: 'Livance · Santos',
-      address: 'Av. Anna Costa, 228, 20º andar, Gonzaga, Santos - SP',
-      info_text:
-        '💙 *Consulta em Santos: R$ 450,00.* Inclui retorno em até 30 dias.\n\n' +
-        '💳 Pagamento online: antes da consulta, você recebe da Livance um link de pagamento. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n' +
-        '📍 Livance · Santos: Av. Anna Costa, 228, 20º andar, Gonzaga. Estacionamento no próprio prédio, com entrada ao lado da portaria.\n\n' +
-        '🖥️ Ao chegar, faça o check-in no totem digitando o nome do paciente. O Dr. Marcello recebe o aviso e vem chamar vocês na sala de espera assim que terminar a consulta anterior.\n\n' +
-        '📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.',
-    },
-    {
-      id: 'unidade-sao-paulo',
-      clinic_id: MARCELLO_ID,
-      archived_at: null,
-      name: 'Livance Ibirapuera - São Paulo',
-      address: 'Rua Agostinho Rodrigues Filho, 550, Vila Clementino - CEP 04026-040',
-      info_text:
-        '💙 *Consulta em São Paulo: R$ 600,00.* Inclui retorno em até 30 dias.\n\n' +
-        '💳 Pagamento online: antes da consulta, você recebe da Livance um link de pagamento. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n' +
-        '📍 Livance · Ibirapuera: R. Agostinho Rodrigues Filho, 550, Vila Clementino. Estacionamento particular no local.\n\n' +
-        '📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.',
-    },
-  ],
+  // Santos as quartas de manha, Sao Paulo as sextas a tarde, como na agenda real.
+  agendaPadrao: {
+    versao: 1,
+    unidades: [
+      {
+        id: 'unidade-santos',
+        nome: 'Livance · Santos',
+        endereco: 'Av. Anna Costa, 228, 20º andar, Gonzaga, Santos - SP',
+        convenio: '',
+        telemedicina: false,
+        periodos: [periodo('santos-qua', 3, '08:00', '12:00')],
+        informacoes:
+          '💙 *Consulta em Santos: R$ 450,00.* Inclui retorno em até 30 dias.\n\n' +
+          '💳 Pagamento online: antes da consulta, você recebe da Livance um link de pagamento. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n' +
+          '📍 Livance · Santos: Av. Anna Costa, 228, 20º andar, Gonzaga. Estacionamento no próprio prédio, com entrada ao lado da portaria.\n\n' +
+          '🖥️ Ao chegar, faça o check-in no totem digitando o nome do paciente. O Dr. Marcello recebe o aviso e vem chamar vocês na sala de espera assim que terminar a consulta anterior.\n\n' +
+          '📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.',
+      },
+      {
+        id: 'unidade-sao-paulo',
+        nome: 'Livance Ibirapuera - São Paulo',
+        endereco: 'Rua Agostinho Rodrigues Filho, 550, Vila Clementino - CEP 04026-040',
+        convenio: '',
+        telemedicina: false,
+        periodos: [periodo('sao-paulo-sex', 5, '14:00', '17:20')],
+        informacoes:
+          '💙 *Consulta em São Paulo: R$ 600,00.* Inclui retorno em até 30 dias.\n\n' +
+          '💳 Pagamento online: antes da consulta, você recebe da Livance um link de pagamento. Não atendemos convênio, mas emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n' +
+          '📍 Livance · Ibirapuera: R. Agostinho Rodrigues Filho, 550, Vila Clementino. Estacionamento particular no local.\n\n' +
+          '📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.',
+      },
+    ],
+    datasExtras: [],
+    bloqueios: [],
+    preferencias: PREFERENCIAS,
+    telemedicinaAtiva: true,
+  },
   respostas: respostas(MARCELLO_ID, [
     {
       subject: 'Valor e pagamento',
@@ -216,57 +238,9 @@ const MARCELLO: Identidade = {
     saudacaoConhecida: 'Olá, {nome}! 👋 Aqui é o consultório do Dr. Marcello Ruiz, Gastroenterologista Pediátrico.',
     informacoes: FECHO,
   },
-  // Santos as quartas de manha, Sao Paulo as sextas a tarde, como na agenda real.
-  agenda: {
-    'unidade-santos': { dias: [3], horas: ['08:00', '08:40', '09:20', '10:00', '10:40', '11:20'] },
-    'unidade-sao-paulo': { dias: [5], horas: ['14:00', '14:40', '15:20', '16:00', '16:40'] },
-  },
 }
 
 export const IDENTIDADES: Record<ChaveIdentidade, Identidade> = { demo: DEMO, marcello: MARCELLO }
-
-/** Dias de agenda aberta oferecidos pelo robo (schedule_horizon_days). */
-export const HORIZONTE_DIAS = 21
-
-/** Brasil sem horario de verao desde 2019: Brasilia e sempre UTC-3. */
-function emBrasilia(dia: string, hora: string): Date {
-  return new Date(`${dia}T${hora}:00-03:00`)
-}
-
-function diaDeBrasilia(d: Date): string {
-  return new Date(d.getTime() - 3 * 3600 * 1000).toISOString().slice(0, 10)
-}
-
-/**
- * Horarios livres de uma unidade, no formato de available_slots: os da agenda
- * da identidade, de hoje ate o horizonte, sem os ja ocupados no banco falso.
- * Comeca duas horas a frente, para a demonstracao nunca oferecer um horario
- * que ja comecou.
- */
-export function horariosLivres(
-  identidade: Identidade,
-  unidadeId: string,
-  ocupados: Set<string>,
-  agora: Date,
-): { slot_start: string; slot_end: string }[] {
-  const regra = identidade.agenda[unidadeId]
-  if (!regra) return []
-  const lista: { slot_start: string; slot_end: string }[] = []
-  const minimo = agora.getTime() + 2 * 3600 * 1000
-  const hoje = emBrasilia(diaDeBrasilia(agora), '12:00')
-  for (let i = 0; i <= HORIZONTE_DIAS; i++) {
-    const dia = diaDeBrasilia(new Date(hoje.getTime() + i * 24 * 3600 * 1000))
-    if (!regra.dias.includes(new Date(`${dia}T12:00:00Z`).getUTCDay())) continue
-    for (const hora of regra.horas) {
-      const inicio = emBrasilia(dia, hora)
-      if (inicio.getTime() < minimo) continue
-      const slot_start = inicio.toISOString()
-      if (ocupados.has(`${unidadeId}|${slot_start}`)) continue
-      lista.push({ slot_start, slot_end: new Date(inicio.getTime() + 40 * 60 * 1000).toISOString() })
-    }
-  }
-  return lista
-}
 
 // ---------------------------------------------------------------
 // Quem escreve
@@ -346,9 +320,16 @@ export const FAMILIAS: Record<ChaveFamilia, Familia> = {
   },
 }
 
-/** As linhas iniciais do banco falso para esta clinica e esta familia. */
-export function bancoInicial(identidade: Identidade, familia: Familia, agora: Date): Record<string, Linha[]> {
+/** As linhas iniciais do banco falso para esta clinica, esta agenda e esta familia. */
+export function bancoInicial(
+  identidade: Identidade,
+  agenda: AgendaDaClinica,
+  familia: Familia,
+  agora: Date,
+): Record<string, Linha[]> {
   const clinic_id = identidade.clinicId
+  const tabelas = tabelasDaAgenda(agenda, clinic_id)
+  const clinic_settings = [{ clinic_id, telemedicine_info_text: identidade.telemedicina, ...tabelas.configuracoes }]
   const patients: Linha[] = familia.pacientes.map((chave) => ({
     ...PACIENTES[chave],
     clinic_id,
@@ -360,12 +341,14 @@ export function bancoInicial(identidade: Identidade, familia: Familia, agora: Da
 
   const appointments: Linha[] = []
   if (familia.comConsulta && patients[0]) {
-    // O primeiro horario livre a partir de dois dias: perto o bastante para
-    // "minha consulta" fazer sentido, longe o bastante para nao ser "hoje".
-    const unidade = identidade.unidades[0]
+    // O primeiro horario livre a partir de dois dias, na primeira unidade que
+    // tiver: perto o bastante para "minha consulta" fazer sentido, longe o
+    // bastante para nao ser "hoje".
     const depois = new Date(agora.getTime() + 2 * 24 * 3600 * 1000)
-    const [slot] = horariosLivres(identidade, String(unidade.id), new Set(), depois)
-    if (slot) {
+    const leitura = { ...tabelas, clinic_settings, appointments: [] }
+    for (const unidade of tabelas.clinic_units.filter((u) => !u.telemedicina)) {
+      const [slot] = horariosLivres(leitura, unidade.id, depois)
+      if (!slot) continue
       appointments.push({
         id: 'consulta-marcada',
         clinic_id,
@@ -381,22 +364,17 @@ export function bancoInicial(identidade: Identidade, familia: Familia, agora: Da
         confirmed_by_clinic: true,
         reschedule_count: 0,
       })
+      break
     }
   }
 
   return {
     clinics: [{ id: clinic_id, name: identidade.nomeNoWhatsApp, timezone: 'America/Sao_Paulo' }],
-    clinic_settings: [
-      {
-        clinic_id,
-        telemedicine_enabled: true,
-        telemedicine_info_text: identidade.telemedicina,
-        schedule_horizon_days: HORIZONTE_DIAS,
-      },
-    ],
-    clinic_units: identidade.unidades,
+    clinic_settings,
+    clinic_units: tabelas.clinic_units,
+    availability_rules: tabelas.availability_rules,
+    schedule_exceptions: tabelas.schedule_exceptions,
     bot_answers: identidade.respostas,
-    availability_rules: [],
     patients,
     appointments,
     whatsapp_conversations: [],
