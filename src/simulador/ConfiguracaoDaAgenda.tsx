@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { CalendarOff, CalendarPlus, Clock, Info, MapPin, Plus, RotateCcw, Settings2, Trash2, Video } from 'lucide-react'
+import { CalendarOff, CalendarPlus, Clock, Info, MapPin, Plus, RefreshCw, RotateCcw, Settings2, Trash2, Video } from 'lucide-react'
 import { DIAS_DA_SEMANA, diaDeBrasilia, type AgendaDaClinica, type UnidadeDaAgenda } from './agenda'
 
 /**
@@ -56,14 +56,22 @@ export default function ConfiguracaoDaAgenda({
   onRestaurar,
   previa,
   alterada,
+  explicacao = 'O que muda aqui vale na hora: peça para marcar no celular ao lado e o robô já oferece. Fica salvo neste navegador.',
+  rotuloRestaurar = 'Restaurar a agenda padrão',
+  onRecarregar,
 }: {
   agenda: AgendaDaClinica
   onMudar: (nova: AgendaDaClinica) => void
   onRestaurar: () => void
   /** Os horarios livres que o robo ofereceria agora, para a unidade. */
   previa: (unidadeId: string) => { slot_start: string }[]
-  /** A agenda difere da padrao da identidade. */
+  /** A agenda difere da padrao da identidade (ou do que veio do sistema). */
   alterada: boolean
+  /** De onde vem esta agenda; na demo, a conta de teste do sistema. */
+  explicacao?: string
+  rotuloRestaurar?: string
+  /** So na demo: ler a conta de teste de novo. */
+  onRecarregar?: () => void
 }) {
   const [hoje] = useState(() => diaDeBrasilia(new Date()))
   const [selecionada, setSelecionada] = useState<string>(agenda.unidades[0]?.id ?? '')
@@ -173,12 +181,15 @@ export default function ConfiguracaoDaAgenda({
     <div className="min-h-0 flex-1 overflow-y-auto bg-[#f7f5f1] p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl bg-[#eef5fd] px-4 py-2.5 text-[12.5px] text-[#16456b]">
         <Info className="h-4 w-4 shrink-0" />
-        <span className="min-w-0 flex-1">
-          O que muda aqui vale na hora: peça para marcar no celular ao lado e o robô já oferece. Fica salvo neste navegador.
-        </span>
+        <span className="min-w-0 flex-1">{explicacao}</span>
+        {onRecarregar && (
+          <button type="button" onClick={onRecarregar} className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-[12px] font-bold text-[#16456b] hover:bg-white/70">
+            <RefreshCw className="h-3.5 w-3.5" /> Recarregar do sistema
+          </button>
+        )}
         {alterada && (
           <button type="button" onClick={onRestaurar} className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-[12px] font-bold text-[#16456b] hover:bg-white/70">
-            <RotateCcw className="h-3.5 w-3.5" /> Restaurar a agenda padrão
+            <RotateCcw className="h-3.5 w-3.5" /> {rotuloRestaurar}
           </button>
         )}
       </div>
@@ -296,7 +307,7 @@ export default function ConfiguracaoDaAgenda({
                       rows={3}
                       value={unidade.informacoes}
                       onChange={(e) => mudarUnidade(unidade.id, { informacoes: e.target.value })}
-                      placeholder="Vazio: o robô manda só o nome e o endereço."
+                      placeholder="Vazio: o robô manda só o texto geral, sem nada desta unidade (como no sistema)."
                       className={`${campo} mt-1 w-full resize-y leading-snug`}
                     />
                   </label>

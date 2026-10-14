@@ -64,12 +64,13 @@ export function somarDias(dia: string, n: number): string {
   return new Date(Date.parse(`${dia}T12:00:00Z`) + n * 24 * 3600 * 1000).toISOString().slice(0, 10)
 }
 
-/** Quando a unidade nao tem texto proprio, o robo ainda precisa dizer onde e. */
-export function informacoesPadrao(nome: string, endereco: string): string {
-  return endereco.trim() ? `📍 *${nome.trim()}*: ${endereco.trim()}` : `📍 *${nome.trim()}*`
-}
-
-/** As linhas das tabelas do banco que esta agenda representa. */
+/**
+ * As linhas das tabelas do banco que esta agenda representa.
+ *
+ * Texto da unidade vazio fica vazio, como no banco: o robo manda so o texto
+ * geral. Ate 14/10/2026 aqui entrava um texto com nome e endereco, e a
+ * demonstracao respondia diferente da clinica de teste que ela espelha.
+ */
 export function tabelasDaAgenda(agenda: AgendaDaClinica, clinicId: string) {
   return {
     clinic_units: agenda.unidades.map((u) => ({
@@ -77,7 +78,7 @@ export function tabelasDaAgenda(agenda: AgendaDaClinica, clinicId: string) {
       clinic_id: clinicId,
       name: u.nome,
       address: u.endereco,
-      info_text: u.informacoes.trim() || informacoesPadrao(u.nome, u.endereco),
+      info_text: u.informacoes,
       accepts_insurance: u.convenio.trim() || null,
       telemedicina: u.telemedicina,
       archived_at: null,

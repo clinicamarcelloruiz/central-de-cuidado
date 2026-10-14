@@ -1,5 +1,6 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
+  AlertTriangle,
   ArrowLeft,
   Bot,
   CalendarCheck2,
@@ -19,6 +20,7 @@ import {
   Paperclip,
   Phone,
   Play,
+  RefreshCw,
   Reply,
   RotateCcw,
   Send,
@@ -32,42 +34,68 @@ import {
 import { useAuth } from '@/auth/AuthProvider'
 import logoCentral from '@/assets/logo-central-de-cuidado.webp'
 import logoDrMarcello from '@/assets/logo.webp'
-import { FAMILIAS, IDENTIDADES, type ChaveFamilia, type ChaveIdentidade } from './dados'
+import { FAMILIAS, IDENTIDADES, type ChaveFamilia, type ChaveIdentidade, type Identidade } from './dados'
 import { agendaValida, copiarAgenda, type AgendaDaClinica } from './agenda'
+import { identidadeDoSistema } from './da-clinica'
+import { lerClinicaDeTeste } from './ler-clinica'
 import ConfiguracaoDaAgenda from './ConfiguracaoDaAgenda'
 import { ROTEIROS, type Roteiro } from './roteiros'
 import { ETAPAS, MOTIVOS, Simulacao, type Mensagem, type Registro, type Situacao, type Tom } from './sessao'
 import type { Toque } from './motor.js'
 
 /**
- * A agenda configurada fica neste navegador, uma por identidade: quem monta a
- * agenda de um cliente antes da reuniao nao pode perde-la ao recarregar. E
- * conveniencia de quem apresenta, nao dado da clinica - por isso localStorage,
- * e por isso tudo em try/catch: sem armazenamento, vale a agenda padrao.
+ * O que cada identidade guarda neste navegador. E conveniencia de quem
+ * apresenta, nao dado da clinica - por isso localStorage, e tudo em try/catch:
+ * sem armazenamento, vale o que veio do sistema ou a copia fixa.
+ *
+ * Dr. Marcello: a agenda montada na aba Agenda, para nao se perder ao recarregar.
+ *
+ * Demo: quem manda e a clinica de teste do sistema (14/10/2026). Guarda-se so a
+ * ultima leitura, para a pagina abrir com ela sem esperar a rede e para a
+ * reuniao seguir se a internet cair. Ajuste na aba Agenda vale ate recarregar:
+ * o lugar de mudar de vez e a conta de teste, na Central.
  */
-const CHAVE_DA_AGENDA = (c: ChaveIdentidade) => `simuladorbot.agenda.${c}`
+const CHAVE_DA_AGENDA = 'simuladorbot.agenda.marcello'
+const CHAVE_DA_LEITURA = 'simuladorbot.demo.sistema'
 
-function carregarAgendas(): Record<ChaveIdentidade, AgendaDaClinica> {
-  const ler = (c: ChaveIdentidade) => {
-    try {
-      const salva: unknown = JSON.parse(window.localStorage.getItem(CHAVE_DA_AGENDA(c)) ?? 'null')
-      if (agendaValida(salva)) return salva
-    } catch {
-      // armazenamento bloqueado ou agenda de outra versao: fica a padrao
-    }
-    return copiarAgenda(IDENTIDADES[c].agendaPadrao)
-  }
-  return { demo: ler('demo'), marcello: ler('marcello') }
-}
+type LeituraDoSistema = { identidade: Identidade; assinatura: string; lidaEm: string }
 
-function guardarAgenda(c: ChaveIdentidade, agenda: AgendaDaClinica | null) {
+function lerGuardado(chave: string): unknown {
   try {
-    if (agenda) window.localStorage.setItem(CHAVE_DA_AGENDA(c), JSON.stringify(agenda))
-    else window.localStorage.removeItem(CHAVE_DA_AGENDA(c))
+    return JSON.parse(window.localStorage.getItem(chave) ?? 'null')
   } catch {
-    // sem armazenamento a agenda vale ate recarregar a pagina
+    return null
   }
 }
+
+function guardar(chave: string, valor: unknown) {
+  try {
+    if (valor === null) window.localStorage.removeItem(chave)
+    else window.localStorage.setItem(chave, JSON.stringify(valor))
+  } catch {
+    // sem armazenamento, vale ate recarregar a pagina
+  }
+}
+
+function agendaDoMarcello(): AgendaDaClinica {
+  const salva = lerGuardado(CHAVE_DA_AGENDA)
+  return agendaValida(salva) ? salva : copiarAgenda(IDENTIDADES.marcello.agendaPadrao)
+}
+
+function leituraGuardada(): LeituraDoSistema | null {
+  const v = lerGuardado(CHAVE_DA_LEITURA) as LeituraDoSistema | null
+  const ok =
+    v &&
+    typeof v.assinatura === 'string' &&
+    typeof v.lidaEm === 'string' &&
+    v.identidade?.textos &&
+    Array.isArray(v.identidade.respostas) &&
+    agendaValida(v.identidade.agendaPadrao)
+  return ok ? v : null
+}
+
+/** De onde veio a identidade demo que esta valendo. */
+type Origem = { situacao: 'lendo' | 'ok' | 'falhou'; lidaEm: string | null; erro: string | null }
 
 /** O mesmo fundo da conversa na tela de Respostas (Conversations.tsx). */
 const FUNDO_WHATSAPP = {
@@ -359,10 +387,17 @@ export default function SimuladorBot() {
   const { signOut, user } = useAuth()
   const [chaveIdentidade, setChaveIdentidade] = useState<ChaveIdentidade>('demo')
   const [chaveFamilia, setChaveFamilia] = useState<ChaveFamilia>('nova')
-  const [agendas, setAgendas] = useState(carregarAgendas)
+  const [guardada] = useState(leituraGuardada)
+  const [identidadeDemo, setIdentidadeDemo] = useState<Identidade>(guardada?.identidade ?? IDENTIDADES.demo)
+  const [origem, setOrigem] = useState<Origem>({ situacao: 'lendo', lidaEm: guardada?.lidaEm ?? null, erro: null })
+  const [avisoDaClinica, setAvisoDaClinica] = useState<string | null>(null)
+  const [agendas, setAgendas] = useState(() => ({
+    demo: copiarAgenda((guardada?.identidade ?? IDENTIDADES.demo).agendaPadrao),
+    marcello: agendaDoMarcello(),
+  }))
   const [aba, setAba] = useState<'respostas' | 'agenda'>('respostas')
   const [avisoDoRoteiro, setAvisoDoRoteiro] = useState<string | null>(null)
-  const [sim, setSim] = useState(() => new Simulacao(IDENTIDADES.demo, FAMILIAS.nova, { agenda: agendas.demo }))
+  const [sim, setSim] = useState(() => new Simulacao(identidadeDemo, FAMILIAS.nova, { agenda: agendas.demo }))
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [registros, setRegistros] = useState<Registro[]>([])
   const [digitando, setDigitando] = useState(false)
@@ -384,9 +419,67 @@ export default function SimuladorBot() {
   const celular = useRef<HTMLDivElement>(null)
   const clinica = useRef<HTMLDivElement>(null)
   const menu = useRef<HTMLDivElement>(null)
+  // Para a releitura do sistema, que roda fora do ciclo de renderizacao.
+  const chaveAtual = useRef<ChaveIdentidade>('demo')
+  const assinaturaAtual = useRef<string | null>(guardada?.assinatura ?? null)
+  const ultimaLeitura = useRef(0)
+  const emRoteiro = useRef(false)
 
-  const identidade = IDENTIDADES[chaveIdentidade]
+  const identidadeDe = (c: ChaveIdentidade) => (c === 'demo' ? identidadeDemo : IDENTIDADES.marcello)
+  const identidade = identidadeDe(chaveIdentidade)
   const familia = FAMILIAS[chaveFamilia]
+
+  /**
+   * Rele a clinica de teste e, se algo mudou, passa a valer na hora - inclusive
+   * na conversa aberta. Roda ao abrir, ao voltar para esta aba (quem acabou de
+   * mudar o endereco na Central volta para ca e ja ve) e no botao Recarregar.
+   *
+   * `forcar` e o botao: aplica mesmo sem mudanca, e com isso desfaz os ajustes
+   * feitos so na aba Agenda. A volta para a aba nao desfaz ajuste nenhum se o
+   * sistema nao mudou, e nao mexe em nada no meio de um roteiro.
+   */
+  const recarregarDoSistema = useCallback(async (forcar: boolean) => {
+    if (!forcar && (emRoteiro.current || Date.now() - ultimaLeitura.current < 5000)) return
+    ultimaLeitura.current = Date.now()
+    try {
+      const nova = identidadeDoSistema(IDENTIDADES.demo, await lerClinicaDeTeste())
+      const assinatura = JSON.stringify(nova)
+      const lidaEm = new Date().toISOString()
+      guardar(CHAVE_DA_LEITURA, { identidade: nova, assinatura, lidaEm })
+      setOrigem({ situacao: 'ok', lidaEm, erro: null })
+      const anterior = assinaturaAtual.current
+      if (assinatura === anterior && !forcar) return
+      assinaturaAtual.current = assinatura
+      setIdentidadeDemo(nova)
+      setAgendas((a) => ({ ...a, demo: copiarAgenda(nova.agendaPadrao) }))
+      if (chaveAtual.current === 'demo') {
+        simAtual.current.atualizarClinica(nova)
+        simAtual.current.aplicarAgenda(nova.agendaPadrao)
+        setVersao((v) => v + 1)
+      }
+      if (anterior && assinatura !== anterior) {
+        setAvisoDaClinica('A clínica de teste mudou no sistema: o simulador já está usando os dados novos.')
+      }
+    } catch (erro) {
+      // Falha tem de aparecer: a demonstracao seguiria com dado velho e
+      // ninguem saberia por que o endereco novo nao veio.
+      console.warn('[simulador] nao consegui ler a clinica de teste', erro)
+      setOrigem((o) => ({ ...o, situacao: 'falhou', erro: erro instanceof Error ? erro.message : String(erro) }))
+    }
+  }, [])
+
+  useEffect(() => {
+    void recarregarDoSistema(false)
+    const aoVoltar = () => {
+      if (document.visibilityState === 'visible') void recarregarDoSistema(false)
+    }
+    window.addEventListener('focus', aoVoltar)
+    document.addEventListener('visibilitychange', aoVoltar)
+    return () => {
+      window.removeEventListener('focus', aoVoltar)
+      document.removeEventListener('visibilitychange', aoVoltar)
+    }
+  }, [recarregarDoSistema])
 
   useEffect(() => {
     const t = window.setInterval(() => setRelogio(hora(new Date())), 20_000)
@@ -408,7 +501,9 @@ export default function SimuladorBot() {
 
   function recomecar(ci: ChaveIdentidade = chaveIdentidade, cf: ChaveFamilia = chaveFamilia): Simulacao {
     geracao.current += 1
-    const nova = new Simulacao(IDENTIDADES[ci], FAMILIAS[cf], { agenda: agendas[ci] })
+    emRoteiro.current = false
+    chaveAtual.current = ci
+    const nova = new Simulacao(identidadeDe(ci), FAMILIAS[cf], { agenda: agendas[ci] })
     simAtual.current = nova
     setSim(nova)
     setChaveIdentidade(ci)
@@ -426,11 +521,14 @@ export default function SimuladorBot() {
     return nova
   }
 
-  /** Agenda nova vale na hora, na conversa aberta, e fica salva neste navegador. */
+  /**
+   * Agenda nova vale na hora, na conversa aberta. So a do Dr. Marcello fica
+   * salva: a da demo vem do sistema, e ajuste aqui e so para esta sessao.
+   */
   function mudarAgenda(nova: AgendaDaClinica, ehPadrao = false) {
     setAgendas((a) => ({ ...a, [chaveIdentidade]: nova }))
     simAtual.current.aplicarAgenda(nova)
-    guardarAgenda(chaveIdentidade, ehPadrao ? null : nova)
+    if (chaveIdentidade === 'marcello') guardar(CHAVE_DA_AGENDA, ehPadrao ? null : nova)
     setVersao((v) => v + 1)
   }
 
@@ -518,6 +616,7 @@ export default function SimuladorBot() {
     setMenuRoteiros(false)
     recomecar(chaveIdentidade, roteiro.familia)
     const minha = geracao.current
+    emRoteiro.current = true
     setRoteiroAtivo(roteiro)
     await espera(500)
     let ultimaComToques: Mensagem | null = null
@@ -537,6 +636,7 @@ export default function SimuladorBot() {
         if (!opcao || !ultimaComToques) {
           // Com a agenda mexida, o dia ou o horario que o roteiro tocaria pode
           // nao existir. Para aqui e diz o motivo, em vez de sumir calado.
+          emRoteiro.current = false
           setRoteiroAtivo(null)
           setAvisoDoRoteiro(
             `O roteiro "${roteiro.titulo}" parou: a opção que ele tocaria não apareceu. ` +
@@ -561,7 +661,10 @@ export default function SimuladorBot() {
       if (respostas.length) ultimaComToques = [...respostas].reverse().find((m) => m.toques) ?? null
       await espera(900)
     }
-    if (geracao.current === minha) setRoteiroAtivo(null)
+    if (geracao.current === minha) {
+      emRoteiro.current = false
+      setRoteiroAtivo(null)
+    }
   }
 
   const enviarRascunho = () => {
@@ -603,6 +706,32 @@ export default function SimuladorBot() {
             ))}
           </select>
         </label>
+
+        {/* De onde veio a clinica demo: a leitura da conta de teste, ou o que
+            sobrou quando a leitura falhou. Clicar rele na hora. */}
+        {chaveIdentidade === 'demo' && (
+          <button
+            type="button"
+            onClick={() => void recarregarDoSistema(true)}
+            title={origem.erro ? `Não consegui ler a conta de teste: ${origem.erro}. Clique para tentar de novo.` : 'Ler de novo a conta de teste do sistema'}
+            className={`flex items-center gap-1.5 whitespace-nowrap rounded-xl px-2.5 py-1.5 text-[11.5px] font-bold transition ${
+              origem.situacao === 'falhou' ? 'bg-amber-400/20 text-amber-200 hover:bg-amber-400/30' : 'text-white/60 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            {origem.situacao === 'falhou' ? (
+              <AlertTriangle className="h-3.5 w-3.5" />
+            ) : (
+              <RefreshCw className={`h-3.5 w-3.5 ${origem.situacao === 'lendo' ? 'animate-spin' : ''}`} />
+            )}
+            {origem.situacao === 'falhou'
+              ? origem.lidaEm
+                ? `Sem leitura agora: usando a de ${hora(new Date(origem.lidaEm))}`
+                : 'Sem leitura: cópia fixa'
+              : origem.lidaEm
+                ? `Conta de teste · lida ${hora(new Date(origem.lidaEm))}`
+                : 'Lendo a conta de teste...'}
+          </button>
+        )}
 
         <div ref={menu} className="relative">
           <button
@@ -652,6 +781,16 @@ export default function SimuladorBot() {
           Roteiro em andamento: {roteiroAtivo.titulo}
           <button type="button" onClick={() => recomecar()} className="ml-auto flex items-center gap-1 rounded-lg bg-[#081b2c] px-2.5 py-1 text-[12px] text-white">
             <Square className="h-3 w-3" /> Parar
+          </button>
+        </div>
+      )}
+
+      {avisoDaClinica && (
+        <div className="flex items-center gap-3 bg-[#eef5fd] px-4 py-2 text-[13px] font-semibold text-[#16456b] lg:px-6">
+          <RefreshCw className="h-4 w-4 shrink-0" />
+          <span className="min-w-0 flex-1">{avisoDaClinica}</span>
+          <button type="button" onClick={() => setAvisoDaClinica(null)} aria-label="Fechar aviso" className="rounded-lg p-1 hover:bg-white">
+            <X className="h-4 w-4" />
           </button>
         </div>
       )}
@@ -827,6 +966,21 @@ export default function SimuladorBot() {
               onRestaurar={() => mudarAgenda(copiarAgenda(identidade.agendaPadrao), true)}
               previa={(id) => sim.horariosLivres(id)}
               alterada={JSON.stringify(agendas[chaveIdentidade]) !== JSON.stringify(identidade.agendaPadrao)}
+              {...(chaveIdentidade === 'demo'
+                ? {
+                    // Dizer de onde veio de verdade: com a leitura falhando, "vem do
+                    // sistema" seria mentira e o endereco antigo pareceria o atual.
+                    explicacao:
+                      (origem.situacao === 'falhou'
+                        ? origem.lidaEm
+                          ? `Não consegui ler a conta de teste agora; esta é a última leitura, de ${hora(new Date(origem.lidaEm))}. `
+                          : 'Não consegui ler a conta de teste; esta é a cópia fixa do simulador, que pode estar diferente do sistema. '
+                        : `Esta agenda vem da conta de teste do sistema${origem.lidaEm ? `, lida às ${hora(new Date(origem.lidaEm))}` : ''}. `) +
+                      'Ajustes feitos aqui valem até recarregar a página; para mudar de vez, altere na Central de Cuidado, na conta de teste.',
+                    rotuloRestaurar: 'Voltar ao que está no sistema',
+                    onRecarregar: () => void recarregarDoSistema(true),
+                  }
+                : {})}
             />
           ) : (
           <div className="grid min-h-0 flex-1 xl:grid-cols-[1fr_340px]">

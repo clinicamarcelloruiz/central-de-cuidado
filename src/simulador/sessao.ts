@@ -138,7 +138,8 @@ function quando(iso: unknown): string {
 }
 
 export class Simulacao {
-  readonly identidade: Identidade
+  /** Troca quando a clinica de teste e relida do sistema (atualizarClinica). */
+  identidade: Identidade
   readonly familia: Familia
   readonly banco: BancoFalso
   /** Alguem da equipe respondeu: o robo deixa de puxar assunto, como no webhook. */
@@ -198,6 +199,18 @@ export class Simulacao {
    * como no sistema: o robo le unidades e horarios do banco a cada passo. As
    * consultas ja marcadas ficam onde estao.
    */
+  /**
+   * Textos e respostas prontas novos, com a conversa aberta: a clinica de
+   * teste foi relida do sistema. A agenda vem a parte, por aplicarAgenda,
+   * porque ela pode ter ajustes feitos so no simulador.
+   */
+  atualizarClinica(identidade: Identidade) {
+    this.identidade = identidade
+    this.banco.tabelas.bot_answers = identidade.respostas.map((r) => ({ ...r }))
+    for (const s of this.banco.linhas('clinic_settings')) s.telemedicine_info_text = identidade.telemedicina
+    for (const c of this.banco.linhas('clinics')) c.name = identidade.nomeNoWhatsApp
+  }
+
   aplicarAgenda(agenda: AgendaDaClinica) {
     const t = tabelasDaAgenda(agenda, this.identidade.clinicId)
     this.banco.tabelas.clinic_units = t.clinic_units

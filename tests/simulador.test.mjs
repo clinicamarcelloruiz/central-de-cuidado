@@ -10,7 +10,8 @@ import assert from 'node:assert/strict'
 import { Simulacao } from './simulador.build/sessao.mjs'
 import { IDENTIDADES, FAMILIAS } from './simulador.build/dados.mjs'
 import { ROTEIROS } from './simulador.build/roteiros.mjs'
-import { horariosLivres, copiarAgenda } from './simulador.build/agenda.mjs'
+import { horariosLivres, copiarAgenda, tabelasDaAgenda } from './simulador.build/agenda.mjs'
+import { identidadeDoSistema } from './simulador.build/da-clinica.mjs'
 
 let ok = 0
 async function caso(nome, fn) {
@@ -242,6 +243,103 @@ await caso('agenda: mudanca com a conversa aberta vale na proxima mensagem', asy
   const opcoes = r.respostas.at(-1).toques.opcoes.map((o) => o.titulo)
   assert.ok(opcoes.includes('Jardins'), `Jardins nao apareceu: ${opcoes.join(', ')}`)
   assert.ok(!opcoes.some((o) => /telemedicina/i.test(o)), 'telemedicina desligada continuou oferecida')
+})
+
+// ---------------------------------------------------------------
+// A conta de teste do sistema virando a identidade demo (14/10/2026)
+// ---------------------------------------------------------------
+
+// Linhas como o Supabase devolve: horario com segundos, unidade arquivada,
+// resposta desligada, a agenda da telemedicina sem horarios proprios.
+const LINHAS_DA_CONTA_DE_TESTE = {
+  clinica: { id: 'f392fe85-ef6e-4729-bd2c-54dbfc9901b9', name: 'Consultório Central de Cuidado' },
+  unidades: [
+    { id: 'moema', name: 'Moema', address: 'Rua Nova, 500, Moema', info_text: '📍 Endereço novo de Moema: Rua Nova, 500.', archived_at: null, telemedicina: false, accepts_insurance: null },
+    { id: 'antiga', name: 'Unidade antiga', address: 'Rua Antiga, 10', info_text: '', archived_at: '2026-09-27T12:00:00Z', telemedicina: false },
+    { id: 'tele', name: 'Telemedicina', address: '', info_text: '', archived_at: null, telemedicina: true },
+  ],
+  regras: [
+    { id: 'r1', unit_id: 'moema', weekday: 2, starts_at: '08:00:00', ends_at: '10:00:00' },
+    { id: 'r2', unit_id: 'antiga', weekday: 3, starts_at: '08:00:00', ends_at: '12:00:00' },
+  ],
+  excecoes: [{ id: 'e1', unit_id: null, exception_date: '2099-01-01', is_closed: true, starts_at: null, ends_at: null, reason: 'Feriado' }],
+  configuracoes: {
+    schedule_slot_minutes: 30,
+    schedule_horizon_days: 21,
+    schedule_min_notice_hours: 2,
+    whatsapp_autoreply_text: 'Oi! Aqui é a recepção de teste do Consultório Central de Cuidado.',
+    whatsapp_autoreply_known_text: '',
+    whatsapp_menu_info_text: 'Texto geral da conta de teste.',
+    telemedicine_enabled: false,
+    telemedicine_info_text: '',
+  },
+  respostas: [
+    { id: 'a1', subject: 'Valor', keywords: ['valor', 'quanto', 'custa'], answer: 'Valor da conta de teste: R$ 123,00.', ask_unit: false, is_active: true, position: 0 },
+    { id: 'a2', subject: 'Estacionamento', keywords: ['estacionamento', 'estacionar'], answer: 'RESPOSTA DESLIGADA', ask_unit: false, is_active: false, position: 1 },
+  ],
+}
+
+await caso('conta de teste: linhas do sistema viram a identidade demo', () => {
+  const id = identidadeDoSistema(IDENTIDADES.demo, LINHAS_DA_CONTA_DE_TESTE)
+  assert.equal(id.clinicId, IDENTIDADES.demo.clinicId, 'o id da clinica e o que faz o robo dizer "a Dra. Ana"')
+  assert.deepEqual(id.agendaPadrao.unidades.map((u) => u.nome), ['Moema', 'Telemedicina'], 'unidade arquivada nao pode entrar')
+  assert.deepEqual(id.agendaPadrao.unidades[0].periodos, [{ id: 'r1', weekday: 2, inicio: '08:00', fim: '10:00' }])
+  assert.equal(id.agendaPadrao.unidades[1].telemedicina, true)
+  assert.equal(id.agendaPadrao.preferencias.duracao, 30)
+  assert.equal(id.agendaPadrao.telemedicinaAtiva, false)
+  assert.equal(id.agendaPadrao.bloqueios[0].unidadeId, null)
+})
+
+await caso('conta de teste: o robo responde com o que esta no sistema', async () => {
+  const id = identidadeDoSistema(IDENTIDADES.demo, LINHAS_DA_CONTA_DE_TESTE)
+  const s = new Simulacao(id, FAMILIAS.nova)
+  let r = await s.enviarDaFamilia({ texto: 'Oi' })
+  assert.match(r.respostas[0].texto, /recepção de teste/, 'a saudacao devia ser a da conta de teste')
+  r = await s.enviarDaFamilia({ texto: 'Dúvidas sobre a consulta', idDoToque: '1' })
+  const textos = r.respostas.map((m) => m.texto).join('\n')
+  // Uma unidade so (telemedicina desligada): o robo ja manda o texto dela.
+  assert.match(textos, /Rua Nova, 500/, `o endereco novo nao chegou ao robo: ${textos.slice(0, 200)}`)
+  assert.match(textos, /Texto geral da conta de teste/)
+  r = await s.enviarDaFamilia({ texto: '2' })
+  const tudo = r.respostas.map((m) => m.texto).join('\n')
+  assert.doesNotMatch(tudo, /Unidade antiga/, 'unidade arquivada apareceu para a familia')
+  const horarios = s.horariosLivres('moema').slice(0, 2).map((h) => (Date.parse(h.slot_end) - Date.parse(h.slot_start)) / 60000)
+  assert.deepEqual(horarios, [30, 30], 'a duracao da conta de teste e 30 minutos')
+})
+
+await caso('conta de teste: resposta pronta desligada no sistema nao responde', async () => {
+  const s = new Simulacao(identidadeDoSistema(IDENTIDADES.demo, LINHAS_DA_CONTA_DE_TESTE), FAMILIAS.nova)
+  await s.enviarDaFamilia({ texto: 'Oi' })
+  const valor = await s.enviarDaFamilia({ texto: 'quanto custa a consulta?' })
+  assert.match(valor.respostas.map((m) => m.texto).join('\n'), /R\$ 123,00/)
+  const estacionar = await s.enviarDaFamilia({ texto: 'onde posso estacionar?' })
+  assert.doesNotMatch(estacionar.respostas.map((m) => m.texto).join('\n'), /RESPOSTA DESLIGADA/)
+})
+
+await caso('conta de teste: sem configuracoes valem os padroes do banco e a saudacao do robo', async () => {
+  const id = identidadeDoSistema(IDENTIDADES.demo, { ...LINHAS_DA_CONTA_DE_TESTE, configuracoes: null })
+  assert.deepEqual(id.agendaPadrao.preferencias, { duracao: 40, janela: 15, antecedencia: 2 })
+  const s = new Simulacao(id, FAMILIAS.nova)
+  const r = await s.enviarDaFamilia({ texto: 'Oi' })
+  assert.match(r.respostas[0].texto, /Dra\. Ana Ribeiro/, 'sem saudacao cadastrada vale a padrao da clinica de teste')
+})
+
+await caso('conta de teste: texto vazio da unidade continua vazio, como no banco', () => {
+  const id = identidadeDoSistema(IDENTIDADES.demo, LINHAS_DA_CONTA_DE_TESTE)
+  const t = tabelasDaAgenda(id.agendaPadrao, id.clinicId)
+  assert.equal(t.clinic_units.find((u) => u.id === 'tele').info_text, '')
+})
+
+await caso('conta de teste: mudanca relida com a conversa aberta vale na proxima mensagem', async () => {
+  const s = new Simulacao(identidadeDoSistema(IDENTIDADES.demo, LINHAS_DA_CONTA_DE_TESTE), FAMILIAS.nova)
+  await s.enviarDaFamilia({ texto: 'Oi' })
+  const linhas = structuredClone(LINHAS_DA_CONTA_DE_TESTE)
+  linhas.unidades[0].info_text = '📍 Mudou de novo: Avenida Ibirapuera, 2000.'
+  const nova = identidadeDoSistema(IDENTIDADES.demo, linhas)
+  s.atualizarClinica(nova)
+  s.aplicarAgenda(nova.agendaPadrao)
+  const r = await s.enviarDaFamilia({ texto: 'Dúvidas sobre a consulta', idDoToque: '1' })
+  assert.match(r.respostas.map((m) => m.texto).join('\n'), /Avenida Ibirapuera, 2000/)
 })
 
 console.warn = warnOriginal
