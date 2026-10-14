@@ -50,15 +50,22 @@ export function Acesso({ children }: { children: ReactNode }) {
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
   const [entrando, setEntrando] = useState(false)
-  const [liberado, setLiberado] = useState<{ email: string; ok: boolean } | null>(null)
+  const [liberado, setLiberado] = useState<{ email: string; ok: boolean; erro?: string } | null>(null)
 
   const emailDaSessao = user?.email ?? ''
   useEffect(() => {
     if (!emailDaSessao) return
     let vivo = true
-    void impressaoDoEmail(emailDaSessao).then((h) => {
-      if (vivo) setLiberado({ email: emailDaSessao, ok: CONTAS_LIBERADAS.includes(h) })
-    })
+    // Falha aqui tem de aparecer. Em 14/10/2026 a pagina aberta em http (onde
+    // crypto.subtle nao existe) rejeitava esta promessa em silencio, e a tela
+    // ficava girando para sempre sem dizer nada.
+    impressaoDoEmail(emailDaSessao)
+      .then((h) => {
+        if (vivo) setLiberado({ email: emailDaSessao, ok: CONTAS_LIBERADAS.includes(h) })
+      })
+      .catch((erro: unknown) => {
+        if (vivo) setLiberado({ email: emailDaSessao, ok: false, erro: erro instanceof Error ? erro.message : String(erro) })
+      })
     return () => {
       vivo = false
     }
@@ -118,6 +125,27 @@ export function Acesso({ children }: { children: ReactNode }) {
   }
 
   if (!liberado || liberado.email !== emailDaSessao) return <Carregando />
+
+  if (liberado.erro) {
+    return (
+      <Moldura>
+        <h1 className="mt-2 text-[22px] font-extrabold text-[#081b2c]">Não consegui conferir o acesso</h1>
+        <p className="mt-2 text-sm text-slate-500">
+          {window.isSecureContext
+            ? `O navegador recusou a conferência: ${liberado.erro}.`
+            : 'A página está aberta sem segurança (http). Abra pelo endereço com https.'}
+        </p>
+        {!window.isSecureContext && (
+          <a
+            href={`https:${window.location.href.slice(window.location.protocol.length)}`}
+            className="mt-6 flex w-full items-center justify-center rounded-2xl bg-[#081b2c] px-4 py-3 text-[15px] font-bold text-white hover:bg-[#10304d]"
+          >
+            Abrir com https
+          </a>
+        )}
+      </Moldura>
+    )
+  }
 
   if (!liberado.ok) {
     return (
