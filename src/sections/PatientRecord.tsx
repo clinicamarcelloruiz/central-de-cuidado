@@ -319,7 +319,30 @@ function BotaoDaBarra({
 /**
  * A barra unica de formatacao, fixa no topo do formulario.
  */
-function BarraDeFormatacao() {
+/**
+ * Tela larga (notebook ou monitor, a partir de 1024 px): a consulta abre em duas
+ * colunas. Pelo JavaScript, e nao so pelo CSS, porque a barra de formatacao e os
+ * avisos mudam de lugar - e dois exemplares de cada, um escondido, dariam dois
+ * botoes "Recuperar rascunho" respondendo pelo mesmo estado.
+ */
+function useTelaLarga() {
+  const consulta = '(min-width: 1024px)'
+  const [larga, setLarga] = useState(() => typeof window !== 'undefined' && window.matchMedia(consulta).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(consulta)
+    const mudou = () => setLarga(mq.matches)
+    mq.addEventListener('change', mudou)
+    mudou()
+    return () => mq.removeEventListener('change', mudou)
+  }, [])
+  return larga
+}
+
+/**
+ * `lateral`: na coluna da esquerda da consulta em duas colunas. Ali a barra fica
+ * parada enquanto o formulario rola, entao nao precisa grudar no topo.
+ */
+function BarraDeFormatacao({ lateral = false }: { lateral?: boolean }) {
   const { ativo } = useContext(CampoAtivo)
   const [painelModelos, setPainelModelos] = useState(false)
   const [novoModelo, setNovoModelo] = useState('')
@@ -348,7 +371,13 @@ function BarraDeFormatacao() {
   }
 
   return (
-    <div className="sticky top-0 z-20 -mx-5 mb-4 border-b border-[#081b2c]/[0.08] bg-white/95 px-5 py-2 backdrop-blur sm:-mx-7 sm:px-7">
+    <div
+      className={
+        lateral
+          ? 'rounded-[14px] border border-[#081b2c]/[0.08] bg-white px-3 py-2.5'
+          : 'sticky top-0 z-20 -mx-5 mb-4 border-b border-[#081b2c]/[0.08] bg-white/95 px-5 py-2 backdrop-blur sm:-mx-7 sm:px-7'
+      }
+    >
       <div className="flex flex-wrap items-center gap-1">
         <BotaoDaBarra titulo="Negrito" rotulo="Negrito" desabilitado={parado} onClick={() => ativo?.comando('bold')}>
           <Bold className="h-3.5 w-3.5" />
@@ -2756,6 +2785,7 @@ export default function PatientRecord({
   // Rascunho guardado de uma sessao anterior, esperando o medico decidir.
   const [rascunhoPendente, setRascunhoPendente] = useState<Rascunho | null>(null)
   const [estadoDoRascunho, setEstadoDoRascunho] = useState<{ tipo: 'salvo' | 'erro'; texto: string } | null>(null)
+  const telaLarga = useTelaLarga()
   // O formulario como abriu: so vale gravar rascunho do que mudou depois disso.
   const baseDoFormulario = useRef('')
   // Cada abertura do formulario ganha um numero; resposta atrasada de uma
@@ -3025,16 +3055,117 @@ export default function PatientRecord({
     onOpenChange(nextOpen)
   }
 
+  // Consulta em duas colunas (14/10/2026). No notebook, o paciente, a barra de
+  // "Nova consulta", a de formatacao e o recado da recepcao comiam metade da
+  // altura antes do primeiro campo, e a metade direita da tela ficava cinza
+  // atras do painel. Em tela larga, o que e fixo vai para uma coluna a
+  // esquerda e o formulario ganha a tela toda a direita. No celular e no
+  // tablet continua uma coluna so, como antes.
+  const duasColunas = telaLarga && !!patient && podeVerProntuario && mode !== 'history'
+  const recadoDaRecepcao = (classe: string) =>
+    patient?.observacoes.trim() ? (
+      <div className={`${classe} rounded-[14px] border border-[#2f7fc1]/25 bg-[#f1f7fd] px-4 py-3`}>
+        <p className="text-[9px] font-extrabold uppercase tracking-[0.13em] text-[#1f4f78]">
+          Recado da recepção
+        </p>
+        <p className="mt-1 whitespace-pre-wrap text-[11px] font-semibold leading-relaxed text-[#16456b]">
+          {patient.observacoes}
+        </p>
+      </div>
+    ) : null
+
+  // Avisos da consulta (assinada, erro, espera da assinatura, rascunho,
+  // heranca). Ficam no topo do formulario numa coluna so; em duas colunas,
+  // na coluna fixa da esquerda, onde nao somem quando o medico rola.
+  const avisosDaConsulta = () => (
+    <>
+      {/* Assinada, a consulta e um documento fechado. O banco recusa a
+          alteracao de qualquer jeito - o aviso existe para a pessoa
+          descobrir isso ANTES de reescrever meia consulta e perder o
+          trabalho na hora de salvar. */}
+      {consultaEmEdicaoAssinada && (
+        <div className="mb-4 flex items-start gap-2 rounded-[14px] border border-[#1c6b3a]/25 bg-[#eef7f1] px-4 py-3">
+          <ShieldCheck className="mt-px h-4 w-4 shrink-0 text-[#1c6b3a]" />
+          <div className="text-[12px] leading-relaxed text-[#1c6b3a]">
+            <p className="font-extrabold">Este atendimento já foi assinado digitalmente.</p>
+            <p className="mt-0.5 font-semibold">
+              O conteúdo não pode mais ser alterado. Para corrigir ou acrescentar algo,
+              volte ao histórico e use "Adicionar adendo" no cartão deste atendimento.
+            </p>
+          </div>
+        </div>
+      )}
+      {aviso && <AvisoDoProntuario aviso={aviso} onFechar={() => setAviso(null)} />}
+      {espera && <EsperaDaAssinatura espera={espera} onDesistir={desistirDaAssinatura} />}
+      {rascunhoPendente && (
+        <div className="mb-4 rounded-[14px] border border-[#b54708]/25 bg-[#fffaf2] px-4 py-3">
+          <p className="text-[12px] font-extrabold text-[#93370d]">
+            Há um rascunho não salvo desta consulta, de {dataHoraLocal(rascunhoPendente.atualizadoEm)}.
+          </p>
+          <p className="mt-0.5 text-[11px] font-semibold text-[#93370d]/80">
+            Ele foi guardado sozinho enquanto você escrevia. Recuperar coloca o texto dele no formulário.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={recuperarRascunho}
+              className="rounded-xl bg-[#93370d] px-3.5 py-2 text-[11px] font-extrabold text-white"
+            >
+              Recuperar rascunho
+            </button>
+            <button
+              type="button"
+              onClick={descartarRascunho}
+              className="rounded-xl border border-[#081b2c]/10 bg-white px-3.5 py-2 text-[11px] font-bold text-slate-500"
+            >
+              Descartar
+            </button>
+          </div>
+        </div>
+      )}
+      {heranca.length > 0 && (
+        <div className="mb-4 flex items-start gap-3 rounded-[14px] border border-[#2f7fc1]/25 bg-[#f1f7fd] px-4 py-3">
+          <div className="flex-1 text-[11px] leading-relaxed text-[#16456b]">
+            <p className="font-extrabold">Trazido das consultas anteriores. Confira antes de salvar:</p>
+            <p className="mt-0.5 font-semibold">
+              {heranca.map((h) => `${ROTULO_DO_CAMPO[h.campo]} (${fmtBR(h.data)})`).join(' · ')}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setForm((atual) => desfazerHeranca(atual, heranca))
+              setHeranca([])
+            }}
+            className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-[#1f4f78]/20 bg-white px-3 py-1.5 text-[10px] font-extrabold text-[#1f4f78]"
+            title="Apaga o que foi trazido, nos campos que você ainda não mexeu"
+          >
+            <Undo2 className="h-3.5 w-3.5" /> Desfazer
+          </button>
+        </div>
+      )}
+    </>
+  )
+
   return (
     <CampoAtivo.Provider value={{ ativo: campoAtivo, ativar: setCampoAtivo }}>
     <Sheet open={open} onOpenChange={handleOpenChange}>
       {/* Metade da tela como piso: em monitores largos o prontuario vai ate o
-          meio do monitor, e nunca fica menor do que os 900px de antes. */}
+          meio do monitor, e nunca fica menor do que os 900px de antes. Na
+          consulta em duas colunas, a tela quase toda. */}
       <SheetContent
         side="left"
-        className="w-full gap-0 border-r border-[#081b2c]/10 bg-[#fbfaf8] p-0 sm:max-w-[760px] lg:max-w-[max(900px,50vw)]"
+        className={
+          duasColunas
+            ? 'grid w-full grid-cols-[minmax(340px,380px)_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] gap-0 border-r border-[#081b2c]/10 bg-[#fbfaf8] p-0 sm:max-w-[min(1560px,calc(100vw-24px))]'
+            : 'w-full gap-0 border-r border-[#081b2c]/10 bg-[#fbfaf8] p-0 sm:max-w-[760px] lg:max-w-[max(900px,50vw)]'
+        }
       >
-        <SheetHeader className="border-b border-[#081b2c]/[0.07] bg-white px-5 pb-5 pt-6 sm:px-7">
+        <SheetHeader
+          className={`border-b border-[#081b2c]/[0.07] bg-white px-5 pb-5 pt-6 sm:px-7 ${
+            duasColunas ? 'col-start-1 row-start-1 border-r' : ''
+          }`}
+        >
           <div className="flex items-start gap-3 pr-8">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] bg-[#e7f0ed] text-[#557f75]">
               <FileHeart className="h-5 w-5" />
@@ -3434,6 +3565,16 @@ export default function PatientRecord({
           </>
         ) : (
           <>
+            {/* Coluna da esquerda, em tela larga: o que fica parado enquanto o
+                formulario rola. Em tela estreita, `contents` desfaz a caixa e
+                tudo volta ao fluxo de uma coluna, como era antes. */}
+            <div
+              className={
+                duasColunas
+                  ? 'scrollbar-subtle col-start-1 row-start-2 flex min-h-0 flex-col overflow-y-auto border-r border-[#081b2c]/[0.07] bg-[#f6f4ef]'
+                  : 'contents'
+              }
+            >
             <div className="flex items-center gap-3 border-b border-[#081b2c]/[0.06] bg-[#fbfaf8] px-5 py-4 sm:px-7">
               <button
                 type="button"
@@ -3473,96 +3614,34 @@ export default function PatientRecord({
                 }}
               />
             </div>
+            {duasColunas && (
+              <div className="space-y-3 px-5 py-4">
+                <BarraDeFormatacao lateral />
+                {avisosDaConsulta()}
+                {recadoDaRecepcao('')}
+              </div>
+            )}
+            </div>
 
+            {/* Coluna da direita, em tela larga: so o formulario, rolando, e o
+                botao de salvar embaixo. */}
+            <div className={duasColunas ? 'col-start-2 row-span-2 row-start-1 flex min-h-0 flex-col' : 'contents'}>
             {/* `zoom` em vez de mexer no tamanho de cada texto: cresce rotulo,
                 letra digitada, caixa e botao na mesma proporcao, e o formulario
                 continua alinhado. */}
             <div
-              className="scrollbar-subtle flex-1 overflow-y-auto px-5 pb-6 pt-2 sm:px-7"
+              className={`scrollbar-subtle flex-1 overflow-y-auto px-5 pb-6 sm:px-7 ${duasColunas ? 'pt-6' : 'pt-2'}`}
               style={{ zoom: escalaDoTexto }}
             >
-              <BarraDeFormatacao />
-              {/* Assinada, a consulta e um documento fechado. O banco recusa a
-                  alteracao de qualquer jeito - o aviso existe para a pessoa
-                  descobrir isso ANTES de reescrever meia consulta e perder o
-                  trabalho na hora de salvar. */}
-              {consultaEmEdicaoAssinada && (
-                <div className="mb-4 flex items-start gap-2 rounded-[14px] border border-[#1c6b3a]/25 bg-[#eef7f1] px-4 py-3">
-                  <ShieldCheck className="mt-px h-4 w-4 shrink-0 text-[#1c6b3a]" />
-                  <div className="text-[12px] leading-relaxed text-[#1c6b3a]">
-                    <p className="font-extrabold">Este atendimento já foi assinado digitalmente.</p>
-                    <p className="mt-0.5 font-semibold">
-                      O conteúdo não pode mais ser alterado. Para corrigir ou acrescentar algo,
-                      volte ao histórico e use "Adicionar adendo" no cartão deste atendimento.
-                    </p>
-                  </div>
-                </div>
-              )}
-              {aviso && <AvisoDoProntuario aviso={aviso} onFechar={() => setAviso(null)} />}
-                  {espera && <EsperaDaAssinatura espera={espera} onDesistir={desistirDaAssinatura} />}
-              {rascunhoPendente && (
-                <div className="mb-4 rounded-[14px] border border-[#b54708]/25 bg-[#fffaf2] px-4 py-3">
-                  <p className="text-[12px] font-extrabold text-[#93370d]">
-                    Há um rascunho não salvo desta consulta, de {dataHoraLocal(rascunhoPendente.atualizadoEm)}.
-                  </p>
-                  <p className="mt-0.5 text-[11px] font-semibold text-[#93370d]/80">
-                    Ele foi guardado sozinho enquanto você escrevia. Recuperar coloca o texto dele no formulário.
-                  </p>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={recuperarRascunho}
-                      className="rounded-xl bg-[#93370d] px-3.5 py-2 text-[11px] font-extrabold text-white"
-                    >
-                      Recuperar rascunho
-                    </button>
-                    <button
-                      type="button"
-                      onClick={descartarRascunho}
-                      className="rounded-xl border border-[#081b2c]/10 bg-white px-3.5 py-2 text-[11px] font-bold text-slate-500"
-                    >
-                      Descartar
-                    </button>
-                  </div>
-                </div>
-              )}
-              {heranca.length > 0 && (
-                <div className="mb-4 flex items-start gap-3 rounded-[14px] border border-[#2f7fc1]/25 bg-[#f1f7fd] px-4 py-3">
-                  <div className="flex-1 text-[11px] leading-relaxed text-[#16456b]">
-                    <p className="font-extrabold">Trazido das consultas anteriores. Confira antes de salvar:</p>
-                    <p className="mt-0.5 font-semibold">
-                      {heranca.map((h) => `${ROTULO_DO_CAMPO[h.campo]} (${fmtBR(h.data)})`).join(' · ')}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setForm((atual) => desfazerHeranca(atual, heranca))
-                      setHeranca([])
-                    }}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-[#1f4f78]/20 bg-white px-3 py-1.5 text-[10px] font-extrabold text-[#1f4f78]"
-                    title="Apaga o que foi trazido, nos campos que você ainda não mexeu"
-                  >
-                    <Undo2 className="h-3.5 w-3.5" /> Desfazer
-                  </button>
-                </div>
-              )}
+              {!duasColunas && <BarraDeFormatacao />}
+              {!duasColunas && avisosDaConsulta()}
               <div className="grid gap-4 sm:grid-cols-2">
                 <SectionTitle>Atendimento</SectionTitle>
                 {/* O recado da recepcao aparece aqui de proposito, e so para
                     ler. Enquanto os dois textos eram a mesma coluna, escrever a
                     observacao clinica apagava este aviso. Mostrar em vez de
                     esconder tambem tira o motivo de alguem usar o campo errado. */}
-                {patient.observacoes.trim() && (
-                  <div className="sm:col-span-2 rounded-[14px] border border-[#2f7fc1]/25 bg-[#f1f7fd] px-4 py-3">
-                    <p className="text-[9px] font-extrabold uppercase tracking-[0.13em] text-[#1f4f78]">
-                      Recado da recepção
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap text-[11px] font-semibold leading-relaxed text-[#16456b]">
-                      {patient.observacoes}
-                    </p>
-                  </div>
-                )}
+                {!duasColunas && recadoDaRecepcao('sm:col-span-2')}
                 <Field label="Data da consulta" required>
                   <input
                     type="date"
@@ -3800,6 +3879,7 @@ export default function PatientRecord({
               >
                 Cancelar
               </button>
+            </div>
             </div>
           </>
         )}
