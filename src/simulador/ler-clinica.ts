@@ -2,6 +2,14 @@
  * Le a configuracao da clinica de teste no Supabase, so leitura, com a sessao
  * de quem abriu o simulador. Ver da-clinica.ts para o que vira o que.
  *
+ * Qual clinica: a do login que esta no simulador (14/10/2026). A conta de teste
+ * tem login proprio, e o fluxo de reuniao e entrar nela
+ * no sistema, configurar a clinica do cliente ("Clinica Cintia") e abrir o
+ * simulador no mesmo navegador. Ate aqui o id da clinica de teste era fixo e o
+ * banco recusava a leitura para quem nao era membro dela - o simulador caia na
+ * copia fixa e a Clinica Cintia nao aparecia. A clinica real do Dr. Marcello
+ * nunca e lida: com esse login, tenta a clinica de teste de sempre.
+ *
  * So tabelas de configuracao: unidades, horarios, excecoes, clinic_settings e
  * respostas prontas. Paciente e consulta nunca sao lidos - a demonstracao
  * aparece na frente de cliente.
@@ -17,11 +25,15 @@ import type { Linha } from './banco-falso'
 import { diaDeBrasilia } from './agenda'
 import type { LinhasDaClinica } from './da-clinica'
 
+/** A clinica real (ver lib/marca.ts): nunca vira demonstracao. */
+const CLINICA_DO_DR_MARCELLO = '1ffde840-a905-4300-b4fd-51571fcefdc0'
+
 type Resposta = { data: unknown; error: { message: string } | null }
 type Consulta = PromiseLike<Resposta> & {
   select(colunas: string): Consulta
   eq(coluna: string, valor: unknown): Consulta
   gte(coluna: string, valor: unknown): Consulta
+  order(coluna: string, opcoes?: { ascending?: boolean }): Consulta
   limit(n: number): Consulta
 }
 
@@ -46,8 +58,29 @@ async function opcional(consulta: Consulta, oQue: string): Promise<Linha[]> {
   }
 }
 
+/**
+ * A clinica do login, na mesma ordem do getCurrentMembership do sistema (a
+ * vinculacao ativa mais antiga), pulando a clinica real. Sem nenhuma, a clinica
+ * de teste de sempre - e se o login nao for membro dela, a leitura acusa.
+ */
+async function clinicaDoLogin(): Promise<string> {
+  try {
+    const { data } = await supabase.auth.getSession()
+    const usuario = data.session?.user.id
+    if (!usuario) return CLINICA_DE_TESTE
+    const vinculos = await linhas(
+      tabela('clinic_memberships').select('clinic_id').eq('user_id', usuario).eq('status', 'active').order('created_at', { ascending: true }),
+    )
+    const outra = vinculos.map((v) => String(v.clinic_id)).find((id) => id && id !== CLINICA_DO_DR_MARCELLO)
+    return outra ?? CLINICA_DE_TESTE
+  } catch (erro) {
+    console.warn('[simulador] nao consegui ver de qual clinica e este login; tentando a clinica de teste', erro)
+    return CLINICA_DE_TESTE
+  }
+}
+
 export async function lerClinicaDeTeste(): Promise<LinhasDaClinica> {
-  const c = CLINICA_DE_TESTE
+  const c = await clinicaDoLogin()
   const hoje = diaDeBrasilia(new Date())
   const [clinica, unidades, regras, excecoes, agenda, saudacao, telemedicina, respostas, marcaTele, convenios] =
     await Promise.all([

@@ -18,6 +18,9 @@ import logoCentral from '@/assets/logo-central-de-cuidado.webp'
  */
 const CONTAS_LIBERADAS = [
   '86c69d3de7e3c3f8b51abe860f78d35d2a1c23682c638c579439ae5f8b0746cf',
+  // O login da conta de teste (14/10/2026): quem configura a clinica de teste
+  // no sistema e abre o simulador logo em seguida, no mesmo navegador.
+  '4f943e5f80a8ac3ca3ce47d1d0cec2ea709866ebc6654bbfcb75cf6e91ead222',
 ]
 
 async function impressaoDoEmail(email: string): Promise<string> {

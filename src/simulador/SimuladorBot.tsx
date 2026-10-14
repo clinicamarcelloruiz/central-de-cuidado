@@ -95,7 +95,7 @@ function leituraGuardada(): LeituraDoSistema | null {
 }
 
 /** De onde veio a identidade demo que esta valendo. */
-type Origem = { situacao: 'lendo' | 'ok' | 'falhou'; lidaEm: string | null; erro: string | null }
+type Origem = { situacao: 'lendo' | 'ok' | 'falhou'; lidaEm: string | null; erro: string | null; nome: string | null }
 
 /** O mesmo fundo da conversa na tela de Respostas (Conversations.tsx). */
 const FUNDO_WHATSAPP = {
@@ -389,7 +389,12 @@ export default function SimuladorBot() {
   const [chaveFamilia, setChaveFamilia] = useState<ChaveFamilia>('nova')
   const [guardada] = useState(leituraGuardada)
   const [identidadeDemo, setIdentidadeDemo] = useState<Identidade>(guardada?.identidade ?? IDENTIDADES.demo)
-  const [origem, setOrigem] = useState<Origem>({ situacao: 'lendo', lidaEm: guardada?.lidaEm ?? null, erro: null })
+  const [origem, setOrigem] = useState<Origem>({
+    situacao: 'lendo',
+    lidaEm: guardada?.lidaEm ?? null,
+    erro: null,
+    nome: guardada?.identidade.nomeNoWhatsApp ?? null,
+  })
   const [avisoDaClinica, setAvisoDaClinica] = useState<string | null>(null)
   const [agendas, setAgendas] = useState(() => ({
     demo: copiarAgenda((guardada?.identidade ?? IDENTIDADES.demo).agendaPadrao),
@@ -446,7 +451,7 @@ export default function SimuladorBot() {
       const assinatura = JSON.stringify(nova)
       const lidaEm = new Date().toISOString()
       guardar(CHAVE_DA_LEITURA, { identidade: nova, assinatura, lidaEm })
-      setOrigem({ situacao: 'ok', lidaEm, erro: null })
+      setOrigem({ situacao: 'ok', lidaEm, erro: null, nome: nova.nomeNoWhatsApp })
       const anterior = assinaturaAtual.current
       if (assinatura === anterior && !forcar) return
       assinaturaAtual.current = assinatura
@@ -701,7 +706,8 @@ export default function SimuladorBot() {
           >
             {Object.values(IDENTIDADES).map((i) => (
               <option key={i.chave} value={i.chave}>
-                {i.rotulo}
+                {/* A demo leva o nome da clinica lida da conta de teste. */}
+                {i.chave === 'demo' && origem.situacao === 'ok' ? `${identidadeDemo.nomeNoWhatsApp} (conta de teste)` : i.rotulo}
               </option>
             ))}
           </select>
@@ -728,7 +734,7 @@ export default function SimuladorBot() {
                 ? `Sem leitura agora: usando a de ${hora(new Date(origem.lidaEm))}`
                 : 'Sem leitura: cópia fixa'
               : origem.lidaEm
-                ? `Conta de teste · lida ${hora(new Date(origem.lidaEm))}`
+                ? `${origem.nome || 'Conta de teste'} · lida ${hora(new Date(origem.lidaEm))}`
                 : 'Lendo a conta de teste...'}
           </button>
         )}
