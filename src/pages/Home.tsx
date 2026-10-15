@@ -187,7 +187,9 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>(() => {
     const endereco = parametrosDoEndereco()
     if (endereco.get('conversa')) return 'conversas'
-    return endereco.get('state') || endereco.get('paciente') ? 'pacientes' : 'followups'
+    // Sem atalho no endereco, a Visao geral (15/10/2026, pedido do Edu): e a
+    // primeira do menu, e o resumo do dia vem antes da lista de acompanhamentos.
+    return endereco.get('state') || endereco.get('paciente') ? 'pacientes' : 'dashboard'
   })
   // Paciente cuja conversa deve abrir ao entrar em Respostas pelo atalho.
   const [conversaFoco, setConversaFoco] = useState<string | null>(null)
