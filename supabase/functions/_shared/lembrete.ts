@@ -45,9 +45,23 @@ export function normalizarResposta(valor: string) {
 export function respondendoEnvioNosso(
   ultimoEnvio: { created_at?: string | null; followup_id?: string | null; appointment_id?: string | null } | null,
   agora = Date.now(),
+  /**
+   * A consulta da mensagem ainda esta marcada? Falso so quando se sabe que
+   * nao (cancelada); desconhecido vale como marcada, o comportamento antigo.
+   *
+   * Existe por causa do aviso de cancelamento (13/10/2026). Ele e gravado
+   * ligado a consulta, e diz "para escolher uma nova data, digite *2*". A
+   * Sandryne digitou 2 e o robo leu como "remarcar" em resposta a um
+   * lembrete - de uma consulta que ele mesmo tinha acabado de avisar que foi
+   * cancelada: "essa consulta nao aparece mais como marcada". Consulta
+   * cancelada nao se confirma, remarca nem cancela; o numero volta a ser do
+   * menu, que e o que o aviso promete.
+   */
+  consultaAindaMarcada: boolean | null = null,
 ) {
   if (!ultimoEnvio?.created_at) return false
   if (!ultimoEnvio.followup_id && !ultimoEnvio.appointment_id) return false
+  if (ultimoEnvio.appointment_id && !ultimoEnvio.followup_id && consultaAindaMarcada === false) return false
   return agora - new Date(ultimoEnvio.created_at).getTime() < JANELA_RESPOSTA_MS
 }
 
@@ -428,4 +442,18 @@ export function unidadeNoLembrete(
     .replace(/[,·-]\s*$/, '')
     .trim()
   return limpo ? `${lugar} (${limpo})` : lugar
+}
+
+/**
+ * "Estamos bem" no acompanhamento encerra a conversa (14/10/2026).
+ *
+ * O acompanhamento ja era marcado como concluido, mas a conversa ficava
+ * aberta, com cara de pendente. No feriado de 12/10 a equipe abriu tres
+ * dessas e mandou "Que bom, a disposicao" - fora das 24h, pelo modelo pago
+ * da Meta - para familias que o robo ja tinha respondido. Encerrar e o mesmo
+ * que o Concluir da tela, e nao e definitivo: a proxima mensagem da familia
+ * reabre. Com algum pedido em aberto (bandeira de atencao), fica como esta.
+ */
+export function acompanhamentoEncerraConversa(resposta: Pick<Resposta, 'isWell'>, temPendencia: boolean): boolean {
+  return resposta.isWell && !temPendencia
 }

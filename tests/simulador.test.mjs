@@ -145,6 +145,18 @@ await caso('agenda: periodo semanal vira horarios do tamanho da consulta', () =>
   assert.deepEqual(quinze.slice(3), ['20 08:00', '20 08:40', '20 09:20'], 'janela de 8 dias devia alcancar a terca seguinte')
 })
 
+// available_slots_periodo (14/10/2026): o botao "Mandar horarios" pede um dia
+// alem da agenda aberta, e o simulador tem de enxerga-lo como o banco.
+await caso('agenda: periodo alcanca dia alem da janela e respeita as pontas', () => {
+  const t = tabelas({ regras: [TERCA_MANHA], cfg: { schedule_horizon_days: 8 } })
+  assert.ok(!horas(horariosLivres(t, 'u1', SEGUNDA_10H)).some((h) => h.startsWith('10 ')), 'a terca a 4 semanas nao esta na janela de 8 dias')
+  const dia = horariosLivres(t, 'u1', SEGUNDA_10H, { de: '2026-11-10', ate: '2026-11-10' })
+  assert.deepEqual(horas(dia), ['10 08:00', '10 08:40', '10 09:20'])
+  assert.deepEqual(horariosLivres(t, 'u1', SEGUNDA_10H, { de: '2026-10-01', ate: '2026-10-11' }), [], 'periodo no passado')
+  const longe = horariosLivres(t, 'u1', SEGUNDA_10H, { de: '2027-03-01', ate: '2027-12-31' })
+  assert.ok(longe.length > 0 && longe.every((h) => h.slot_start < '2027-04-11'), 'nada alem de 180 dias')
+})
+
 await caso('agenda: duracao de 30 minutos muda os horarios', () => {
   const lista = horariosLivres(tabelas({ regras: [TERCA_MANHA], cfg: { schedule_slot_minutes: 30 } }), 'u1', SEGUNDA_10H)
   assert.deepEqual(horas(lista).slice(0, 4), ['13 08:00', '13 08:30', '13 09:00', '13 09:30'])

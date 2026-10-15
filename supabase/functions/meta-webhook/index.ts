@@ -1,19 +1,26 @@
 import '../_shared/whatsapp.ts'
 import { adminClient, digits, sha256HmacHex, safeEqual } from '../_shared/whatsapp.ts'
-import { colherEventos, type Estado, pediuNotaFiscal, type Toque, tratarConversa } from '../_shared/atendimento.ts'
+import { colherEventos, type Estado, type Toque, tratarConversa } from '../_shared/atendimento.ts'
 import { montarMensagens } from '../_shared/conteudo.ts'
 import { RegistroDeEventos } from '../_shared/eventos-do-webhook.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
-import { textoDaLocalizacao, textoDosContatos } from '../_shared/mensagem-recebida.ts'
+import { semRespostaDoRobo, textoDaLocalizacao, textoDosContatos } from '../_shared/mensagem-recebida.ts'
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 import { montarAviso } from '../_shared/aviso-da-equipe.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
-import { ESPERA_MAXIMA_MS, precisaEsperar } from '../_shared/rajada.ts'
+import {
+  ESPERA_MAXIMA_MS,
+  complementoDaRajada,
+  precisaEsperar,
+  qualquerMensagem,
+  rajadaJaRespondida,
+} from '../_shared/rajada.ts'
 
 // O runtime das Edge Functions deixa terminar trabalho depois da resposta.
 // Fora dele (teste local) cai no await comum.
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined
 import {
+  acompanhamentoEncerraConversa,
   avisoDaResposta,
   depoisDoAcompanhamento,
   lembreteRecente,
@@ -437,13 +444,18 @@ Deno.serve(async (req) => {
           // Perder o convenio e um arranhao. Perder o estado da conversa
           // desliga o atendimento inteiro. Por isso os dois pedidos.
           // Rajada (01/10/2026, ver _shared/rajada.ts): se a familia acabou de
-          // pedir nota fiscal e o pedido ainda nao teve resposta, esta
-          // mensagem espera essa resposta sair antes de ler a conversa. Sem
-          // isto as duas rodavam juntas, e a segunda mandava o menu por cima
-          // do pedido. So nota fiscal: as outras mensagens nao esperam nada.
+          // escrever e ainda nao teve resposta, esta mensagem espera essa
+          // resposta sair antes de ler a conversa. Sem isto as duas rodavam
+          // juntas e a segunda respondia por cima da primeira. Era so nota
+          // fiscal ate 14/10/2026; agora vale para qualquer mensagem.
+          //
+          // E se esta mensagem for so o complemento ("Tudo bem?", "?") de uma
+          // que o robo acabou de responder, ela nao recebe resposta propria:
+          // o Lorenzo recebeu dois menus por "boa tarde!" + "Tudo bem?".
           //
           // Em try/catch e com limite: a espera e cortesia. Se a consulta
           // falhar ou o tempo acabar, segue como antes - com aviso no log.
+          let complementoDeRajada = false
           try {
             const { data: conversaDaRajada } = await admin
               .from('whatsapp_conversations')
@@ -468,11 +480,24 @@ Deno.serve(async (req) => {
                       corpo: (ultima.body as string | null) ?? '',
                     }
                   : null
-                if (!precisaEsperar(resumo, Date.now(), pediuNotaFiscal)) break
+                if (!precisaEsperar(resumo, Date.now(), qualquerMensagem)) break
                 await new Promise((ok) => setTimeout(ok, 500))
               }
               if (Date.now() - inicio >= ESPERA_MAXIMA_MS) {
                 console.warn('Rajada: a mensagem anterior nao teve resposta a tempo; seguindo assim mesmo', waId)
+              }
+              if (message.type === 'text' && complementoDaRajada(messageBody(message))) {
+                const { data: recentes } = await admin
+                  .from('whatsapp_messages')
+                  .select('direction,automatic,created_at')
+                  .eq('conversation_id', conversaDaRajada.id)
+                  .order('created_at', { ascending: false })
+                  .limit(3)
+                complementoDeRajada = rajadaJaRespondida(
+                  ((recentes ?? []) as { direction: 'inbound' | 'outbound'; automatic?: boolean | null; created_at: string }[])
+                    .map((m) => ({ direction: m.direction, automatic: m.automatic, criadaEm: m.created_at })),
+                  Date.now(),
+                )
               }
             }
           } catch (erro) {
@@ -616,7 +641,26 @@ Deno.serve(async (req) => {
                 .maybeSingle(),
             ])
 
-            respondendoEnvioNosso = dentroDaJanelaDeResposta(ultimoNossoResult.data)
+            // A consulta da ultima mensagem nossa ainda esta marcada? Aviso de
+            // cancelamento tambem vai ligado a consulta, e o "digite 2" dele e
+            // do menu, nao do lembrete (13/10/2026, ver respondendoEnvioNosso).
+            // Consulta propria e try/catch: falhando, vale o de antes.
+            let consultaAindaMarcada: boolean | null = null
+            const consultaDoEnvio = (ultimoNossoResult.data as { appointment_id?: string | null } | null)?.appointment_id
+            if (consultaDoEnvio) {
+              try {
+                const { data: situacao, error: erroSituacao } = await admin
+                  .from('appointments')
+                  .select('status')
+                  .eq('id', consultaDoEnvio)
+                  .maybeSingle()
+                if (erroSituacao) throw erroSituacao
+                if (situacao) consultaAindaMarcada = (situacao as { status?: string }).status === 'scheduled'
+              } catch (erro) {
+                console.warn('Nao consegui ler a consulta da ultima mensagem; 1/2/3 seguem como resposta ao lembrete', erro)
+              }
+            }
+            respondendoEnvioNosso = dentroDaJanelaDeResposta(ultimoNossoResult.data, Date.now(), consultaAindaMarcada)
             // Falha aqui custa so o tratamento especial do pos-consulta: a
             // mensagem segue o caminho de sempre. Mas avisa, para nao virar
             // mais um defeito mudo.
@@ -833,7 +877,15 @@ Deno.serve(async (req) => {
           // mais abaixo, que responde e entrega a conversa a equipe. Deixar o
           // menu falar antes mandava "como podemos ajudar hoje?" para quem
           // acabou de dizer que precisa de ajuda.
-          if (!optedOut && !respondeuLembrete && !isWell && !pediuAjuda && settings.whatsapp_autoreply_enabled) {
+          if (
+            !optedOut &&
+            !respondeuLembrete &&
+            !isWell &&
+            !pediuAjuda &&
+            !complementoDeRajada &&
+            !semRespostaDoRobo(message.type) &&
+            settings.whatsapp_autoreply_enabled
+          ) {
             const resultado = await tratarConversa({
               admin,
               clinicId,
@@ -1177,6 +1229,15 @@ Deno.serve(async (req) => {
               // assumir, em vez de mandar menu por cima de um pedido de ajuda.
               const texto = respostaAoAcompanhamento(resposta)
               if (texto) await responder(texto)
+              // "Estamos bem": nada ficou para a equipe. Ver
+              // acompanhamentoEncerraConversa.
+              if (acompanhamentoEncerraConversa(resposta, marcarAtencao)) {
+                const { error: erroAoEncerrar } = await admin
+                  .from('whatsapp_conversations')
+                  .update({ status: 'resolved', needs_attention: false, attention_reason: null })
+                  .eq('id', conversation.id)
+                if (erroAoEncerrar) console.warn('Nao consegui encerrar a conversa do "Estamos bem"', erroAoEncerrar)
+              }
               if (pediuAjuda) {
                 await admin
                   .from('whatsapp_conversations')

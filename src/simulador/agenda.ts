@@ -153,7 +153,13 @@ function numero(valor: unknown, padrao: number): number {
  * (semanais fora dos dias fechados, mais os horarios extras), horarios do
  * tamanho da consulta, antecedencia minima e consultas que ocupam o medico.
  */
-export function horariosLivres(t: TabelasDaAgenda, unidadeId: string, agora: Date): { slot_start: string; slot_end: string }[] {
+export function horariosLivres(
+  t: TabelasDaAgenda,
+  unidadeId: string,
+  agora: Date,
+  /** available_slots_periodo (14/10/2026): sem periodo, a agenda aberta. */
+  periodo?: { de?: string | null; ate?: string | null },
+): { slot_start: string; slot_end: string }[] {
   const unidade = t.clinic_units.find((u) => u.id === unidadeId && !u.archived_at)
   if (!unidade) return []
   const clinicId = unidade.clinic_id
@@ -178,10 +184,15 @@ export function horariosLivres(t: TabelasDaAgenda, unidadeId: string, agora: Dat
     )
     .map((a) => [new Date(String(a.starts_at)).getTime(), new Date(String(a.ends_at ?? a.starts_at)).getTime()])
 
-  const primeiro = diaDeBrasilia(agora)
+  // As pontas de available_slots_periodo: nunca antes de hoje, nunca alem de
+  // 180 dias, e sem "ate" a janela da clinica a partir do primeiro dia.
+  const hoje = diaDeBrasilia(agora)
+  const primeiro = periodo?.de && periodo.de > hoje ? periodo.de : hoje
+  const pedidoAte = periodo?.ate ?? somarDias(primeiro, janela)
+  const teto = somarDias(hoje, 180)
+  const ultimo = pedidoAte < teto ? pedidoAte : teto
   const porInicio = new Map<number, { slot_start: string; slot_end: string }>()
-  for (let i = 0; i <= janela; i++) {
-    const dia = somarDias(primeiro, i)
+  for (let dia = primeiro; dia <= ultimo; dia = somarDias(dia, 1)) {
     const diaDaSemana = new Date(`${dia}T12:00:00Z`).getUTCDay()
     const excecoes = t.schedule_exceptions.filter(
       (e) => e.exception_date === dia && e.clinic_id === clinicId && (e.unit_id == null || e.unit_id === unidadeId),

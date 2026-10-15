@@ -1,7 +1,7 @@
 // Mensagens em rajada (supabase/functions/_shared/rajada.ts). Caso real de
 // 30/09/2026: duas mensagens com 2 segundos de diferenca, processadas juntas.
 import assert from 'node:assert/strict'
-import { precisaEsperar, JANELA_DA_RAJADA_MS } from './rajada.build.mjs'
+import { precisaEsperar, JANELA_DA_RAJADA_MS, complementoDaRajada, rajadaJaRespondida, qualquerMensagem } from './rajada.build.mjs'
 
 let ok = 0
 function caso(nome, fn) {
@@ -48,6 +48,40 @@ caso('relogio torto (mensagem "do futuro") nao trava ninguem', () => {
 caso('rajada que nao e de nota fiscal nao espera (decisao de 01/10)', () => {
   assert.equal(precisaEsperar({ direction: 'inbound', criadaEm: ha(2000), corpo: 'Oi' }, agora, ehNota), false)
   assert.equal(precisaEsperar({ direction: 'inbound', criadaEm: ha(2000), corpo: 'quero marcar' }, agora, ehNota), false)
+})
+
+// 14/10/2026: o webhook espera em qualquer rajada, nao so de nota fiscal.
+caso('com qualquerMensagem, "Oi" de 2s atras sem resposta faz esperar', () => {
+  assert.equal(precisaEsperar({ direction: 'inbound', criadaEm: ha(2000), corpo: 'boa tarde!' }, agora, qualquerMensagem), true)
+})
+
+// Lorenzo ("boa tarde!" + "Tudo bem?") e Kalina (frase do site + "?").
+caso('cumprimento e pontuacao sao complemento da rajada', () => {
+  for (const t of ['Tudo bem?', '?', 'boa tarde!', 'Oi, tudo bem?', '🙏', 'ok', 'Tudo bem tbm']) {
+    assert.equal(complementoDaRajada(t), true, t)
+  }
+})
+caso('pedido de verdade nao e complemento', () => {
+  for (const t of ['quero marcar', 'quanto custa?', 'Enquanto&', '2', 'convenio?', 'Por enquanto nao']) {
+    assert.equal(complementoDaRajada(t), false, t)
+  }
+})
+
+const msg = (direction, msAtras, automatic = false) => ({ direction, automatic, criadaEm: ha(msAtras) })
+caso('a mensagem de 3s atras ja teve resposta do robo: rajada respondida', () => {
+  assert.equal(rajadaJaRespondida([msg('outbound', 1000, true), msg('inbound', 3000)], agora), true)
+})
+caso('resposta foi da equipe, nao do robo: nao conta', () => {
+  assert.equal(rajadaJaRespondida([msg('outbound', 1000, false), msg('inbound', 3000)], agora), false)
+})
+caso('mensagem anterior de minutos atras: nao e rajada', () => {
+  assert.equal(rajadaJaRespondida([msg('outbound', 60000, true), msg('inbound', 62000)], agora), false)
+})
+caso('a ultima e da familia, sem resposta ainda: nao conta como respondida', () => {
+  assert.equal(rajadaJaRespondida([msg('inbound', 1000), msg('outbound', 5000, true)], agora), false)
+})
+caso('conversa vazia', () => {
+  assert.equal(rajadaJaRespondida([], agora), false)
 })
 
 console.log(`rajada: ${ok} verificacoes ok`)

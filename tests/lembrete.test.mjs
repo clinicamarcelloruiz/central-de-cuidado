@@ -6,6 +6,7 @@
 // producao. Cada caso abaixo existe para que um erro desses falhe aqui, em dois
 // segundos, e nao la, em silencio.
 import {
+  acompanhamentoEncerraConversa,
   avisoDaResposta,
   depoisDoAcompanhamento,
   lembreteRecente,
@@ -58,6 +59,21 @@ conferir(
 )
 
 conferir('Conversa sem nenhuma mensagem nossa não abre janela', respondendoEnvioNosso(null, AGORA) === false)
+
+// Sandryne, 13/10/2026: o aviso de cancelamento dizia "digite 2 para escolher
+// uma nova data", e o 2 virou "remarcar" de uma consulta ja cancelada.
+conferir(
+  'Aviso de consulta cancelada não abre janela: o 2 volta a ser do menu',
+  respondendoEnvioNosso({ created_at: quando(0.1), appointment_id: 'a1' }, AGORA, false) === false,
+)
+conferir(
+  'Consulta ainda marcada continua abrindo a janela',
+  respondendoEnvioNosso({ created_at: quando(0.1), appointment_id: 'a1' }, AGORA, true) === true,
+)
+conferir(
+  'Sem saber o estado da consulta, vale o comportamento de antes',
+  respondendoEnvioNosso({ created_at: quando(0.1), appointment_id: 'a1' }, AGORA) === true,
+)
 
 // ---------------------------------------------------------------------------
 // O robô calado enquanto gente conversa
@@ -471,6 +487,12 @@ conferir(
   'Confirmação repete onde é a consulta',
   avisoDaResposta(interpretarResposta('1', true), 'Livance · Santos (Av. Anna Costa, 228)').includes('📍 Livance · Santos (Av. Anna Costa, 228)'),
 )
+
+// "Estamos bem" encerra a conversa (feriado de 12/10/2026: a equipe respondeu
+// pelo modelo pago tres familias que o robo ja tinha atendido).
+conferir('"Estamos bem" sem pendência encerra a conversa', acompanhamentoEncerraConversa(interpretarResposta('Estamos bem', true), false) === true)
+conferir('"Estamos bem" com pedido em aberto não encerra', acompanhamentoEncerraConversa(interpretarResposta('Estamos bem', true), true) === false)
+conferir('"Preciso de ajuda" não encerra', acompanhamentoEncerraConversa(interpretarResposta('Preciso de ajuda', true), false) === false)
 
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)
 console.log(`FALHAS: ${falhas.length}`)

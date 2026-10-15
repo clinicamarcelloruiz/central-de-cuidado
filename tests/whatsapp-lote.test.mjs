@@ -1,7 +1,7 @@
 // Lote do WhatsApp de 25/09/2026: nono digito, localizacao/contato e notas.
 // Numeros e nomes inventados.
 import { variantesDoTelefone, mesmoTelefone } from './telefone-br.build.mjs'
-import { textoDaLocalizacao, textoDosContatos } from './mensagem-recebida.build.mjs'
+import { textoDaLocalizacao, textoDosContatos, semRespostaDoRobo } from './mensagem-recebida.build.mjs'
 import { linhaDoTempo } from './linha-do-tempo.build.mjs'
 import { avaliarSaude } from './saude-dos-envios.build.mjs'
 import { consultasDeUmDia, avisoDoBloqueio } from './bloqueio-de-dia.build.mjs'
@@ -102,6 +102,12 @@ function confere(nome, cond, detalhe) {
   confere('so consultas de pe, no dia de Sao Paulo', doDia.length === 1 && doDia[0].patientName === 'Paciente A', JSON.stringify(doDia))
   const aviso = avisoDoBloqueio(doDia)
   confere('aviso diz que ninguem e avisado', /NÃO são avisadas/.test(aviso.detalhe) && /1 consulta marcada/.test(aviso.titulo), JSON.stringify(aviso))
+}
+
+// ------------------------------------------- figurinha nao puxa resposta (14/10/2026)
+confere('figurinha nao recebe resposta do robo', semRespostaDoRobo('sticker') === true)
+for (const tipo of ['text', 'image', 'document', 'audio', 'interactive', 'button', undefined]) {
+  confere(`${tipo} continua com resposta`, semRespostaDoRobo(tipo) === false)
 }
 
 console.log(`WhatsApp (lote 25/09): ${ok} verificações passaram.`)

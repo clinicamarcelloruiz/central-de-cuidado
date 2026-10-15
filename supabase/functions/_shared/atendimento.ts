@@ -253,11 +253,21 @@ export function pediuMudarConsulta(texto: string) {
  * outro, por cima da equipe. "Fulana agradece seu contato. Como podemos
  * ajudar?" e o mesmo caso. Primeira pessoa de proposito: a mae que pergunta
  * "voces estao fora do horario?" nao pode ser calada.
+ *
+ * 10/10/2026: a imobiliaria da Natalia respondeu ao acompanhamento no mesmo
+ * segundo - "Seja muito bem-vindo(a)... Agradeco imensamente o seu contato.
+ * Em breve eu ou um membro da nossa equipe entraremos em contato". Nada
+ * daquilo casava (era "agradeco", nao "agradece"), e o robo leu como recado
+ * sobre a crianca: "o Dr. Marcello fica sabendo", e a equipe chamada.
  */
 export function respostaAutomaticaDaFamilia(texto: string) {
   const t = normalizar(texto)
   return (
     /\bagradece (o |seu |o seu |pelo |pela sua )?(contato|mensagem)\b/.test(t) ||
+    /\bagradec(o|emos) (imensamente |muito |sinceramente )?(o |seu |o seu |pelo |pela |pela sua )?(contato|mensagem)\b/.test(t) ||
+    /\bseja (muito )?bem[- ]?vind[oa]/.test(t) ||
+    /\bentraremos em contato\b/.test(t) ||
+    /\b(retornaremos|responderemos) (o contato |sua mensagem |a sua mensagem )?(em breve|assim que|o mais breve)/.test(t) ||
     /\b(estou|estamos) fora do (meu |nosso )?horario de atendimento\b/.test(t) ||
     /\b(mensagem|resposta) automatica\b/.test(t) ||
     /\bretorno (sua mensagem|seu contato|o contato|a mensagem) (assim que|em breve|o mais breve)/.test(t) ||
@@ -1052,10 +1062,22 @@ async function fusoDaClinica(admin: Admin, clinicId: string) {
  * verdade a consulta ao banco tinha sido recusada por permissao. Dizer que a
  * agenda esta vazia quando ela esta cheia e pior do que admitir a falha.
  */
+/**
+ * Dias de um pedido de horarios (AAAA-MM-DD). Nulo = a ponta de sempre: hoje
+ * no inicio, a janela da clinica no fim. Ver available_slots_periodo.
+ */
+export type Periodo = { de: string | null; ate: string | null }
+
 async function horariosLivres(
   admin: Admin,
   clinicId: string,
   unitId: string,
+  /**
+   * So quando a equipe manda horarios de uma data combinada (14/10/2026), ou
+   * quando o dia escolhido esta alem da agenda aberta. Sem periodo, a agenda
+   * aberta de sempre.
+   */
+  periodo?: Periodo,
 ): Promise<{ horarios: Horario[]; falhou: boolean }> {
   // Telemedicina. Cada horario lembra em que agenda a consulta vai ser gravada.
   if (unitId === TELE_ID) {
@@ -1063,7 +1085,7 @@ async function horariosLivres(
 
     // Agenda propria com horarios (03/10/2026): so ela vale.
     if (teleId && (await telemedicinaTemHorarios(admin, teleId))) {
-      const propria = await horariosLivres(admin, clinicId, teleId)
+      const propria = await horariosLivres(admin, clinicId, teleId, periodo)
       return { ...propria, horarios: propria.horarios.map((h) => ({ ...h, unitId: teleId })) }
     }
 
@@ -1072,7 +1094,7 @@ async function horariosLivres(
     // (available_slots cruza as agendas). Havendo agenda da telemedicina, a
     // consulta vai para ela; sem, para a unidade que cedeu o horario.
     const fisicas = await unidadesAtivas(admin, clinicId)
-    const partes = await Promise.all(fisicas.map((u) => horariosLivres(admin, clinicId, u.id)))
+    const partes = await Promise.all(fisicas.map((u) => horariosLivres(admin, clinicId, u.id, periodo)))
     if (partes.length > 0 && partes.every((p) => p.falhou)) return { horarios: [], falhou: true }
     const juntos = partes
       .flatMap((p, i) => p.horarios.map((h) => ({ ...h, unitId: teleId ?? fisicas[i].id })))
@@ -1087,9 +1109,24 @@ async function horariosLivres(
   const { error: erroFaxina } = await admin.rpc('liberar_reservas_vencidas')
   if (erroFaxina) console.error('liberar_reservas_vencidas falhou', erroFaxina)
 
-  const { data, error } = await admin.rpc('available_slots', { p_unit_id: unitId })
+  let { data, error } = periodo
+    ? await admin.rpc('available_slots_periodo', { p_unit_id: unitId, p_de: periodo.de, p_ate: periodo.ate })
+    : await admin.rpc('available_slots', { p_unit_id: unitId })
+  // Funcao nova (14/10/2026) que o banco ainda nao tem: cai na agenda aberta
+  // e corta o periodo aqui. Perde-se so o que passa da janela da clinica, e o
+  // log diz por que.
+  if (periodo && error && /available_slots_periodo|PGRST202|42883/.test(`${error.code ?? ''} ${error.message ?? ''}`)) {
+    console.warn('Sem available_slots_periodo no banco; usando a agenda aberta', error)
+    const timezone = await fusoDaClinica(admin, clinicId)
+    const aberta = await admin.rpc('available_slots', { p_unit_id: unitId })
+    error = aberta.error
+    data = ((aberta.data ?? []) as { slot_start: string; slot_end: string }[]).filter((h) => {
+      const dia = chaveDoDia(h.slot_start, timezone)
+      return (!periodo.de || dia >= periodo.de) && (!periodo.ate || dia <= periodo.ate)
+    })
+  }
   if (error) {
-    console.error('available_slots falhou', { unitId, error })
+    console.error('available_slots falhou', { unitId, periodo, error })
     return { horarios: [], falhou: true }
   }
 
@@ -1162,6 +1199,66 @@ export async function mostrarMenu(
  * Termina em 'menu' para os numeros continuarem valendo: quem acabou de ler o
  * valor da consulta e exatamente quem pode responder "2" para marcar.
  */
+/**
+ * A mesma resposta pronta ja saiu nesta conversa ha pouco? (14/10/2026)
+ *
+ * A Kalina recebeu o texto de convenios duas vezes em dois minutos: na
+ * pergunta e, de novo, na despedida ("ok obrigada, vou tentar achar pelo
+ * convenio, se nao conseguir volto pra marcar"), que tambem dizia "convenio".
+ * O texto repetido logo abaixo do primeiro parece que o robo nao leu nada.
+ *
+ * Compara o comeco do texto pronto (sem as linhas com campo, que saem
+ * preenchidas) com o que o robo mandou na ultima meia hora. Falha ao ler
+ * vale como "nao saiu": melhor repetir do que calar.
+ */
+const JANELA_SEM_REPETIR_MS = 30 * 60 * 1000
+
+async function jaMandada(admin: Admin, conversationId: string, resposta: string): Promise<boolean> {
+  const trecho = resposta
+    .split('\n')
+    .filter((linha) => !linha.includes('{'))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+  if (trecho.length < 20) return false
+  try {
+    const { data, error } = await admin
+      .from('whatsapp_messages')
+      .select('body')
+      .eq('conversation_id', conversationId)
+      .eq('direction', 'outbound')
+      .eq('automatic', true)
+      .gte('created_at', new Date(Date.now() - JANELA_SEM_REPETIR_MS).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(10)
+    if (error) throw error
+    return ((data ?? []) as { body?: string | null }[]).some((m) =>
+      String(m.body ?? '').replace(/\s+/g, ' ').includes(trecho),
+    )
+  } catch (erro) {
+    console.warn('Nao consegui conferir se a resposta pronta ja saiu; respondendo assim mesmo', erro)
+    return false
+  }
+}
+
+/**
+ * Despedida com "volto depois" (14/10/2026): "Ok obrigada, vou tentar achar
+ * pelo convenio, se nao conseguir volto pra marcar". Nao e pergunta nem
+ * pedido de marcar agora - e a pessoa encerrando. Antes caia no "convenio" e
+ * no "marcar" da frase e recebia convenios de novo e o botao da agenda.
+ */
+export function despedida(texto: string): boolean {
+  if (parecePergunta(texto)) return false
+  const t = normalizar(texto).replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  const agradece = /\b(ok|okay|obrigad[oa]|obg|valeu|grat[oa]|beleza|blz|combinado|certo|entendi|agradeco)\b/.test(t)
+  const depois =
+    /\b(vou (tentar|ver|pensar|verificar|conversar|falar|olhar|analisar|decidir|avaliar|procurar)|volto (a falar|depois|mais tarde|pra|para|aqui|a entrar|a chamar)|retorno (depois|mais tarde|em breve)|(entro|entramos) em contato|qualquer coisa (eu )?(volto|chamo|falo|aviso|entro)|depois (eu )?(volto|chamo|falo|marco|vejo|aviso))\b/.test(t)
+  return agradece && depois
+}
+
+const RESPOSTA_A_DESPEDIDA = '💙 Combinado! Quando quiser, é só escrever por aqui.'
+
 async function responderPergunta(
   admin: Admin,
   clinicId: string,
@@ -1172,11 +1269,15 @@ async function responderPergunta(
   const achada = acharResposta(texto, await carregarRespostas(admin, clinicId))
   if (!achada) return null
 
+  // A mesma resposta acabou de sair: aponta para ela em vez de repetir o
+  // paragrafo inteiro (ver jaMandada), com as mesmas saidas e a mesma lista.
+  const repetida = await jaMandada(admin, conversationId, achada.resposta)
+
   // "Quanto custa?" nao tem resposta unica: depende de onde. O assunto marcado
   // para perguntar a unidade cai na mesma pergunta da opcao 1 do menu, e a
   // resposta e o texto de informacoes do lugar escolhido. Com um lugar so, a
   // pergunta nao existe e vale o texto da propria resposta.
-  if (achada.perguntarUnidade) {
+  if (achada.perguntarUnidade && !repetida) {
     const lugares = await opcoesDeAtendimento(admin, clinicId)
     if (lugares.length > 1) {
       // A resposta vem junto da pergunta (09/10/2026). A Mayara perguntou o
@@ -1195,7 +1296,9 @@ async function responderPergunta(
   })
 
   return {
-    resposta: `${achada.resposta}\n\n${SAIDAS}`,
+    resposta: repetida
+      ? `👆 Essa informação está logo acima. Se ficou alguma dúvida, é só perguntar à nossa equipe.\n\n${SAIDAS}`
+      : `${achada.resposta}\n\n${SAIDAS}`,
     lista: {
       rotulo: 'Ver opções',
       linhas: [
@@ -1899,9 +2002,11 @@ async function perguntarDia(
   unidade: Unidade,
   /** Falso quando a clinica so tem uma unidade: nao existe "outra" para trocar. */
   podeTrocarUnidade = true,
+  /** Dias pedidos pela equipe (ver oferecerHorarios). */
+  periodo?: Periodo,
 ): Promise<Resultado> {
   const timezone = await fusoDaClinica(admin, clinicId)
-  const { horarios, falhou } = await horariosLivres(admin, clinicId, unidade.id)
+  const { horarios, falhou } = await horariosLivres(admin, clinicId, unidade.id, periodo)
   const tele = unidade.id === TELE_ID
 
   if (falhou) {
@@ -1983,6 +2088,81 @@ async function perguntarDia(
 }
 
 /**
+ * A equipe manda os horarios livres pela conversa (14/10/2026).
+ *
+ * A secretaria digitava a lista a mao ("Tenho esses horarios na sexta,
+ * 23/10: 08:00 / 08:40 / ...") e, quando a familia escolhia, marcava na
+ * Agenda - as vezes na manha seguinte, com o horario podendo ter sido pego no
+ * meio. Foram tres casos entre 13 e 14/10 (Bernardo, Sandryne, Mariah). Agora
+ * ela escolhe a unidade e, se quiser, o periodo ("ate 25/10", "dia 27/11");
+ * o robo manda a lista tocavel e segue o agendamento de sempre a partir do
+ * dia: horario, cadastro, confirmacao.
+ *
+ * Nada e enviado quando nao ha horario no periodo: a equipe le o motivo na
+ * tela em vez de a familia receber uma lista vazia.
+ */
+export type PedidoDeHorarios = {
+  /** Id da unidade, ou 'telemedicina'. */
+  unidade: string
+  /** Primeiro e ultimo dia (AAAA-MM-DD). Sem eles, a agenda aberta. */
+  de?: string | null
+  ate?: string | null
+  /** Paciente da consulta, quando ha mais de um no telefone (irmaos). */
+  pacienteId?: string | null
+}
+
+const DATA_ISO = /^\d{4}-\d{2}-\d{2}$/
+
+export async function oferecerHorarios(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+  pedido: PedidoDeHorarios,
+): Promise<{ resultado: Resultado } | { erro: string }> {
+  focar(conversationId)
+  const de = pedido.de?.trim() || null
+  const ate = pedido.ate?.trim() || null
+  if ((de && !DATA_ISO.test(de)) || (ate && !DATA_ISO.test(ate))) return { erro: 'Data inválida.' }
+  if (de && ate && ate < de) return { erro: 'A data final vem antes da inicial.' }
+
+  const unidade = pedido.unidade === TELE_ID ? UNIDADE_TELE : await unidadePorId(admin, pedido.unidade)
+  if (!unidade) return { erro: 'Unidade não encontrada.' }
+
+  const periodo = de || ate ? { de, ate } : undefined
+  const { horarios, falhou } = await horariosLivres(admin, clinicId, unidade.id, periodo)
+  if (falhou) return { erro: 'Não consegui consultar a agenda agora. Nada foi enviado.' }
+  if (horarios.length === 0) {
+    const br = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`
+    const quando = de && ate ? (de === ate ? ` em ${br(de)}` : ` entre ${br(de)} e ${br(ate)}`) : de ? ` a partir de ${br(de)}` : ate ? ` até ${br(ate)}` : ''
+    return { erro: `Não há horário livre em ${unidade.name}${quando}. Nada foi enviado.` }
+  }
+
+  // Comeco de agendamento limpo: sem consulta a substituir nem cadastro
+  // pela metade de outra conversa, e com o paciente que a equipe indicou.
+  await salvarEstado(admin, conversationId, {
+    booking_patient_id: pedido.pacienteId ?? null,
+    booking_replaces_id: null,
+    booking_intake_id: null,
+    booking_insurance: null,
+  })
+
+  const umDia = Boolean(de && ate && de === ate)
+  const resultado = umDia
+    ? await perguntarHorario(admin, clinicId, conversationId, unidade.id, de as string)
+    : await perguntarDia(admin, clinicId, conversationId, unidade, true, periodo)
+  return {
+    resultado: {
+      ...resultado,
+      resposta:
+        (umDia
+          ? 'Separei os horários livres para você 👇 Toque no horário que preferir: a consulta fica marcada na hora.\n\n'
+          : 'Separei os horários livres para você 👇 Toque no dia e depois no horário: a consulta fica marcada na hora.\n\n') +
+        resultado.resposta,
+    },
+  }
+}
+
+/**
  * Urgencia na telemedicina: o robo para de marcar e chama gente.
  *
  * Nao e a mesma coisa que "falar com a equipe". Quem pediu urgencia esta com
@@ -2047,9 +2227,21 @@ async function perguntarHorario(
     return { resposta: AVISO_FALHA, atencao: 'falha' }
   }
 
-  const doDia = horarios
+  let doDia = horarios
     .filter((h) => chaveDoDia(h.inicio, timezone) === diaEscolhido)
     .slice(0, MAX_HORARIOS_DIA)
+
+  // Dia alem da agenda aberta (14/10/2026): so chega aqui quando a equipe
+  // mandou horarios de uma data combinada ("dia 27/11"). A agenda aberta nao
+  // enxerga esse dia; o pedido do dia exato enxerga.
+  if (doDia.length === 0) {
+    const doPedido = await horariosLivres(admin, clinicId, unitId, { de: diaEscolhido, ate: diaEscolhido })
+    if (!doPedido.falhou) {
+      doDia = doPedido.horarios
+        .filter((h) => chaveDoDia(h.inicio, timezone) === diaEscolhido)
+        .slice(0, MAX_HORARIOS_DIA)
+    }
+  }
 
   if (doDia.length === 0) {
     // Alguem ocupou o dia inteiro entre a listagem e a escolha. Volta um passo
@@ -3443,6 +3635,10 @@ async function tratarConversaPorDentro(opcoes: {
     // recebeu "toque em Marcar uma consulta" - ela queria uma resposta da
     // equipe, que ja estava com a conversa. Frase longa com cara de pergunta
     // fica para a equipe.
+    // Despedida na fila: resposta curta, e a conversa continua na fila.
+    if (opcoes.podeIniciarMenu && despedida(texto)) {
+      return (await jaMandada(admin, conversationId, RESPOSTA_A_DESPEDIDA)) ? null : { resposta: RESPOSTA_A_DESPEDIDA }
+    }
     const perguntaLonga =
       parecePergunta(texto) && normalizar(texto).split(/\s+/).filter(Boolean).length >= 10
     const querMarcar = !perguntaLonga && (pediuAgendamento(texto) || texto.trim() === '2')
@@ -3459,7 +3655,8 @@ async function tratarConversaPorDentro(opcoes: {
       }
       const lista = await carregarRespostas(admin, clinicId)
       // "Marca consulta pra minha filha, e valor da consulta": as duas coisas.
-      const junto = acharResposta(texto, lista, 2)
+      const achadoJunto = acharResposta(texto, lista, 2)
+      const junto = achadoJunto && !(await jaMandada(admin, conversationId, achadoJunto.resposta)) ? achadoJunto : null
       await admin
         .from('whatsapp_conversations')
         .update({ auto_replies_while_waiting: jaRespondidas + 1 })
@@ -3494,7 +3691,8 @@ async function tratarConversaPorDentro(opcoes: {
       // Sem perguntar a unidade: a pergunta "para qual atendimento?" mudaria a
       // etapa da conversa e tiraria a pessoa da fila sem ela pedir. Vale o
       // texto curto da propria resposta, que ja cobre os tres lugares.
-      if (achada) {
+      // Ja respondida ha pouco: na fila, silencio (a equipe esta a caminho).
+      if (achada && !(await jaMandada(admin, conversationId, achada.resposta))) {
         await admin
           .from('whatsapp_conversations')
           .update({ auto_replies_while_waiting: jaRespondidas + 1 })
@@ -3589,7 +3787,8 @@ async function tratarConversaPorDentro(opcoes: {
     // refluxo, queria marcar" e as duas coisas: o robo diz que nao orienta sobre
     // sintoma e mostra o menu, de onde ela marca pelo *2*. Pular essa frase
     // seria o robo fingir que nao leu a parte que mais importava.
-    if (opcoes.jaViuOMenu && pediuAgendamento(texto) && !assuntoClinico(texto)) {
+    // "...e volto pra marcar" e despedida, nao pedido de agora (14/10/2026).
+    if (opcoes.jaViuOMenu && pediuAgendamento(texto) && !assuntoClinico(texto) && !despedida(texto)) {
       return await iniciarAgendamento(
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
       )
@@ -3607,7 +3806,7 @@ async function tratarConversaPorDentro(opcoes: {
     // curta que nao e agradecimento ("sim", "otimo") tambem: cai na regra de
     // sempre.
     if (opcoes.posAcompanhamento) {
-      if (soAgradecimento(texto)) {
+      if (soAgradecimento(texto) || despedida(texto)) {
         registrar('acompanhamento_agradeceu')
         return { resposta: '💙 Nós que agradecemos! Qualquer coisa, é só escrever por aqui.', concluida: true }
       }
@@ -3653,6 +3852,7 @@ async function tratarConversaPorDentro(opcoes: {
     if (soAgradecimento(texto)) {
       return { resposta: '😊 Por nada! Se precisar de algo, é só escrever *0* para ver as opções.', concluida: true }
     }
+    if (despedida(texto)) return { resposta: RESPOSTA_A_DESPEDIDA, concluida: true }
 
     // Nota fiscal: a mensagem ja diz o que a pessoa quer. Ver pediuNotaFiscal.
     if (pediuNotaFiscal(texto)) return await registrarPedidoDeNota(admin, conversationId)
@@ -3859,7 +4059,7 @@ async function tratarConversaPorDentro(opcoes: {
       if (distante) return await pedirRetornoDistante(admin, conversationId, distante.pedido, distante.horizonte, false)
     }
 
-    if (pediuAgendamento(texto) && !assuntoClinico(texto)) {
+    if (pediuAgendamento(texto) && !assuntoClinico(texto) && !despedida(texto)) {
       return await iniciarAgendamento(
         admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas,
       )
@@ -3886,6 +4086,8 @@ async function tratarConversaPorDentro(opcoes: {
 
     // Com o menu na tela, a pessoa pode escrever o pedido em vez de escolher.
     if (pediuNotaFiscal(texto)) return await registrarPedidoDeNota(admin, conversationId)
+
+    if (despedida(texto)) return { resposta: RESPOSTA_A_DESPEDIDA, concluida: true }
 
     // Antes de dizer "nao entendi": a pessoa pode ter ignorado a lista e
     // escrito a duvida dela, que e o que se faz num WhatsApp de verdade.
@@ -4235,7 +4437,8 @@ async function tratarConversaPorDentro(opcoes: {
       const palavrasDaDuvida = normalizar(texto).replace(/[^a-z\s]/g, ' ').trim().split(/\s+/).filter((p) => p.length > 1)
       if (palavrasDaDuvida.length >= 3) {
         const clinica = assuntoClinico(texto)
-        const pronta = clinica ? null : acharResposta(texto, await carregarRespostas(admin, clinicId))
+        const achadaAqui = clinica ? null : acharResposta(texto, await carregarRespostas(admin, clinicId))
+        const pronta = achadaAqui && !(await jaMandada(admin, conversationId, achadaAqui.resposta)) ? achadaAqui : null
         if (pronta) return { resposta: `${pronta.resposta}\n\n${VOLTA}` }
         registrar(clinica ? 'assunto_clinico' : 'duvida_para_equipe')
         const chamada = await chamarEquipe(admin, conversationId)

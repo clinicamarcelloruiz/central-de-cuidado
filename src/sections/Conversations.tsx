@@ -11,6 +11,7 @@ import {
   ChevronUp,
   CircleSlash,
   Clock3,
+  CalendarClock,
   MessageSquareText,
   Paperclip,
   RefreshCw,
@@ -56,12 +57,14 @@ import {
   sendConversationReply,
   sendConversationMenu,
   sendConversationQuestionnaire,
+  sendConversationSlots,
   type AutoReplySettings,
   type Conversation,
   type ConversationMessage,
   type ResumoDoPaciente,
 } from '@/lib/repository'
 import { lugaresDoRobo } from '@/lib/lugares'
+import MandarHorarios from '@/sections/MandarHorarios'
 import {
   preencherCampos,
   problemasDoTexto,
@@ -591,6 +594,8 @@ export default function Conversations({
   const [salvandoAuto, setSalvandoAuto] = useState(false)
   const [avisoAuto, setAvisoAuto] = useState('')
   const [destravando, setDestravando] = useState<string | null>(null)
+  // Destravar e do dono da conta (14/10/2026). Ver o comentario no botao.
+  const [souDono, setSouDono] = useState(false)
 
   useEffect(() => {
     const timer = window.setInterval(() => setAgora(Date.now()), 60_000)
@@ -762,6 +767,7 @@ export default function Conversations({
       const membership = await getCurrentMembership()
       if (!membership) throw new Error('Não foi possível identificar a clínica do seu usuário.')
       setClinicId(membership.clinicId)
+      setSouDono(membership.role === 'owner')
       const [lista, automatica] = await Promise.all([
         listConversations(membership.clinicId),
         getAutoReply(membership.clinicId),
@@ -989,6 +995,39 @@ export default function Conversations({
       void load(true)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Não foi possível enviar o menu.')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  // Mandar horarios (14/10/2026). O painel fica aberto ate dar certo: a
+  // recusa ("nao ha horario livre...") e a escolha do paciente aparecem nele.
+  const [painelHorarios, setPainelHorarios] = useState(false)
+  const [erroHorarios, setErroHorarios] = useState('')
+  const [irmaos, setIrmaos] = useState<{ id: string; nome: string }[] | null>(null)
+  useEffect(() => {
+    setPainelHorarios(false)
+    setErroHorarios('')
+    setIrmaos(null)
+  }, [selectedId])
+
+  async function enviarHorarios(pedido: Parameters<typeof sendConversationSlots>[1]) {
+    if (!selectedId || enviando) return
+    setEnviando(true)
+    setErroHorarios('')
+    try {
+      const r = await sendConversationSlots(selectedId, pedido)
+      if (r.escolherPaciente) {
+        setIrmaos(r.escolherPaciente)
+        return
+      }
+      setPainelHorarios(false)
+      setIrmaos(null)
+      acabamosDeEnviar.current = true
+      setMessages(await listConversationMessages(selectedId))
+      void load(true)
+    } catch (cause) {
+      setErroHorarios(cause instanceof Error ? cause.message : 'Não foi possível mandar os horários.')
     } finally {
       setEnviando(false)
     }
@@ -1931,10 +1970,23 @@ export default function Conversations({
                       o robo escreve como equipe e responde do proprio celular;
                       com a equipe tendo escrito, o robo fica calado por 12h e,
                       sem etapa aberta, nao havia botao nenhum para solta-lo.
-                      Na clinica real continua so com etapa presa: la, soltar o
-                      robo no meio de uma conversa da recepcao e ele falar por
-                      cima dela. */}
-                  {(conversation.bookingState || clinicId === CLINICA_DE_TESTE) && (
+
+                      Na clinica real (14/10/2026): nada em "aguardando a
+                      equipe" nem "no menu" (o mesmo criterio de etapa presa
+                      do cartao, mais acima), e o botao so para o dono da
+                      conta. A recepcao
+                      usava Destravar para "limpar" a conversa depois de
+                      responder - em 13/10, oito em doze minutos -, e
+                      destravar devolve a conversa ao robo: a Isabelle e a
+                      Susan responderam a pergunta da secretaria e receberam o
+                      menu e um texto pronto por cima. "Aguardando a equipe"
+                      nao e robo preso, e a conversa esperando quem a esta
+                      atendendo; etapa de agendamento parada vence sozinha em
+                      24h. Para encerrar, o caminho e Concluir. */}
+                  {(clinicId === CLINICA_DE_TESTE ||
+                    (conversation.bookingState &&
+                      conversation.bookingState !== 'atendente' &&
+                      conversation.bookingState !== 'menu')) && (
                     <div className="mt-2 flex items-center justify-between gap-2 rounded-[12px] bg-[#f6f4f1] px-2.5 py-1.5">
                       <span className="truncate text-[9px] font-bold text-slate-500">
                         Robô:{' '}
@@ -1942,20 +1994,22 @@ export default function Conversations({
                           ? (ETAPA_DO_ROBO[conversation.bookingState] ?? conversation.bookingState)
                           : 'conta de teste'}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => void destravar(conversation.id)}
-                        disabled={destravando === conversation.id}
-                        title={
-                          conversation.bookingState
-                            ? 'Zera a etapa do robô. Não apaga mensagens nem consultas.'
-                            : 'Conta de teste: devolve a conversa ao robô agora, mesmo com a equipe tendo escrito. Não apaga mensagens nem consultas.'
-                        }
-                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white px-2 py-1 text-[9px] font-extrabold text-[#081b2c] transition hover:bg-[#081b2c] hover:text-white disabled:opacity-40"
-                      >
-                        <RotateCcw className="h-3 w-3" />
-                        {destravando === conversation.id ? 'Soltando...' : 'Destravar'}
-                      </button>
+                      {(souDono || clinicId === CLINICA_DE_TESTE) && (
+                        <button
+                          type="button"
+                          onClick={() => void destravar(conversation.id)}
+                          disabled={destravando === conversation.id}
+                          title={
+                            conversation.bookingState
+                              ? 'Zera a etapa do robô. Não apaga mensagens nem consultas.'
+                              : 'Conta de teste: devolve a conversa ao robô agora, mesmo com a equipe tendo escrito. Não apaga mensagens nem consultas.'
+                          }
+                          className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white px-2 py-1 text-[9px] font-extrabold text-[#081b2c] transition hover:bg-[#081b2c] hover:text-white disabled:opacity-40"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          {destravando === conversation.id ? 'Soltando...' : 'Destravar'}
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -2405,6 +2459,20 @@ export default function Conversations({
                           e.target.value = ''
                         }}
                       />
+                      {painelHorarios && lugares && lugares.length > 0 && (
+                        <MandarHorarios
+                          lugares={lugares}
+                          enviando={enviando}
+                          erro={erroHorarios}
+                          pacientes={irmaos}
+                          onEnviar={(pedido) => void enviarHorarios(pedido)}
+                          onFechar={() => {
+                            setPainelHorarios(false)
+                            setErroHorarios('')
+                            setIrmaos(null)
+                          }}
+                        />
+                      )}
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                         <p className="text-[9px] font-semibold text-slate-400">
                           Enter envia · Shift+Enter quebra linha
@@ -2423,6 +2491,24 @@ export default function Conversations({
                           <ListIcon className="h-3.5 w-3.5" />
                           Enviar menu de opções
                         </button>
+                        {/* Mandar horarios (14/10/2026): no lugar de digitar a
+                            lista de horarios e marcar depois na Agenda. */}
+                        {lugares && lugares.length > 0 && (
+                          <button
+                            type="button"
+                            disabled={enviando}
+                            onClick={() => setPainelHorarios((aberto) => !aberto)}
+                            className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] font-extrabold transition disabled:opacity-40 ${
+                              painelHorarios
+                                ? 'border-[#2f7fc1]/40 bg-[#f1f7fd] text-[#1f4f78]'
+                                : 'border-[#081b2c]/10 bg-white text-slate-600 hover:border-[#081b2c]/25 hover:text-[#081b2c]'
+                            }`}
+                            title="Manda a lista de dias e horários livres; a família toca e o robô marca a consulta"
+                          >
+                            <CalendarClock className="h-3.5 w-3.5" />
+                            Mandar horários
+                          </button>
+                        )}
                         {/* O cadastro que ficou pela metade.
                             Quem marca e toca em "Voltar ao menu" no meio das
                             perguntas fica com consulta e ficha vazia, e a

@@ -2331,6 +2331,37 @@ export async function sendConversationMenu(conversationId: string) {
 }
 
 /**
+ * Manda os horarios livres de uma unidade pela lista tocavel do robo
+ * (14/10/2026, botao "Mandar horarios"). A familia toca no dia e no horario,
+ * e o robo marca a consulta.
+ *
+ * Com irmaos no mesmo telefone e sem paciente escolhido, nada e enviado:
+ * volta a lista para a equipe escolher de quem e a consulta.
+ */
+export type PedidoDeHorarios = {
+  /** Id da unidade, ou 'telemedicina'. */
+  unidade: string
+  de?: string | null
+  ate?: string | null
+  pacienteId?: string | null
+}
+
+export async function sendConversationSlots(
+  conversationId: string,
+  pedido: PedidoDeHorarios,
+): Promise<{ escolherPaciente?: { id: string; nome: string }[] }> {
+  const { data, error } = await supabase.functions.invoke('whatsapp-reply', {
+    body: { conversationId, horarios: pedido },
+  })
+  if (error) {
+    throw new Error(await motivoDaFuncao(error, data, 'Não foi possível mandar os horários.'))
+  }
+  const resposta = data as { error?: string; escolherPaciente?: { id: string; nome: string }[] } | null
+  if (resposta?.error) throw new Error(resposta.error)
+  return { escolherPaciente: resposta?.escolherPaciente }
+}
+
+/**
  * Refaz as perguntas do cadastro na conversa, a pedido da equipe.
  *
  * Para quem marcou e abandonou a ficha: em vez de ligar atrás do CPF, a

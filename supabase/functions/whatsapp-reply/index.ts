@@ -1,5 +1,5 @@
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
-import { iniciarQuestionario, mostrarMenu } from '../_shared/atendimento.ts'
+import { iniciarQuestionario, mostrarMenu, oferecerHorarios } from '../_shared/atendimento.ts'
 import { montarConteudo } from '../_shared/conteudo.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
@@ -62,6 +62,14 @@ type ReplyRequest = {
    * a ficha: a recepcao dispara pelo botao em vez de ligar.
    */
   questionario?: boolean
+  /**
+   * Em vez de texto, manda os horarios livres de uma unidade, como lista
+   * tocavel do robo (14/10/2026, botao "Mandar horarios"). A familia toca no
+   * dia e no horario e o robo marca. `unidade` e o id, ou 'telemedicina';
+   * `de`/`ate` (AAAA-MM-DD) limitam os dias; `pacienteId` diz de quem e a
+   * consulta quando ha irmaos no mesmo telefone.
+   */
+  horarios?: { unidade?: string; de?: string | null; ate?: string | null; pacienteId?: string | null }
 }
 
 Deno.serve(async (req) => {
@@ -88,6 +96,7 @@ Deno.serve(async (req) => {
     }
     const querMenu = body.menu === true
     const querQuestionario = body.questionario === true
+    const querHorarios = Boolean(body.horarios?.unidade)
     let texto = (body.text ?? '').trim()
     if (!body.conversationId) return json({ error: 'Conversa não informada.' }, 400)
 
@@ -115,7 +124,7 @@ Deno.serve(async (req) => {
     // questionario chegam aqui sem texto de proposito: quem monta a mensagem e
     // o robo, mais abaixo. Sem esta ressalva o botao Questionario batia nesta
     // linha e voltava "Escreva a mensagem antes de enviar" sem nunca enviar.
-    if (!texto && !querMenu && !querQuestionario && !arquivo) {
+    if (!texto && !querMenu && !querQuestionario && !querHorarios && !arquivo) {
       return json({ error: 'Escreva a mensagem antes de enviar.' }, 400)
     }
     if (texto.length > LIMITE_CARACTERES) {
@@ -274,6 +283,51 @@ Deno.serve(async (req) => {
     const token = chaveDoWhatsApp(settings.whatsapp_phone_number_id)
     if (!token) return json({ error: 'Token do WhatsApp não configurado.', code: 'NO_TOKEN' }, 503)
 
+    // Horarios livres pela lista do robo (14/10/2026). Ver oferecerHorarios.
+    if (querHorarios && body.horarios) {
+      // De quem e a consulta: o que a equipe escolheu; sem escolha, o unico
+      // paciente deste telefone (mesma busca do webhook e do questionario).
+      // Com irmaos e sem escolha, nada sai: a tela pergunta de quem e, porque
+      // marcar no irmao errado e o tipo de erro que so aparece no consultorio.
+      let pacienteId = body.horarios.pacienteId ?? null
+      if (pacienteId) {
+        const { data: daClinica } = await admin
+          .from('patients')
+          .select('id')
+          .eq('id', pacienteId)
+          .eq('clinic_id', visivel.clinic_id)
+          .maybeSingle()
+        if (!daClinica) return json({ error: 'Paciente não encontrado nesta clínica.', code: 'PACIENTE' }, 400)
+      } else {
+        const { data: fichas } = await admin
+          .from('patients')
+          .select('id,name')
+          .eq('clinic_id', visivel.clinic_id)
+          .is('archived_at', null)
+          .in('phone_digits', variantesDoTelefone(visivel.wa_id ?? ''))
+          .order('name')
+        const doTelefone = (fichas ?? []) as { id: string; name: string }[]
+        if (doTelefone.length > 1) {
+          return json({ escolherPaciente: doTelefone.map((p) => ({ id: p.id, nome: p.name })) })
+        }
+        pacienteId = doTelefone[0]?.id ?? visivel.patient_id ?? null
+      }
+
+      const oferta = await oferecerHorarios(admin, visivel.clinic_id, visivel.id, {
+        unidade: String(body.horarios.unidade),
+        de: body.horarios.de ?? null,
+        ate: body.horarios.ate ?? null,
+        pacienteId,
+      })
+      if ('erro' in oferta) return json({ error: oferta.erro, code: 'SEM_HORARIO' }, 409)
+      texto = oferta.resultado.resposta
+      toques = oferta.resultado.lista
+        ? { lista: oferta.resultado.lista }
+        : oferta.resultado.botoes
+          ? { botoes: oferta.resultado.botoes }
+          : undefined
+    }
+
     const graphVersion = Deno.env.get('META_GRAPH_VERSION')?.trim() || 'v25.0'
     const agora = new Date().toISOString()
 
@@ -354,7 +408,7 @@ Deno.serve(async (req) => {
         conversation_id: visivel.id,
         patient_id: visivel.patient_id,
         direction: 'outbound',
-        automatic: body.automatico === true || querMenu || querQuestionario,
+        automatic: body.automatico === true || querMenu || querQuestionario || querHorarios,
         message_type: tipoDaMensagem,
         body: corpoNoHistorico,
         status: 'failed',
@@ -373,7 +427,7 @@ Deno.serve(async (req) => {
         patient_id: visivel.patient_id,
         external_message_id: corpo?.messages?.[0]?.id ?? null,
         direction: 'outbound',
-        automatic: body.automatico === true || querMenu || querQuestionario,
+        automatic: body.automatico === true || querMenu || querQuestionario || querHorarios,
         message_type: tipoDaMensagem,
         body: corpoNoHistorico,
         status: 'accepted',

@@ -14,10 +14,14 @@
  * ainda nao teve resposta E e um pedido de nota fiscal, quem chegou agora
  * espera essa resposta sair (ate um limite) e so entao le a conversa.
  *
- * So nota fiscal, por decisao do Edu (01/10/2026): e o caso que aconteceu, e
- * o atraso fica restrito a ele. Outras rajadas ("Oi" + "quanto custa?")
- * continuam sendo lidas em paralelo - se um dia derem problema, basta tirar a
- * condicao `motivo` daqui.
+ * Ate 14/10/2026 era so nota fiscal (decisao de 01/10: o atraso ficava
+ * restrito ao caso que tinha acontecido). Entre 13 e 14/10 as outras rajadas
+ * deram problema tres vezes: "boa tarde!" + "Tudo bem?" recebeu dois menus
+ * (Lorenzo), a frase do site + "?" recebeu a agenda e o menu (Kalina), e duas
+ * linhas soltas receberam "Nao entendi" e "passei para a equipe" (Isabelle).
+ * O webhook agora espera em qualquer rajada (motivo = sempre), e o segundo
+ * pedaco que e so cumprimento ou pontuacao nem recebe resposta: ver
+ * complementoDaRajada e rajadaJaRespondida, abaixo.
  *
  * Regra pura, sem banco, para o teste cobrir (tests/rajada.test.mjs).
  */
@@ -50,4 +54,50 @@ export function precisaEsperar(
   // familia a toa.
   if (idade < 0 || idade >= JANELA_DA_RAJADA_MS) return false
   return motivo(String(ultima.corpo ?? ''))
+}
+
+/** Qualquer mensagem anterior justifica esperar (14/10/2026). */
+export const qualquerMensagem = () => true
+
+const CUMPRIMENTO = new Set([
+  'oi', 'oie', 'ola', 'opa', 'bom', 'boa', 'dia', 'tarde', 'noite', 'tudo', 'bem', 'como', 'vai', 'e',
+  'ai', 'td', 'tb', 'tbm', 'tambem', 'pessoal', 'doutor', 'dr', 'ok', 'certo',
+])
+
+/**
+ * O segundo pedaco de uma rajada que nao pede nada: "?", "Tudo bem?",
+ * "boa tarde!", um emoji. Responder a ele e mandar o menu (ou o "Nao
+ * entendi") de novo, logo abaixo da resposta que acabou de sair.
+ */
+export function complementoDaRajada(texto: string): boolean {
+  // Numero e escolha ("2", "1"), nunca enfeite.
+  if (/\d/.test(texto)) return false
+  const t = texto
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, ' ')
+    .trim()
+  if (!t) return true
+  return t.split(/\s+/).every((palavra) => CUMPRIMENTO.has(palavra))
+}
+
+export type MensagemRecente = {
+  direction: 'inbound' | 'outbound'
+  automatic?: boolean | null
+  criadaEm: string
+}
+
+/**
+ * A mensagem anterior da familia, de segundos atras, ja recebeu resposta do
+ * robo? `recentes` vem da mais nova para a mais antiga e NAO inclui a mensagem
+ * que acabou de chegar (o webhook le antes de grava-la).
+ */
+export function rajadaJaRespondida(recentes: MensagemRecente[], agora: number): boolean {
+  const resposta = recentes.findIndex((m) => m.direction === 'outbound')
+  if (resposta !== 0 || !recentes[0].automatic) return false
+  const pergunta = recentes.slice(1).find((m) => m.direction === 'inbound')
+  if (!pergunta) return false
+  const idade = agora - new Date(pergunta.criadaEm).getTime()
+  return idade >= 0 && idade < JANELA_DA_RAJADA_MS
 }

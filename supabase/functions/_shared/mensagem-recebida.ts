@@ -28,3 +28,17 @@ export function textoDosContatos(contatos: Contato[] | undefined): string {
   })
   return linhas.length ? `👤 Contato compartilhado\n${linhas.join('\n')}` : '👤 Contato compartilhado'
 }
+
+/**
+ * Figurinha nao recebe resposta do robo (14/10/2026).
+ *
+ * Depois do lembrete da secretaria, uma mae mandou uma figurinha e depois
+ * "Boa tarde, obrigada". A figurinha entrava como anexo: "Recebi o que voce
+ * enviou e ja avisei a nossa equipe: alguem vai olhar" - e a conversa
+ * acendia para a equipe abrir um emoji. Ela continua gravada (a equipe ve no
+ * historico); so nao puxa resposta nem pedido de atencao. A reacao (curtir
+ * uma mensagem) ja e ignorada antes, no webhook.
+ */
+export function semRespostaDoRobo(tipo: string | undefined | null): boolean {
+  return tipo === 'sticker'
+}

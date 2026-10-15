@@ -160,6 +160,11 @@ export class Simulacao {
     this.banco = new BancoFalso(bancoInicial(identidade, opcoes.agenda ?? identidade.agendaPadrao, familia, agora), {
       liberar_reservas_vencidas: () => 0,
       available_slots: (args) => this.horariosLivres(String(args.p_unit_id)),
+      available_slots_periodo: (args) =>
+        this.horariosLivres(String(args.p_unit_id), {
+          de: (args.p_de as string | null | undefined) ?? null,
+          ate: (args.p_ate as string | null | undefined) ?? null,
+        }),
     })
     this.banco.linhas('whatsapp_conversations').push({
       id: CONVERSA,
@@ -180,7 +185,7 @@ export class Simulacao {
   }
 
   /** O available_slots do banco falso: a agenda de agora menos o que ja foi marcado. */
-  horariosLivres(unidadeId: string): { slot_start: string; slot_end: string }[] {
+  horariosLivres(unidadeId: string, periodo?: { de: string | null; ate: string | null }): { slot_start: string; slot_end: string }[] {
     const b = this.banco
     return horariosLivres(
       {
@@ -192,6 +197,7 @@ export class Simulacao {
       },
       unidadeId,
       this.relogio(),
+      periodo,
     )
   }
 

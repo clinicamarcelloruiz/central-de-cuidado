@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia } from './atendimento.build.mjs'
+import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 import { montarMensagens } from './conteudo.build.mjs'
 
@@ -32,6 +32,9 @@ function fazerAdmin({
   consultasComFicha = [],
   // Horarios semanais cadastrados por unidade (so a contagem importa aqui).
   regrasPorUnidade = {},
+  // Horarios alem da agenda aberta: so a funcao com periodo os enxerga, como
+  // available_slots_periodo no banco (14/10/2026).
+  slotsAlemDaAgenda = {},
 }) {
   const conversa = {
     booking_state: null,
@@ -48,9 +51,14 @@ function fazerAdmin({
   // acontecia com a resposta ninguem via.
   const fichas = []
 
+  // O que o robo ja mandou nesta conversa, como o webhook grava. E daqui que
+  // ele confere se uma resposta pronta acabou de sair (jaMandada).
+  const enviadas = []
+
   const chain = (resultado) => ({
     select: () => chain(resultado),
     eq: (_col, valor) => chain(resultado._porId ? { ...resultado, single: resultado._porId(valor) } : resultado),
+    gte: () => chain(resultado),
     is: () => chain(resultado),
     in: () => chain(resultado),
     order: () => chain(resultado),
@@ -126,6 +134,9 @@ function fazerAdmin({
       // sozinho. Vazio por padrao - a maioria dos casos nao passa por aqui.
       if (tabela === 'bot_answers') {
         return { select: () => chain({ list: respostasProntas }) }
+      }
+      if (tabela === 'whatsapp_messages') {
+        return { select: () => chain({ list: [...enviadas].reverse() }) }
       }
       // Telemedicina: desligada por padrao, para os casos antigos continuarem
       // vendo so as unidades fisicas.
@@ -206,10 +217,22 @@ function fazerAdmin({
         }
         return { data: slotsPorUnidade[args.p_unit_id] ?? [], error: null }
       }
+      if (nome === 'available_slots_periodo') {
+        if (falharSlots) {
+          return { data: null, error: { code: '42501', message: 'permission denied for table clinics' } }
+        }
+        // Dia de Sao Paulo (UTC-3), como o banco compara.
+        const dia = (iso) => new Date(new Date(iso).getTime() - 3 * 3600 * 1000).toISOString().slice(0, 10)
+        const todos = [...(slotsPorUnidade[args.p_unit_id] ?? []), ...(slotsAlemDaAgenda[args.p_unit_id] ?? [])]
+        return {
+          data: todos.filter((h) => (!args.p_de || dia(h.slot_start) >= args.p_de) && (!args.p_ate || dia(h.slot_start) <= args.p_ate)),
+          error: null,
+        }
+      }
       throw new Error('rpc nao prevista: ' + nome)
     },
   }
-  return { admin, conversa, marcadas, canceladas, fichas }
+  return { admin, conversa, marcadas, canceladas, fichas, enviadas }
 }
 
 const TRES_UNIDADES = [
@@ -270,7 +293,7 @@ const VAZIO = Symbol('vazio')
 const SEXTA_23H = new Date('2026-10-10T02:00:00Z')
 
 async function caso(titulo, passos, opcoes = {}) {
-  const { admin, conversa, marcadas, canceladas, fichas } = fazerAdmin({
+  const { admin, conversa, marcadas, canceladas, fichas, enviadas } = fazerAdmin({
     unidades: opcoes.unidades ?? TRES_UNIDADES,
     slotsPorUnidade: opcoes.slots ?? SLOTS_CHEIOS,
     falharSlots: opcoes.falharSlots,
@@ -281,6 +304,7 @@ async function caso(titulo, passos, opcoes = {}) {
     colunasAusentes: opcoes.colunasAusentes ?? [],
     consultasComFicha: opcoes.fichas ?? [],
     regrasPorUnidade: opcoes.regras ?? {},
+    slotsAlemDaAgenda: opcoes.alemDaAgenda ?? {},
   })
 
   // A conversa começa como se o menu já tivesse aparecido alguma vez.
@@ -296,6 +320,9 @@ async function caso(titulo, passos, opcoes = {}) {
   // Conversa que ja estava no meio de uma etapa quando o caso comeca - por
   // exemplo, parada numa pergunta que deixou de fazer sentido.
   Object.assign(conversa, opcoes.estadoInicial ?? {})
+  // Algo que acontece antes da primeira mensagem, com o mesmo banco - a
+  // equipe mandando horarios pela tela, por exemplo.
+  if (opcoes.antes) await opcoes.antes({ admin, conversa })
 
   const transcricao = []
   let ultimoToque = { resposta: '', botoes: undefined, lista: undefined }
@@ -356,6 +383,7 @@ async function caso(titulo, passos, opcoes = {}) {
     })
 
     const resposta = r?.resposta ?? null
+    if (resposta) enviadas.push({ body: resposta, direction: 'outbound', automatic: true })
     // Auditoria de botoes (01/10/2026), em TODA mensagem de TODO caso: o que
     // oferece opcao numerada tem de chegar com botao ou lista, depois de
     // passar pelo envio de verdade (montarMensagens), e caber no limite da
@@ -1239,6 +1267,16 @@ const RESPOSTAS = [
   },
 ]
 
+// Quatro assuntos diferentes, para o limite da fila ser contado com
+// respostas DIFERENTES: desde 14/10/2026 a mesma resposta nao sai duas vezes
+// em meia hora (jaMandada), e "Aceitam cartao?" logo depois do valor - que ja
+// fala de cartao - fica em silencio.
+const RESPOSTAS_DA_FILA = [
+  ...RESPOSTAS,
+  { id: 'r3', subject: 'Endereço', keywords: ['endereco', 'onde', 'fica'], answer: '📍 Av. Ana Costa, 228, 20º andar, Gonzaga.' },
+  { id: 'r4', subject: 'Idade', keywords: ['idade', 'anos', 'adolescente'], answer: 'Atendemos crianças e adolescentes de 0 a 18 anos.' },
+]
+
 await caso('Pergunta de valor recebe a resposta pronta', [
   ['Quanto custa a consulta?', 'custa R$ 450,00'],
 ], { respostasProntas: RESPOSTAS })
@@ -1290,9 +1328,9 @@ await caso('Esperando a equipe: três respostas prontas, depois silêncio', [
   ['3', 'direcionando você'],
   ['Vocês atendem convênio?', ['particular', 'continua na fila']],
   ['Qual o valor?', ['R$ 450,00', 'continua na fila']],
-  ['Aceitam cartão?', 'continua na fila'],
-  ['E o reembolso do plano?', null],
-], { respostasProntas: RESPOSTAS })
+  ['Onde fica o consultório?', ['Ana Costa', 'continua na fila']],
+  ['Atende até que idade?', null],
+], { respostasProntas: RESPOSTAS_DA_FILA })
 
 // A resposta pronta nao tira a pessoa da fila: a etapa continua 'atendente' e a
 // equipe continua devendo resposta. Por isso o "bom dia" seguinte cai no
@@ -1494,10 +1532,10 @@ await caso('Urgência responde mesmo com o limite estourado', [
   ['3', 'direcionando você'],
   ['Vocês atendem convênio?', 'continua na fila'],
   ['Qual o valor?', 'continua na fila'],
-  ['Aceitam cartão?', 'continua na fila'],
-  ['E o reembolso do plano?', null],
+  ['Onde fica o consultório?', 'continua na fila'],
+  ['Atende até que idade?', null],
   ['é urgente, ele está passando mal', 'urgente'],
-], { respostasProntas: RESPOSTAS })
+], { respostasProntas: RESPOSTAS_DA_FILA })
 
 // O assunto marcado para perguntar a unidade nao responde o texto dele: faz a
 // mesma pergunta da opcao 1 e entrega o texto do lugar escolhido.
@@ -3396,6 +3434,8 @@ await caso('Valor escrito em número casa com a resposta de valor', [
 for (const frase of [
   'Oie. No momento, estou fora do meu horário de atendimento. Retorno sua mensagem assim que possível 😊',
   'Cinthia Esteves agradece seu contato. Como podemos ajudar?',
+  // Natalia, 10/10/2026: a imobiliaria dela respondeu ao acompanhamento.
+  'Olá! Seja muito bem-vindo(a). Aqui é *Natália*, proprietária da *Imobiliária*. 🏠 Agradeço imensamente o seu contato. Em breve eu ou um membro da nossa equipe entraremos em contato para lhe atender com toda atenção. Até já!',
 ]) {
   await caso(`Resposta automática da família não recebe nada: ${frase.slice(0, 30)}`, [
     ['Oi', 'Como podemos ajudar'],
@@ -3412,10 +3452,26 @@ for (const [frase, esperado] of [
   ['vocês estão fora do horário de atendimento?', false],
   ['retorno para o Anthony', false],
   ['Esta é uma mensagem automática', true],
+  ['Agradeço o contato! Retornaremos em breve.', true],
+  // Mae agradecendo de verdade nao pode ser calada.
+  ['Agradeço muito pela consulta, ele melhorou bastante', false],
+  ['obrigada, a gente entra em contato depois', false],
 ]) {
   if (respostaAutomaticaDaFamilia(frase) === esperado) passou++
   else falhas.push(`respostaAutomaticaDaFamilia("${frase}") deveria ser ${esperado}`)
 }
+
+// Natalia: a resposta automatica chegou logo depois do acompanhamento. Nao e
+// recado sobre a crianca: nem resposta, nem equipe chamada.
+await caso('Resposta automática depois do acompanhamento não vira recado', [
+  ['Olá! Seja muito bem-vindo(a). Agradeço imensamente o seu contato. Em breve eu ou um membro da nossa equipe entraremos em contato.', VAZIO],
+], {
+  posAcompanhamento: true,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (!ultimoToque.atencao) passou++
+    else falhas.push(`${titulo} | chamou a equipe: ${ultimoToque.atencao}`)
+  },
+})
 
 // Veronica e Dani: atraso e chegada no dia da consulta.
 await caso('"Vou atrasar" no dia da consulta vai para a equipe, sem menu', [
@@ -3580,6 +3636,152 @@ await caso('Campos: resposta pronta com {valores} lista cada atendimento', [
     verificar: semCampoCru(titulo),
   })
   exigirEvento(eventos, 'campo_sem_valor', titulo)
+}
+
+// ---------------------------------------------------------------
+// Mandar horarios (a equipe pela tela, 14/10/2026)
+// ---------------------------------------------------------------
+// A secretaria escolhe a unidade e o periodo; a familia toca no dia e no
+// horario e o robo marca. PARA PROVAR: em perguntarHorario, tire a segunda
+// busca ("Dia alem da agenda aberta") e o caso do dia 27/11 falha; em
+// oferecerHorarios, troque `periodo` por undefined e o caso "ate 02/09" falha.
+
+const PEDIDOS = []
+const pedirHorarios = (pedido) => async ({ admin }) => {
+  const r = await oferecerHorarios(admin, 'c1', 'conv1', pedido)
+  PEDIDOS.push(r)
+}
+
+{
+  PEDIDOS.length = 0
+  const r = await caso('Mandar horários: a família toca no dia e no horário e a consulta fica marcada', [
+    ['1', ['Horários de segunda, 31/08', '08:00']],
+    ['1', 'Consulta marcada'],
+  ], { antes: pedirHorarios({ unidade: 'u-santos' }), pacientes: [ANA] })
+  const enviado = PEDIDOS[0]?.resultado
+  if (enviado?.resposta.includes('Separei os horários') && enviado.resposta.includes('Datas disponíveis em Liferty · Santos') && enviado.lista) passou++
+  else falhas.push(`Mandar horários | mensagem da equipe errada: ${JSON.stringify(PEDIDOS[0]).slice(0, 160)}`)
+  if (r.marcadas.length === 1 && r.marcadas[0].unit_id === 'u-santos') passou++
+  else falhas.push(`Mandar horários | consulta não marcada: ${JSON.stringify(r.marcadas)}`)
+}
+
+{
+  // A secretaria escreveu antes ("vou verificar, só um minuto"): a conversa e
+  // humana, mas a lista foi ela que mandou - o toque da familia tem de marcar.
+  PEDIDOS.length = 0
+  const r = await caso('Mandar horários: com a equipe conversando, o toque ainda marca', [
+    ['1', '08:00'],
+    ['1', 'Consulta marcada'],
+  ], { antes: pedirHorarios({ unidade: 'u-santos' }), pacientes: [ANA], podeIniciarMenu: false })
+  if (r.marcadas.length === 1) passou++
+  else falhas.push('Mandar horários com a equipe conversando | não marcou')
+}
+
+{
+  PEDIDOS.length = 0
+  await caso('Mandar horários com período: só os dias pedidos', [], {
+    antes: pedirHorarios({ unidade: 'u-santos', de: '2026-09-01', ate: '2026-09-02' }),
+  })
+  const texto = PEDIDOS[0]?.resultado?.resposta ?? ''
+  if (texto.includes('01/09') && texto.includes('02/09') && !texto.includes('31/08') && !texto.includes('07/09')) passou++
+  else falhas.push(`Mandar horários com período | dias errados: ${texto.slice(0, 200)}`)
+}
+
+{
+  // A Mariah: o Dr. pediu retorno em 40 dias, "dia 27/11" - fora da agenda aberta.
+  PEDIDOS.length = 0
+  const r = await caso('Mandar horários de um dia além da agenda aberta (27/11)', [
+    ['2', 'Consulta marcada'],
+  ], {
+    antes: pedirHorarios({ unidade: 'u-santos', de: '2026-11-27', ate: '2026-11-27' }),
+    alemDaAgenda: {
+      'u-santos': ['11:00', '11:40', '12:20'].map((h) => ({ slot_start: `2026-11-27T${h}:00Z`, slot_end: `2026-11-27T${h}:40Z` })),
+    },
+    pacientes: [ANA],
+  })
+  const texto = PEDIDOS[0]?.resultado?.resposta ?? ''
+  if (texto.includes('Horários de sexta, 27/11') && texto.includes('08:40')) passou++
+  else falhas.push(`Mandar horários 27/11 | lista errada: ${texto.slice(0, 200)}`)
+  if (r.marcadas.length === 1 && String(r.marcadas[0].starts_at).startsWith('2026-11-27T11:40')) passou++
+  else falhas.push(`Mandar horários 27/11 | não marcou o horário tocado: ${JSON.stringify(r.marcadas).slice(0, 160)}`)
+}
+
+{
+  PEDIDOS.length = 0
+  const r = await caso('Mandar horários sem vaga no período não envia nada', [], {
+    antes: pedirHorarios({ unidade: 'u-andre', de: '2026-09-01', ate: '2026-09-05' }),
+  })
+  const erro = PEDIDOS[0]?.erro ?? ''
+  if (erro.includes('Não há horário livre em Livance · Santo André entre 01/09 e 05/09') && r.conversa.booking_state !== 'aguardando_dia') passou++
+  else falhas.push(`Mandar horários sem vaga | ${JSON.stringify(PEDIDOS[0])} estado=${r.conversa.booking_state}`)
+}
+
+{
+  PEDIDOS.length = 0
+  await caso('Mandar horários: data invertida e unidade inexistente são recusadas', [], {
+    antes: async ({ admin }) => {
+      PEDIDOS.push(await oferecerHorarios(admin, 'c1', 'conv1', { unidade: 'u-santos', de: '2026-09-05', ate: '2026-09-01' }))
+      PEDIDOS.push(await oferecerHorarios(admin, 'c1', 'conv1', { unidade: 'nao-existe' }))
+    },
+  })
+  if (PEDIDOS[0]?.erro && PEDIDOS[1]?.erro) passou++
+  else falhas.push(`Mandar horários recusas | ${JSON.stringify(PEDIDOS)}`)
+}
+
+// ---------------------------------------------------------------
+// Repeticao e despedida (Kalina, 14/10/2026)
+// ---------------------------------------------------------------
+// PARA PROVAR: em atendimento.ts, faca jaMandada devolver sempre false, ou
+// tire as chamadas a despedida(). Os casos abaixo falham.
+
+await caso('Kalina: despedida na fila não repete convênios nem oferece a agenda', [
+  ['Oi', 'Como podemos ajudar'],
+  ['9', 'direcionando você'],
+  ['Queria saber se atende o convênio da Petrobrás', ['particular', 'continua na fila']],
+  ['Ok obrigada vou tentar achar um pelo convênio, se não conseguir, volto pra marcar uma consulta', 'Combinado'],
+], {
+  respostasProntas: RESPOSTAS,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (/particular|Marcar uma consulta/.test(ultimoToque.resposta)) falhas.push(`${titulo} | repetiu: ${ultimoToque.resposta.slice(0, 80)}`)
+    else passou++
+  },
+})
+
+await caso('Na fila, a mesma resposta pronta não sai duas vezes', [
+  ['Oi', 'Como podemos ajudar'],
+  ['3', 'direcionando você'],
+  ['Vocês atendem convênio?', 'continua na fila'],
+  ['e convênio da Unimed?', null],
+], { respostasProntas: RESPOSTAS })
+
+await caso('Sem fila, a pergunta repetida aponta para a resposta de cima', [
+  ['Oi', 'Como podemos ajudar'],
+  ['Qual o valor?', 'R$ 450,00'],
+  ['quanto custa a consulta?', 'logo acima'],
+], {
+  respostasProntas: RESPOSTAS,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.resposta.includes('R$ 450,00')) falhas.push(`${titulo} | repetiu o texto inteiro`)
+    else passou++
+  },
+})
+
+await caso('Despedida com o menu na tela recebe resposta curta', [
+  ['Oi', 'Como podemos ajudar'],
+  ['Ok, obrigada! Vou conversar com o pai dele e volto pra marcar', 'Combinado'],
+], { respostasProntas: RESPOSTAS })
+
+// Pergunta nao e despedida, mesmo com "vou ver".
+for (const [frase, esperado] of [
+  ['Ok obrigada vou tentar achar um pelo convênio, se não conseguir, volto pra marcar uma consulta', true],
+  ['Obrigada, depois eu volto', true],
+  ['vou ver com meu marido e te falo, obrigada', true],
+  ['Obrigada! Vou marcar agora', false],
+  ['ok, vou tentar. Qual o valor?', false],
+  ['volto pra marcar', false],
+]) {
+  if (despedida(frase) === esperado) passou++
+  else falhas.push(`despedida("${frase}") deveria ser ${esperado}`)
 }
 
 // Texto antigo, com o valor escrito a mao: igual a antes, sem ler valor nenhum.
