@@ -5,10 +5,21 @@ import { useDialogos } from '@/components/dialogos-contexto'
 import {
   deleteRespostaPronta,
   getCurrentMembership,
+  getTelemedicina,
   listRespostasProntas,
+  listUnits,
   saveRespostaPronta,
   type RespostaPronta,
 } from '@/lib/repository'
+import { lugaresDoRobo } from '@/lib/lugares'
+import {
+  CAMPOS,
+  preencherCampos,
+  problemasDoTexto,
+  temCampo,
+  valoresEscritos,
+  type Lugar,
+} from '../../supabase/functions/_shared/campos-do-texto.ts'
 
 const campo =
   'mt-1.5 w-full rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5 text-xs font-semibold text-[#081b2c] outline-none transition placeholder:font-normal placeholder:text-slate-300 focus:border-[#2f7fc1] focus:bg-white focus:ring-4 focus:ring-[#2f7fc1]/10'
@@ -48,6 +59,10 @@ export default function RespostasProntas() {
   const [carregando, setCarregando] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [salvo, setSalvo] = useState(false)
+  // Os atendimentos com valor e endereco, para conferir e mostrar {valores}.
+  // Nulo = nao deu para ler; ai a tela nao confere nem mostra previa, mas
+  // tambem nao trava (o robo tem a propria rede, ver comCampos).
+  const [lugares, setLugares] = useState<Lugar[] | null>(null)
 
   useEffect(() => {
     let vivo = true
@@ -58,6 +73,12 @@ export default function RespostasProntas() {
         setClinicId(membership.clinicId)
         const lista = await listRespostasProntas(membership.clinicId)
         if (vivo) setItens(lista)
+        try {
+          const [units, tele] = await Promise.all([listUnits(membership.clinicId), getTelemedicina(membership.clinicId)])
+          if (vivo) setLugares(lugaresDoRobo(units, tele))
+        } catch (erro) {
+          console.warn('Nao consegui ler valores e enderecos para conferir {valores}', erro)
+        }
       } catch (causa) {
         if (vivo) avisar(causa instanceof Error ? causa.message : 'Não foi possível carregar as respostas.', 'erro')
       } finally {
@@ -109,6 +130,16 @@ export default function RespostasProntas() {
       avisar('Um assunto ligado precisa de nome, palavras e resposta. Desligue-o ou complete os campos.', 'erro')
       return
     }
+    // Campo que o robo nao conseguiria preencher: nada e salvo, o que esta no
+    // ar continua igual (pedido do Edu, 14/10/2026).
+    const comProblema = validos.find((item) => problemasDe(item).length > 0)
+    if (comProblema) {
+      avisar(
+        `Não salvei. Em "${comProblema.assunto || 'um assunto'}": ${problemasDe(comProblema)[0]} As respostas no ar continuam as mesmas.`,
+        'erro',
+      )
+      return
+    }
 
     setSalvando(true)
     try {
@@ -128,6 +159,14 @@ export default function RespostasProntas() {
     } finally {
       setSalvando(false)
     }
+  }
+
+  // Resposta pronta vale para qualquer lugar: so {valores} e {enderecos}.
+  // Desligada tambem confere - ligar depois nao pode trazer o problema junto.
+  function problemasDe(item: Item) {
+    return problemasDoTexto(item.resposta, 'geral', null, lugares ?? [])
+      // Sem a lista (falha ao ler), confere so o nome do campo.
+      .filter((p) => lugares !== null || !p.startsWith('Falta'))
   }
 
   const visiveis = itens.map((item, indice) => ({ item, indice })).filter(({ item }) => !item.removida)
@@ -226,18 +265,52 @@ export default function RespostasProntas() {
                   className={`${campo} min-h-[110px] resize-y font-medium leading-relaxed`}
                   value={item.resposta}
                   onChange={(e) => mudar(indice, { resposta: e.target.value })}
-                  placeholder="A consulta particular custa R$ ..."
+                  placeholder={'💰 Valores da consulta:\n{valores}'}
                   maxLength={1024}
                 />
-                <span className="mt-1 block text-right text-[9px] font-bold text-slate-300">
-                  {item.resposta.length}/1024
-                </span>
               </label>
+              <div className="mt-1 flex flex-wrap items-center gap-1">
+                <span className="mr-1 text-[9px] font-bold text-slate-400">Inserir:</span>
+                {CAMPOS.filter((c) => c.onde.includes('geral')).map((c) => (
+                  <button
+                    key={c.nome}
+                    type="button"
+                    onClick={() =>
+                      mudar(indice, { resposta: `${item.resposta.replace(/\s+$/, '')}${item.resposta.trim() ? '\n' : ''}{${c.nome}}` })
+                    }
+                    title={c.ajuda}
+                    className="rounded-md border border-[#2f7fc1]/20 bg-[#f1f7fd] px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#1f4f78] transition hover:bg-[#e2effa]"
+                  >
+                    {`{${c.nome}}`}
+                  </button>
+                ))}
+                <span className="ml-auto text-[9px] font-bold text-slate-300">{item.resposta.length}/1024</span>
+              </div>
+              {problemasDe(item).map((p) => (
+                <p key={p} className="mt-1.5 text-[10px] font-bold text-red-600">
+                  {p}
+                </p>
+              ))}
+              {valoresEscritos(item.resposta).length > 0 && (
+                <p className="mt-1.5 text-[10px] font-semibold leading-relaxed text-[#b54708]">
+                  Esta resposta tem valor escrito à mão ({valoresEscritos(item.resposta).map((v) => v.trecho).join(', ')}).
+                  Quando o preço mudar, ele não acompanha: troque pela lista {'{valores}'}, que pega o valor do cartão de
+                  cada unidade.
+                </p>
+              )}
+              {lugares && temCampo(item.resposta) && problemasDe(item).length === 0 && (
+                <div className="mt-2">
+                  <span className={rotulo}>Como chega no WhatsApp</span>
+                  <p className="mt-1 whitespace-pre-wrap rounded-[13px] bg-[#e7f0ed] px-3.5 py-2.5 text-[11px] leading-relaxed text-[#081b2c]">
+                    {preencherCampos(item.resposta, null, lugares).texto}
+                  </p>
+                </div>
+              )}
 
-              {/* Para o que muda de unidade para unidade - o valor, sobretudo.
-                  Ligado, o robo pergunta onde e o atendimento e responde o
-                  texto de "Informacoes por unidade" daquele lugar; o texto
-                  acima vira reserva. */}
+              {/* Para o que muda de unidade para unidade - o endereco, o que
+                  levar. Ligado, o robo responde o texto acima e pergunta onde e
+                  o atendimento, para mandar o texto do cartao daquela unidade
+                  (Agenda > Configuracao > Unidades). */}
               <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-[14px] border border-[#081b2c]/[0.06] bg-[#f8f7f4] px-3.5 py-3">
                 <input
                   type="checkbox"
@@ -246,9 +319,8 @@ export default function RespostasProntas() {
                   className="mt-0.5 h-3.5 w-3.5 accent-[#2f7fc1]"
                 />
                 <span className="text-[10px] font-bold leading-relaxed text-slate-500">
-                  Antes de responder, perguntar onde é o atendimento (Santos, São Paulo ou Telemedicina) e enviar
-                  o texto de "Informações por unidade" daquele lugar. A resposta acima só é usada se a clínica
-                  tiver um lugar só.
+                  Depois da resposta, perguntar onde é o atendimento (Santos, São Paulo ou Telemedicina) para
+                  enviar o texto daquela unidade, que fica no cartão dela em Agenda → Configuração → Unidades.
                 </span>
               </label>
             </div>

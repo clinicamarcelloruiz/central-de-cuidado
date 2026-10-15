@@ -23,6 +23,7 @@ import { dataDeNascimentoIso } from './datas.ts'
 import type { adminClient } from './whatsapp.ts'
 import { cadastrarDaFicha, type ConsultaParaCadastro } from './cadastro.ts'
 import { quemAtende } from './quem-atende.ts'
+import { preencherCampos, temCampo, type Lugar } from './campos-do-texto.ts'
 import {
   acharResposta,
   assuntoClinico,
@@ -959,6 +960,81 @@ async function opcoesDeAtendimento(admin: Admin, clinicId: string): Promise<Unid
   return tele.ativa && unidades.length > 0 ? [...unidades, UNIDADE_TELE] : unidades
 }
 
+/**
+ * Valor da consulta de cada unidade (coluna nova, 14/10/2026).
+ *
+ * Consulta propria e try/catch, como toda coluna recente: sem ela, quem perde
+ * e so o {valor} (a linha cai e o painel acusa), e nao a lista de unidades -
+ * que e o que derrubou a opcao 1 em 19/09.
+ */
+async function valoresDasUnidades(admin: Admin, clinicId: string): Promise<Map<string, number>> {
+  try {
+    const { data, error } = await admin.from('clinic_units').select('id,price_cents').eq('clinic_id', clinicId)
+    if (error) throw error
+    const valores = new Map<string, number>()
+    for (const u of (data ?? []) as { id: string; price_cents?: number | null }[]) {
+      if (u.price_cents) valores.set(u.id, u.price_cents)
+    }
+    return valores
+  } catch (erro) {
+    console.warn('Sem clinic_units.price_cents; os campos {valor} ficam sem preencher', erro)
+    return new Map()
+  }
+}
+
+async function valorDaTelemedicina(admin: Admin, clinicId: string): Promise<number | null> {
+  try {
+    const { data, error } = await admin
+      .from('clinic_settings')
+      .select('telemedicine_price_cents')
+      .eq('clinic_id', clinicId)
+      .maybeSingle()
+    if (error) throw error
+    return (data as { telemedicine_price_cents?: number | null } | null)?.telemedicine_price_cents || null
+  } catch (erro) {
+    console.warn('Sem clinic_settings.telemedicine_price_cents; o {valor} da telemedicina fica sem preencher', erro)
+    return null
+  }
+}
+
+/** Os atendimentos que o robo oferece, com valor e endereco, para os campos. */
+async function lugaresComValor(admin: Admin, clinicId: string): Promise<Lugar[]> {
+  const [lugares, valores, tele] = await Promise.all([
+    opcoesDeAtendimento(admin, clinicId),
+    valoresDasUnidades(admin, clinicId),
+    valorDaTelemedicina(admin, clinicId),
+  ])
+  return lugares.map((u) =>
+    u.id === TELE_ID
+      ? { id: u.id, nome: u.name, endereco: '', valorCentavos: tele, telemedicina: true }
+      : { id: u.id, nome: u.name, endereco: u.address ?? '', valorCentavos: valores.get(u.id) ?? null },
+  )
+}
+
+/**
+ * Troca {valor}, {endereco}, {valores}... pelos dados de agora.
+ *
+ * So le o banco quando o texto tem campo: os textos antigos, com o valor
+ * escrito a mao, passam direto e custam o mesmo de antes.
+ *
+ * Campo que nao deu para preencher NAO sai cru (a linha cai, ver
+ * preencherCampos) e GRITA: aviso no log e evento 'campo_sem_valor', que
+ * aparece em Numeros do WhatsApp. O lembrete parado tres semanas em silencio
+ * ensinou que erro que ninguem ve e o pior que existe.
+ */
+async function comCampos(admin: Admin, clinicId: string, texto: string, lugarId: string | null): Promise<string> {
+  if (!temCampo(texto)) return texto
+  const lugares = await lugaresComValor(admin, clinicId)
+  const lugar = lugarId ? (lugares.find((l) => l.id === lugarId) ?? null) : null
+  const pronto = preencherCampos(texto, lugar, lugares)
+  if (pronto.faltando.length > 0) {
+    const detalhe = pronto.faltando.join('; ')
+    console.warn(`Campo sem dado no texto do robo (${clinicId}): ${detalhe}`)
+    registrar('campo_sem_valor', detalhe.slice(0, 120))
+  }
+  return pronto.texto
+}
+
 async function fusoDaClinica(admin: Admin, clinicId: string) {
   const { data } = await admin
     .from('clinics')
@@ -1285,10 +1361,16 @@ async function responderInformacoes(
   // e "telefones" com o mesmo peso. Traco leve de proposito: o pesado (━) ja e
   // usado no comprovante da consulta, e dois riscos iguais em mensagens
   // diferentes tiram o significado do primeiro.
-  const corpo =
+  // Os campos ({valor}, {endereco}...) sao trocados aqui, onde se sabe de que
+  // lugar se fala; o fecho vai junto porque e colado no texto deste lugar.
+  const corpo = await comCampos(
+    admin,
+    clinicId,
     informacoes && fecho
       ? `${informacoes}\n\n──────────────\n\n${fecho}`
-      : [informacoes, fecho].filter(Boolean).join('\n\n')
+      : [informacoes, fecho].filter(Boolean).join('\n\n'),
+    lugarId || null,
+  )
   if (!corpo) {
     return await mostrarMenu(admin, conversationId, 'Olá!')
   }
@@ -3062,6 +3144,14 @@ export async function tratarConversa(
   if (resultado && naoEntendeu && opcoes.estadoAtual && !opcoes.podeIniciarMenu) {
     registrar('calou_com_equipe')
     return null
+  }
+  // Ultima porta antes da familia (14/10/2026). Resposta pronta e fecho podem
+  // trazer {valores} e {enderecos}, e saem por muitos caminhos (duvida no meio
+  // do agendamento, fila da equipe, "nao entendi"). Em vez de lembrar de cada
+  // um, tudo passa aqui. O que ja foi preenchido com o lugar certo (texto da
+  // unidade) chega sem campo e passa direto.
+  if (resultado && temCampo(resultado.resposta)) {
+    resultado.resposta = await comCampos(opcoes.admin, opcoes.clinicId, resultado.resposta, null)
   }
   return resultado
 }

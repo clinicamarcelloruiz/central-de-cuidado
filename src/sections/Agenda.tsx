@@ -27,7 +27,8 @@ import {
   createAvailabilityRule,
   createScheduleException,
   createUnit,
-  saveUnitCnes,
+  getTelemedicina,
+  type Telemedicina,
   deleteAvailabilityRule,
   deleteScheduleException,
   getCurrentMembership,
@@ -56,6 +57,9 @@ import {
 } from '@/lib/repository'
 import { useDialogos } from '@/components/dialogos-contexto'
 import { avisoDoBloqueio, consultasDeUmDia } from '@/lib/bloqueio-de-dia'
+import { lugaresDoRobo } from '@/lib/lugares'
+import CartaoDaUnidade from '@/sections/agenda/CartaoDaUnidade'
+import { valorDaConsulta } from '../../supabase/functions/_shared/campos-do-texto.ts'
 import {
   Sheet,
   SheetContent,
@@ -592,6 +596,10 @@ export default function Agenda({
   const [ligarHoje, setLigarHoje] = useState<PendenciaDeLigar[]>([])
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [units, setUnits] = useState<Unit[]>([])
+  // Texto, valor e liga/desliga da telemedicina, para o cartao dela em
+  // Configuracao. Falhar aqui nao derruba a agenda: o cartao so fica sem dados.
+  const [tele, setTele] = useState<Telemedicina | null>(null)
+  const lugares = useMemo(() => lugaresDoRobo(units, tele), [units, tele])
   const [unitId, setUnitId] = useState<string | null>(null)
   const [rules, setRules] = useState<AvailabilityRule[]>([])
   const [exceptions, setExceptions] = useState<ScheduleException[]>([])
@@ -635,7 +643,17 @@ export default function Agenda({
   }
 
   // Formularios
-  const [novaUnidade, setNovaUnidade] = useState({ nome: '', endereco: '' })
+  const [novaUnidade, setNovaUnidade] = useState({ nome: '', endereco: '', valor: '' })
+  // Unidade nova so entra com nome, endereco e valor (14/10/2026): sem valor, o
+  // {valor} dos textos do robo nao teria o que mostrar.
+  const valorDaNova = valorDaConsulta(novaUnidade.valor)
+  const faltaNaNova = !novaUnidade.nome.trim()
+    ? 'Preencha o nome.'
+    : !novaUnidade.endereco.trim()
+      ? 'Preencha o endereço.'
+      : 'erro' in valorDaNova
+        ? valorDaNova.erro
+        : ''
   const [novaRegra, setNovaRegra] = useState({ weekday: 1, inicio: '08:00', fim: '12:00' })
   const [novoBloqueio, setNovoBloqueio] = useState({ data: '', motivo: '' })
 
@@ -646,12 +664,17 @@ export default function Agenda({
       const membership = await getCurrentMembership()
       if (!membership) throw new Error('Não foi possível identificar a clínica do seu usuário.')
       setClinicId(membership.clinicId)
-      const [lista, preferencias, excecoes] = await Promise.all([
+      const [lista, preferencias, excecoes, telemedicina] = await Promise.all([
         listUnits(membership.clinicId),
         getSchedulePreferences(membership.clinicId),
         listScheduleExceptions(membership.clinicId),
+        getTelemedicina(membership.clinicId).catch((erro) => {
+          console.warn('Nao consegui ler a telemedicina para o cartao dela', erro)
+          return null
+        }),
       ])
       setUnits(lista)
+      setTele(telemedicina)
       setPrefs(preferencias)
       setExceptions(excecoes)
       setUnitId((atual) => atual ?? lista[0]?.id ?? null)
@@ -1014,17 +1037,27 @@ export default function Agenda({
             <input
               value={novaUnidade.endereco}
               onChange={(e) => setNovaUnidade({ ...novaUnidade, endereco: e.target.value })}
-              placeholder="Endereço (opcional)"
+              placeholder="Endereço"
               className="rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3 py-2 text-xs outline-none focus:border-[#2f7fc1]"
             />
+            <input
+              value={novaUnidade.valor}
+              onChange={(e) => setNovaUnidade({ ...novaUnidade, valor: e.target.value })}
+              placeholder="Valor da consulta (R$)"
+              inputMode="decimal"
+              className="rounded-xl border border-[#081b2c]/10 bg-[#fafaf8] px-3 py-2 text-xs outline-none focus:border-[#2f7fc1]"
+            />
+            {faltaNaNova && (novaUnidade.nome || novaUnidade.endereco || novaUnidade.valor) && (
+              <p className="text-[10px] font-semibold text-[#b54708]">{faltaNaNova}</p>
+            )}
             <button
               type="button"
-              disabled={!novaUnidade.nome.trim()}
+              disabled={Boolean(faltaNaNova)}
               onClick={() =>
                 void acao(async () => {
-                  if (!clinicId) return
-                  await createUnit(clinicId, novaUnidade.nome, novaUnidade.endereco)
-                  setNovaUnidade({ nome: '', endereco: '' })
+                  if (!clinicId || !('centavos' in valorDaNova)) return
+                  await createUnit(clinicId, novaUnidade.nome, novaUnidade.endereco, valorDaNova.centavos)
+                  setNovaUnidade({ nome: '', endereco: '', valor: '' })
                 }, 'Unidade cadastrada.')
               }
               className="rounded-xl bg-[#081b2c] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#102d47] disabled:opacity-40"
@@ -1797,88 +1830,84 @@ export default function Agenda({
                 </button>
               </div>
 
-              {/* Unidades */}
+              {/* Unidades. Desde 14/10/2026 cada uma abre num cartao com
+                  endereco, valor e o texto que o robo responde sobre ela:
+                  antes o texto ficava em Configuracoes, longe do valor que ele
+                  citava, e mudar o preco era lembrar de tres lugares. */}
               <div className="surface-card rounded-[20px] p-4">
                 <p className="flex items-center gap-1.5 text-xs font-extrabold text-[#081b2c]">
                   <Building2 className="h-3.5 w-3.5 text-[#2f7fc1]" />
                   Unidades
+                  <Ajuda texto="Clique numa unidade para mudar endereço, valor da consulta e o que o robô responde sobre ela. Nos textos, {valor} e {endereco} são trocados pelo que está no cartão na hora de enviar: mudou aqui, muda em toda mensagem." />
+                </p>
+                <p className="mt-0.5 text-[10px] text-slate-500">
+                  Endereço, valor e o que o robô responde sobre cada uma.
                 </p>
                 <div className="mt-3 space-y-1.5">
-                  {units.map((u) => (
-                    <div
-                      key={u.id}
-                      className="flex items-center justify-between gap-2 rounded-xl bg-[#fafaf8] px-3 py-2"
-                    >
-                      <span className="min-w-0 truncate text-[11px] font-bold text-[#081b2c]">
-                        {u.name}
-                        {u.address && (
-                          <span className="font-normal text-slate-500"> · {u.address}</span>
-                        )}
-                      </span>
-                      {/* CNES: o número do estabelecimento de saúde, que a Memed
-                          passou a exigir de quem integra agora. É de cada
-                          unidade - a sala de Santos e a de São Paulo são
-                          estabelecimentos diferentes. Enquanto estiver vazio, a
-                          receita sai sem ele. */}
-                      <input
-                        defaultValue={u.cnes}
-                        onBlur={(e) => {
-                          const novo = e.target.value.replace(/\D/g, '')
-                          if (novo === u.cnes) return
-                          void acao(async () => {
-                            await saveUnitCnes(u.id, novo)
-                          }, 'CNES guardado.')
-                        }}
-                        placeholder="CNES"
-                        inputMode="numeric"
-                        title="Cadastro Nacional de Estabelecimentos de Saúde desta unidade. Sai impresso na receita."
-                        className="w-[88px] shrink-0 rounded-lg border border-[#081b2c]/10 bg-white px-2 py-1 text-[10px] font-semibold text-[#081b2c] outline-none focus:border-[#2f7fc1]"
-                      />
-                      {units.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void acao(async () => {
-                              await archiveUnit(u.id)
-                              if (unitId === u.id) setUnitId(null)
-                            }, 'Unidade arquivada. O histórico foi preservado.')
-                          }
-                          className="rounded-lg p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </div>
+                  {/* Sem a agenda propria da telemedicina (clinica criada
+                      depois de 03/10/2026), o cartao dela aparece mesmo assim:
+                      o texto, o valor e o liga/desliga precisam de um lugar. */}
+                  {(units.some((u) => u.telemedicina) || !tele
+                    ? units
+                    : [...units, { id: '', name: 'Telemedicina', address: '', cnes: '', telemedicina: true }]
+                  ).map((u) => (
+                    <CartaoDaUnidade
+                      key={u.id || 'telemedicina'}
+                      unidade={u}
+                      tele={u.telemedicina ? tele : null}
+                      lugares={lugares}
+                      clinicId={clinicId ?? ''}
+                      podeArquivar={Boolean(u.id) && units.length > 1}
+                      onSalvo={(mensagem) => void acao(async () => {}, mensagem)}
+                      onArquivar={() =>
+                        void acao(async () => {
+                          await archiveUnit(u.id)
+                          if (unitId === u.id) setUnitId(null)
+                        }, 'Unidade arquivada. O histórico foi preservado.')
+                      }
+                    />
                   ))}
                 </div>
-                <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-[#081b2c]/[0.07] pt-3">
-                  <input
-                    value={novaUnidade.nome}
-                    onChange={(e) => setNovaUnidade({ ...novaUnidade, nome: e.target.value })}
-                    placeholder="Nome"
-                    className="min-w-[100px] flex-1 rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none"
-                  />
-                  <input
-                    value={novaUnidade.endereco}
-                    onChange={(e) => setNovaUnidade({ ...novaUnidade, endereco: e.target.value })}
-                    placeholder="Endereço"
-                    className="min-w-[100px] flex-1 rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none"
-                  />
-                  <button
-                    type="button"
-                    disabled={!novaUnidade.nome.trim()}
-                    onClick={() =>
-                      void acao(async () => {
-                        if (!clinicId) return
-                        await createUnit(clinicId, novaUnidade.nome, novaUnidade.endereco)
-                        setNovaUnidade({ nome: '', endereco: '' })
-                      }, 'Unidade cadastrada.')
-                    }
-                    className="inline-flex items-center gap-1 rounded-xl bg-[#081b2c] px-3 py-1.5 text-[10px] font-bold text-white transition hover:bg-[#102d47] disabled:opacity-40"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Adicionar
-                  </button>
+                <div className="mt-3 border-t border-[#081b2c]/[0.07] pt-3">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <input
+                      value={novaUnidade.nome}
+                      onChange={(e) => setNovaUnidade({ ...novaUnidade, nome: e.target.value })}
+                      placeholder="Nome"
+                      className="min-w-[100px] flex-1 rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none"
+                    />
+                    <input
+                      value={novaUnidade.endereco}
+                      onChange={(e) => setNovaUnidade({ ...novaUnidade, endereco: e.target.value })}
+                      placeholder="Endereço"
+                      className="min-w-[100px] flex-[2] rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none"
+                    />
+                    <input
+                      value={novaUnidade.valor}
+                      onChange={(e) => setNovaUnidade({ ...novaUnidade, valor: e.target.value })}
+                      placeholder="Valor (R$)"
+                      inputMode="decimal"
+                      className="w-[92px] rounded-xl border border-[#081b2c]/10 bg-white px-2 py-1.5 text-[11px] outline-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={Boolean(faltaNaNova)}
+                      onClick={() =>
+                        void acao(async () => {
+                          if (!clinicId || !('centavos' in valorDaNova)) return
+                          await createUnit(clinicId, novaUnidade.nome, novaUnidade.endereco, valorDaNova.centavos)
+                          setNovaUnidade({ nome: '', endereco: '', valor: '' })
+                        }, 'Unidade cadastrada. Abra o cartão dela para escrever o que o robô responde.')
+                      }
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#081b2c] px-3 py-1.5 text-[10px] font-bold text-white transition hover:bg-[#102d47] disabled:opacity-40"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Adicionar
+                    </button>
+                  </div>
+                  {faltaNaNova && (novaUnidade.nome || novaUnidade.endereco || novaUnidade.valor) && (
+                    <p className="mt-1.5 text-[10px] font-semibold text-[#b54708]">{faltaNaNova}</p>
+                  )}
                 </div>
               </div>
             </div>

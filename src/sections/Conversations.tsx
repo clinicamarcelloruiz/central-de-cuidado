@@ -39,6 +39,8 @@ import {
   linkDoAnexo,
   buscarNasConversas,
   listRespostasProntas,
+  listUnits,
+  getTelemedicina,
   sendConversationFile,
   type RespostaPronta,
   listConversations,
@@ -59,6 +61,13 @@ import {
   type ConversationMessage,
   type ResumoDoPaciente,
 } from '@/lib/repository'
+import { lugaresDoRobo } from '@/lib/lugares'
+import {
+  preencherCampos,
+  problemasDoTexto,
+  temCampo,
+  type Lugar,
+} from '../../supabase/functions/_shared/campos-do-texto.ts'
 
 const STATUS_LABEL: Record<Conversation['status'], string> = {
   open: 'Em aberto',
@@ -539,6 +548,9 @@ export default function Conversations({
   const [error, setError] = useState('')
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [prontas, setProntas] = useState<RespostaPronta[]>([])
+  // Valor e endereco de cada atendimento: a resposta pronta com {valores}
+  // entra no campo ja preenchida, como o robo a mandaria (14/10/2026).
+  const [lugares, setLugares] = useState<Lugar[] | null>(null)
   // Arquivo escolhido para ir junto da proxima resposta (24/09/2026).
   const [arquivo, setArquivo] = useState<File | null>(null)
   const seletorDeArquivo = useRef<HTMLInputElement>(null)
@@ -551,6 +563,9 @@ export default function Conversations({
     listRespostasProntas(clinicId)
       .then((lista) => vivo && setProntas(lista.filter((p) => p.ativa && p.resposta.trim())))
       .catch((erro) => console.warn('Nao consegui carregar as respostas prontas', erro))
+    Promise.all([listUnits(clinicId), getTelemedicina(clinicId)])
+      .then(([units, tele]) => vivo && setLugares(lugaresDoRobo(units, tele)))
+      .catch((erro) => console.warn('Nao consegui ler valores e enderecos das unidades', erro))
     return () => {
       vivo = false
     }
@@ -1038,6 +1053,15 @@ export default function Conversations({
 
   async function salvarAutoReply() {
     if (!clinicId || salvandoAuto) return
+    // O fecho vai colado no texto de qualquer unidade: so {valores} e
+    // {enderecos}. Campo que o robo nao preencheria nao e salvo (14/10/2026).
+    const problemas = problemasDoTexto(autoReply.infoText, 'geral', null, lugares ?? []).filter(
+      (p) => lugares !== null || !p.startsWith('Falta'),
+    )
+    if (problemas.length) {
+      setAvisoAuto(`Não salvei: ${problemas[0]} O menu no ar continua o mesmo.`)
+      return
+    }
     setSalvandoAuto(true)
     setAvisoAuto('')
     try {
@@ -1455,8 +1479,9 @@ export default function Conversations({
             />
             <p className="mt-2 text-[10px] text-slate-500">
               Vai no fim do texto de qualquer unidade e da telemedicina: como agendar, como falar com a
-              equipe, telefones e horário. O valor, o endereço e o que levar de cada lugar ficam em
-              Preferências, em "Informações por unidade".
+              equipe, telefones e horário. O valor, o endereço e o que levar de cada lugar ficam no
+              cartão de cada unidade, em Agenda → Configuração → Unidades. Aqui dá para usar{' '}
+              <strong>{'{valores}'}</strong> e <strong>{'{enderecos}'}</strong>, que listam cada uma.
             </p>
             <p className="mt-1 text-[10px] text-slate-500">
               A opção 2 usa a agenda das unidades e a 4 mexe na consulta já marcada. A opção 3
@@ -1474,8 +1499,16 @@ export default function Conversations({
               >
                 {salvandoAuto ? 'Salvando...' : 'Salvar menu automático'}
               </button>
+              {/* Verde so o sucesso: recusa e erro do banco em verde pareciam
+                  "salvo" para quem olhava de relance. */}
               {avisoAuto && (
-                <span className="text-[10px] font-bold text-[#557f75]">{avisoAuto}</span>
+                <span
+                  className={`text-[10px] font-bold ${
+                    avisoAuto === 'Resposta automática salva.' ? 'text-[#557f75]' : 'text-red-600'
+                  }`}
+                >
+                  {avisoAuto}
+                </span>
               )}
             </div>
           </div>
@@ -2294,9 +2327,23 @@ export default function Conversations({
                               onChange={(e) => {
                                 const escolhida = prontas.find((p) => p.id === e.target.value)
                                 if (!escolhida) return
-                                setResposta((atual) =>
-                                  atual.trim() ? `${atual.trimEnd()}\n\n${escolhida.resposta}` : escolhida.resposta,
-                                )
+                                // A mesma troca do robo: {valores} vira a lista
+                                // com o valor do cartao de cada unidade. O que
+                                // nao der para preencher fica visivel, para a
+                                // recepcao nao mandar "{valores}" para a mae.
+                                let texto = escolhida.resposta
+                                if (temCampo(texto)) {
+                                  if (lugares) {
+                                    const pronta = preencherCampos(texto, null, lugares)
+                                    texto = pronta.texto
+                                    if (pronta.faltando.length) {
+                                      setError(`"${escolhida.assunto}" ficou sem: ${pronta.faltando.join(', ')}. Confira antes de enviar.`)
+                                    }
+                                  } else {
+                                    setError('Não consegui ler os valores das unidades: a resposta entrou com os campos {…}. Troque-os antes de enviar.')
+                                  }
+                                }
+                                setResposta((atual) => (atual.trim() ? `${atual.trimEnd()}\n\n${texto}` : texto))
                               }}
                               title="Coloca o texto de uma resposta pronta no campo, para revisar e enviar"
                               className="max-w-[200px] rounded-lg border border-[#081b2c]/10 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 outline-none"

@@ -116,6 +116,7 @@ const EVENTOS: Record<string, (detalhe?: string) => { titulo: string; tom: Tom }
   acompanhamento_agradeceu: () => ({ titulo: 'Agradecimento depois do acompanhamento', tom: 'neutro' }),
   chamou_equipe: (d) => ({ titulo: `Chamou a equipe: ${MOTIVOS[d ?? '']?.rotulo ?? d}`, tom: MOTIVOS[d ?? '']?.tom ?? 'alerta' }),
   concluiu_sozinho: () => ({ titulo: 'Atendimento concluído sem precisar de ninguém', tom: 'bom' }),
+  campo_sem_valor: (d) => ({ titulo: `Texto com campo sem dado: ${d ?? 'confira o cartão da unidade'}`, tom: 'alerta' }),
 }
 
 const CAMPOS_DA_FICHA: Record<string, string> = {

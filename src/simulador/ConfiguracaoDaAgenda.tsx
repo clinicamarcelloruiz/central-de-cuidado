@@ -15,6 +15,14 @@ import { DIAS_DA_SEMANA, diaDeBrasilia, type AgendaDaClinica, type UnidadeDaAgen
 const LETRA_DO_DIA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
 const MAX_DIAS_DO_ROBO = 8
 
+// O valor digitado em reais, guardado em centavos como no banco. Vazio ou
+// zero = sem valor, e o robo da demonstracao se comporta como o de verdade
+// (a linha com {valor} cai e o evento aparece).
+const emCentavos = (digitado: string) => {
+  const reais = Number(digitado)
+  return Number.isFinite(reais) && reais > 0 ? Math.round(reais * 100) : null
+}
+
 const novoId = (prefixo: string) => `${prefixo}-${crypto.randomUUID().slice(0, 8)}`
 
 const campo =
@@ -270,10 +278,23 @@ export default function ConfiguracaoDaAgenda({
                 </label>
               ))}
             </div>
-            <label className="mt-3 flex items-center gap-2 text-[12.5px] font-semibold text-[#081b2c]">
-              <input type="checkbox" checked={agenda.telemedicinaAtiva} onChange={(e) => mudar({ ...agenda, telemedicinaAtiva: e.target.checked })} />
-              O robô oferece telemedicina
-            </label>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-[12.5px] font-semibold text-[#081b2c]">
+                <input type="checkbox" checked={agenda.telemedicinaAtiva} onChange={(e) => mudar({ ...agenda, telemedicinaAtiva: e.target.checked })} />
+                O robô oferece telemedicina
+              </label>
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500">
+                Valor (R$)
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={agenda.telemedicinaValor ? agenda.telemedicinaValor / 100 : ''}
+                  onChange={(e) => mudar({ ...agenda, telemedicinaValor: emCentavos(e.target.value) })}
+                  className={`${campo} w-24`}
+                />
+              </label>
+            </div>
           </Bloco>
         </div>
 
@@ -293,9 +314,22 @@ export default function ConfiguracaoDaAgenda({
                   </label>
                 )}
                 {!unidade.telemedicina && (
-                  <label className="block sm:col-span-2">
+                  <label className="block">
                     <span className="block text-[9.5px] font-extrabold uppercase tracking-wide text-slate-400">Endereço</span>
                     <input value={unidade.endereco} onChange={(e) => mudarUnidade(unidade.id, { endereco: e.target.value })} className={`${campo} mt-1 w-full`} />
+                  </label>
+                )}
+                {!unidade.telemedicina && (
+                  <label className="block">
+                    <span className="block text-[9.5px] font-extrabold uppercase tracking-wide text-slate-400">Valor da consulta (R$)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={unidade.valor ? unidade.valor / 100 : ''}
+                      onChange={(e) => mudarUnidade(unidade.id, { valor: emCentavos(e.target.value) })}
+                      className={`${campo} mt-1 w-full`}
+                    />
                   </label>
                 )}
                 {!unidade.telemedicina && (
@@ -310,6 +344,9 @@ export default function ConfiguracaoDaAgenda({
                       placeholder="Vazio: o robô manda só o texto geral, sem nada desta unidade (como no sistema)."
                       className={`${campo} mt-1 w-full resize-y leading-snug`}
                     />
+                    <span className="mt-1 block text-[11px] text-slate-500">
+                      {'{valor}'} e {'{endereco}'} viram o valor e o endereço acima na hora de enviar, como no sistema.
+                    </span>
                   </label>
                 )}
               </div>

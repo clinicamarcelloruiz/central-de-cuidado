@@ -322,6 +322,24 @@ export default function NumerosDoWhatsApp() {
             })()}
           </Bloco>
 
+          {/* Campo sem dado (14/10/2026): um texto do robo usa {valor} ou
+              {endereco} e o cartao da unidade esta vazio. O robo tira a linha
+              em vez de mandar "{valor}" cru - e a familia fica sem o preco. Sem
+              este aviso, isso so apareceria quando alguem reclamasse. */}
+          {(dados.eventos.campo_sem_valor ?? 0) > 0 && (
+            <div className="flex items-start gap-2 rounded-[16px] border border-red-200 bg-red-50 p-3 text-[11px] leading-relaxed text-red-700">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                <strong>
+                  O robô deixou de mandar um valor ou endereço {dados.eventos.campo_sem_valor}{' '}
+                  {dados.eventos.campo_sem_valor === 1 ? 'vez' : 'vezes'} neste período.
+                </strong>{' '}
+                Um texto usa {'{valor}'} ou {'{endereco}'} e o cartão da unidade está sem esse dado. Confira em
+                Agenda → Configuração → Unidades.
+              </span>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
             <Numero
               rotulo="Não entendi"

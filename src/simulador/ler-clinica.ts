@@ -82,7 +82,7 @@ async function clinicaDoLogin(): Promise<string> {
 export async function lerClinicaDeTeste(): Promise<LinhasDaClinica> {
   const c = await clinicaDoLogin()
   const hoje = diaDeBrasilia(new Date())
-  const [clinica, unidades, regras, excecoes, agenda, saudacao, telemedicina, respostas, marcaTele, convenios] =
+  const [clinica, unidades, regras, excecoes, agenda, saudacao, telemedicina, respostas, marcaTele, convenios, valores, valorTele] =
     await Promise.all([
       opcional(tabela('clinics').select('id,name').eq('id', c), 'o nome da clinica'),
       linhas(tabela('clinic_units').select('id,name,address,info_text,archived_at').eq('clinic_id', c)),
@@ -105,6 +105,9 @@ export async function lerClinicaDeTeste(): Promise<LinhasDaClinica> {
       opcional(tabela('bot_answers').select('id,subject,keywords,answer,ask_unit,is_active,position').eq('clinic_id', c), 'as respostas prontas'),
       opcional(tabela('clinic_units').select('id,telemedicina').eq('clinic_id', c), 'a marca de telemedicina das unidades'),
       opcional(tabela('clinic_units').select('id,accepts_insurance').eq('clinic_id', c), 'o convenio das unidades'),
+      // Colunas de 14/10/2026: sem elas, a demonstracao segue sem os valores.
+      opcional(tabela('clinic_units').select('id,price_cents').eq('clinic_id', c), 'o valor das unidades'),
+      opcional(tabela('clinic_settings').select('telemedicine_price_cents').eq('clinic_id', c).limit(1), 'o valor da telemedicina'),
     ])
 
   // RLS nao da erro para quem nao e membro: devolve lista vazia. Sem unidade
@@ -117,16 +120,18 @@ export async function lerClinicaDeTeste(): Promise<LinhasDaClinica> {
   const porId = (lista: Linha[]) => new Map(lista.map((l) => [l.id, l]))
   const tele = porId(marcaTele)
   const convenio = porId(convenios)
+  const valor = porId(valores)
   return {
     clinica: clinica[0] ?? null,
     unidades: unidades.map((u) => ({
       ...u,
       telemedicina: tele.get(u.id)?.telemedicina === true,
       accepts_insurance: convenio.get(u.id)?.accepts_insurance ?? null,
+      price_cents: valor.get(u.id)?.price_cents ?? null,
     })),
     regras,
     excecoes,
-    configuracoes: { ...(agenda[0] ?? {}), ...(saudacao[0] ?? {}), ...(telemedicina[0] ?? {}) },
+    configuracoes: { ...(agenda[0] ?? {}), ...(saudacao[0] ?? {}), ...(telemedicina[0] ?? {}), ...(valorTele[0] ?? {}) },
     respostas,
   }
 }

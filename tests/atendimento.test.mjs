@@ -131,13 +131,20 @@ function fazerAdmin({
       // vendo so as unidades fisicas.
       if (tabela === 'clinic_settings') {
         return {
-          select: () =>
-            chain({
+          select: (colunas = '') => {
+            // Coluna nova que o banco ainda nao tem recusa a consulta inteira.
+            const faltando = colunasAusentes.find((c) => String(colunas).includes(c))
+            if (faltando) {
+              return chain({ single: null, erro: { code: '42703', message: `column ${faltando} does not exist` } })
+            }
+            return chain({
               single: {
                 telemedicine_enabled: telemedicina.ativa,
                 telemedicine_info_text: telemedicina.texto,
+                telemedicine_price_cents: telemedicina.valor ?? null,
               },
-            }),
+            })
+          },
         }
       }
       if (tabela === 'appointments') {
@@ -3451,6 +3458,139 @@ for (const [frase, esperado] of [
 await caso('Relato de evolução depois da consulta vira recado, com o menu na tela', [
   ['Recebi sim, já estamos aplicando os medicamentos, mas o Martín segue com dores abdominais à noite', ['Obrigado por nos contar', 'URGÊNCIA']],
 ], { posAcompanhamento: true, estadoInicial: { booking_state: 'menu' } })
+
+// ---------------------------------------------------------------
+// Campos {valor}, {endereco}, {valores} (14/10/2026)
+// ---------------------------------------------------------------
+// O valor mora no cartao da unidade e o texto diz {valor}. Mudou no cartao,
+// mudou na mensagem. E nada de "{valor}" cru na tela de uma mae.
+//
+// PARA PROVAR QUE ESTE BLOCO PEGA O DEFEITO: em atendimento.ts, troque o
+// `await comCampos(...)` de responderInformacoes pelo texto sem trocar, ou
+// apague a guarda final de tratarConversa (`if (resultado && temCampo(...`).
+// Os casos com "nao sai cru" falham.
+
+const COM_VALOR = [
+  { ...TRES_UNIDADES[0], price_cents: 45000 },
+  { ...TRES_UNIDADES[1], price_cents: 50000 },
+  {
+    ...TRES_UNIDADES[2],
+    price_cents: 60000,
+    info_text: '💙 *Consulta em {unidade}: {valor}.* Inclui retorno em até 30 dias.\n📍 {endereco}',
+  },
+]
+
+function semCampoCru(titulo) {
+  return ({ ultimoToque }) => {
+    if (/\{\s*(valor|valores|endereco|enderecos|unidade)\s*\}/i.test(ultimoToque.resposta)) {
+      falhas.push(`${titulo} | campo saiu cru para a família: ${ultimoToque.resposta.slice(0, 120)}`)
+    } else passou++
+  }
+}
+
+await caso('Campos: texto da unidade sai com o valor e o endereço do cartão', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['3', ['Consulta em Livance Ibirapuera - São Paulo: R$ 600,00.', '📍 Rua Y, 30', '13 3273-6828']],
+], { unidades: COM_VALOR, verificar: semCampoCru('Campos: texto da unidade') })
+
+await caso('Campos: valor novo no cartão já vale na próxima mensagem', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['3', 'R$ 650,00'],
+], { unidades: [COM_VALOR[0], COM_VALOR[1], { ...COM_VALOR[2], price_cents: 65000 }] })
+
+{
+  const titulo = 'Campos: unidade sem valor perde a linha, não o resto, e grita'
+  const eventos = await eventosDe(titulo, [
+    ['Oi', 'Como podemos ajudar'],
+    ['1', 'Para qual atendimento'],
+    ['3', ['Bem-vindo à unidade.', 'Traga a carteirinha.']],
+  ], {
+    unidades: [
+      COM_VALOR[0],
+      COM_VALOR[1],
+      { ...TRES_UNIDADES[2], info_text: 'Bem-vindo à unidade.\n*Consulta: {valor}.*\nTraga a carteirinha.' },
+    ],
+    verificar: (r) => {
+      semCampoCru(titulo)(r)
+      if (r.ultimoToque.resposta.includes('Consulta:')) falhas.push(`${titulo} | a linha sem valor ficou pela metade`)
+      else passou++
+    },
+  })
+  exigirEvento(eventos, 'campo_sem_valor', titulo, 'valor de Livance Ibirapuera - São Paulo')
+}
+
+{
+  // A Edge sobe antes da migration: a coluna nova ainda nao existe. Perde-se a
+  // linha do valor; a lista de unidades e o resto do atendimento seguem.
+  const titulo = 'Campos: sem a coluna price_cents o atendimento segue de pé'
+  const eventos = await eventosDe(titulo, [
+    ['Oi', 'Como podemos ajudar'],
+    ['1', ['Para qual atendimento', '*1* Liferty · Santos', '*3* Livance Ibirapuera']],
+    ['3', ['📍 Rua Y, 30', '13 3273-6828']],
+  ], {
+    unidades: COM_VALOR,
+    colunasAusentes: ['price_cents', 'telemedicine_price_cents'],
+    verificar: (r) => {
+      semCampoCru(titulo)(r)
+      // A linha do valor cai inteira: preco pela metade e pior que nenhum.
+      if (r.ultimoToque.resposta.includes('Consulta em')) falhas.push(`${titulo} | linha do valor ficou sem o valor`)
+      else passou++
+    },
+  })
+  exigirEvento(eventos, 'campo_sem_valor', titulo)
+}
+
+await caso('Campos: telemedicina com o valor dela', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', ['Para qual atendimento', 'Telemedicina']],
+  ['4', ['*Telemedicina: R$ 420,00.*', 'URGÊNCIA']],
+], {
+  unidades: COM_VALOR,
+  telemedicina: { ativa: true, texto: '*Telemedicina: {valor}.* Retorno presencial em até 30 dias.', valor: 42000 },
+  verificar: semCampoCru('Campos: telemedicina'),
+})
+
+await caso('Campos: resposta pronta com {valores} lista cada atendimento', [
+  ['Oi', 'Como podemos ajudar'],
+  ['quanto custa a consulta?', [
+    '• Liferty · Santos: R$ 450,00',
+    '• Livance · Santo André: R$ 500,00',
+    '• Livance Ibirapuera - São Paulo: R$ 600,00',
+    '• Telemedicina (por vídeo): R$ 420,00',
+  ]],
+], {
+  unidades: COM_VALOR,
+  telemedicina: { ativa: true, texto: 'Por vídeo.', valor: 42000 },
+  respostasProntas: [{ id: 'v', subject: 'Valor e pagamento', keywords: ['valor', 'custa', 'preco'], answer: '💰 Valores da consulta:\n{valores}\n\nPix, débito ou crédito.' }],
+  verificar: semCampoCru('Campos: resposta pronta com {valores}'),
+})
+
+{
+  // A tela nao deixa salvar {valor} numa resposta pronta (nao se sabe de qual
+  // unidade). Se mesmo assim estiver no banco, a guarda final segura.
+  const titulo = 'Campos: {valor} numa resposta pronta não sai cru'
+  const eventos = await eventosDe(titulo, [
+    ['Oi', 'Como podemos ajudar'],
+    ['quanto custa a consulta?', ['Pix, débito ou crédito.']],
+  ], {
+    unidades: COM_VALOR,
+    respostasProntas: [{ id: 'v', subject: 'Valor', keywords: ['valor', 'custa'], answer: 'A consulta custa {valor}.\nPix, débito ou crédito.' }],
+    verificar: semCampoCru(titulo),
+  })
+  exigirEvento(eventos, 'campo_sem_valor', titulo)
+}
+
+// Texto antigo, com o valor escrito a mao: igual a antes, sem ler valor nenhum.
+await caso('Campos: texto sem campo continua exatamente igual', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['3', '*Consulta em São Paulo: R$ 550,00.*'],
+], {
+  unidades: [TRES_UNIDADES[0], TRES_UNIDADES[1], { ...TRES_UNIDADES[2], info_text: '*Consulta em São Paulo: R$ 550,00.*' }],
+  colunasAusentes: ['price_cents'],
+})
 
 console.log('\n============================================')
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)

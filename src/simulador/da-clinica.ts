@@ -51,6 +51,7 @@ export function identidadeDoSistema(base: Identidade, linhas: LinhasDaClinica): 
       nome: texto(u.name),
       endereco: texto(u.address),
       informacoes: texto(u.info_text),
+      valor: Number(u.price_cents) > 0 ? Number(u.price_cents) : null,
       convenio: texto(u.accepts_insurance),
       telemedicina: u.telemedicina === true,
       periodos: linhas.regras
@@ -76,6 +77,7 @@ export function identidadeDoSistema(base: Identidade, linhas: LinhasDaClinica): 
       antecedencia: numero(cfg.schedule_min_notice_hours, 2),
     },
     telemedicinaAtiva: cfg.telemedicine_enabled === true,
+    telemedicinaValor: Number(cfg.telemedicine_price_cents) > 0 ? Number(cfg.telemedicine_price_cents) : null,
   }
 
   return {

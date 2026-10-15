@@ -453,6 +453,10 @@ export interface Unit {
    * 20261003150000_agenda_propria_da_telemedicina.sql.
    */
   telemedicina?: boolean
+  /** O que o robo responde na opcao 1 sobre esta unidade. Pode ter {valor}. */
+  infoText?: string
+  /** Valor da consulta em centavos (14/10/2026). Nulo = ainda nao preenchido. */
+  priceCents?: number | null
 }
 
 export interface AvailabilityRule {
@@ -564,9 +568,18 @@ export async function listUnits(clinicId: string): Promise<Unit[]> {
     .order('name')
   if (error) fail(error)
   const unidades: Unit[] = data ?? []
-  const tele = await idsDaTelemedicina(clinicId)
+  const [tele, textos, valores] = await Promise.all([
+    idsDaTelemedicina(clinicId),
+    textosDasUnidades(clinicId),
+    valoresDasUnidades(clinicId),
+  ])
   return unidades
-    .map((u) => ({ ...u, telemedicina: tele.has(u.id) }))
+    .map((u) => ({
+      ...u,
+      telemedicina: tele.has(u.id),
+      infoText: textos.get(u.id) ?? '',
+      priceCents: valores.get(u.id) ?? null,
+    }))
     // A telemedicina por ultimo: e a agenda "extra", e as unidades fisicas
     // continuam na ordem de sempre.
     .sort((a, b) => Number(a.telemedicina) - Number(b.telemedicina))
@@ -596,14 +609,105 @@ async function idsDaTelemedicina(clinicId: string): Promise<Set<string>> {
   }
 }
 
-export async function createUnit(clinicId: string, name: string, address: string): Promise<Unit> {
-  const { data, error } = await supabase
-    .from('clinic_units')
-    .insert({ clinic_id: clinicId, name: name.trim(), address: address.trim() })
+/**
+ * O texto do robo de cada unidade, para o cartao da unidade na Agenda.
+ *
+ * Separado da lista: se falhar, a Agenda abre e o cartao mostra o texto vazio
+ * com aviso, em vez de a agenda inteira nao abrir.
+ */
+async function textosDasUnidades(clinicId: string): Promise<Map<string, string>> {
+  try {
+    const { data, error } = await tabelaCrua('clinic_units')
+      .select('id,info_text')
+      .eq('clinic_id', clinicId)
+      .order('name', { ascending: true })
+    if (error) throw error
+    return new Map(((data ?? []) as { id: string; info_text?: string | null }[]).map((u) => [u.id, u.info_text ?? '']))
+  } catch (erro) {
+    console.warn('Nao consegui ler os textos do robo das unidades', erro)
+    return new Map()
+  }
+}
+
+/**
+ * Valor da consulta por unidade (coluna nova, 14/10/2026), em consulta propria:
+ * sem a coluna, a Agenda abre igual e o cartao so mostra o valor vazio.
+ */
+async function valoresDasUnidades(clinicId: string): Promise<Map<string, number>> {
+  try {
+    const { data, error } = await tabelaCrua('clinic_units')
+      .select('id,price_cents')
+      .eq('clinic_id', clinicId)
+      .order('name', { ascending: true })
+    if (error) throw error
+    const valores = new Map<string, number>()
+    for (const u of (data ?? []) as { id: string; price_cents?: number | null }[]) {
+      if (u.price_cents) valores.set(u.id, u.price_cents)
+    }
+    return valores
+  } catch (erro) {
+    console.warn('Sem a coluna clinic_units.price_cents; valores das unidades vazios', erro)
+    return new Map()
+  }
+}
+
+/**
+ * Cadastra a unidade ja com o valor da consulta (14/10/2026): unidade sem valor
+ * e unidade em que o {valor} do robo nao tem o que mostrar.
+ */
+export async function createUnit(clinicId: string, name: string, address: string, priceCents: number): Promise<Unit> {
+  // price_cents nao esta nos tipos gerados (src/types/database.ts), como as
+  // outras colunas recentes da unidade.
+  const inserir = (supabase.from as unknown as (n: string) => {
+    insert: (valores: Record<string, unknown>) => {
+      select: (colunas: string) => {
+        single: () => PromiseLike<{ data: Unit | null; error: { message: string } | null }>
+      }
+    }
+  })('clinic_units')
+  const { data, error } = await inserir
+    .insert({ clinic_id: clinicId, name: name.trim(), address: address.trim(), price_cents: priceCents })
     .select('id,name,address,cnes')
     .single()
+  if (error || !data) fail(error ?? { message: 'A unidade não voltou do banco depois de cadastrada.' })
+  return data as Unit
+}
+
+export type DadosDaUnidade = {
+  name: string
+  address: string
+  cnes: string
+  /** Nulo so na agenda da telemedicina: o valor dela mora em clinic_settings. */
+  priceCents: number | null
+  infoText: string
+}
+
+/**
+ * Salva o cartao da unidade inteiro, num UPDATE so.
+ *
+ * Um so de proposito: ou entra tudo, ou nada muda. Salvar o valor e o texto em
+ * duas idas deixaria, numa falha no meio, o texto novo dizendo {valor} com o
+ * valor antigo - ou o contrario. A tela ja recusou o que estava errado antes de
+ * chegar aqui; o check do banco e a ultima trava.
+ */
+export async function saveUnit(unitId: string, dados: Partial<DadosDaUnidade>) {
+  const atualizar = (supabase.from as unknown as (n: string) => {
+    update: (valores: Record<string, unknown>) => {
+      eq: (coluna: string, valor: string) => PromiseLike<{ error: { message: string } | null }>
+    }
+  })('clinic_units')
+  const { error } = await atualizar
+    .update({
+      // So o que veio: o cartao da telemedicina nao mexe em endereco nem texto
+      // da unidade (o texto dela fica em clinic_settings).
+      ...(dados.name !== undefined ? { name: dados.name.trim() } : {}),
+      ...(dados.address !== undefined ? { address: dados.address.trim() } : {}),
+      ...(dados.cnes !== undefined ? { cnes: dados.cnes.replace(/\D/g, '') } : {}),
+      ...(dados.priceCents !== undefined ? { price_cents: dados.priceCents } : {}),
+      ...(dados.infoText !== undefined ? { info_text: dados.infoText.trim() } : {}),
+    })
+    .eq('id', unitId)
   if (error) fail(error)
-  return data
 }
 
 /**
@@ -3287,35 +3391,15 @@ export async function deleteRespostaPronta(id: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Informações que o robô dá por unidade, e a telemedicina
+// Telemedicina: o texto e o valor que o robo da (o texto de cada unidade fica
+// no cartao da unidade, ver saveUnit)
 // ---------------------------------------------------------------------------
 
-export type InformacoesDaUnidade = { id: string; nome: string; texto: string }
-export type Telemedicina = { ativa: boolean; texto: string }
-
-/** As unidades ativas com o texto que o robô responde na opção "Dúvidas". */
-export async function listInformacoesDasUnidades(clinicId: string): Promise<InformacoesDaUnidade[]> {
-  const { data, error } = await tabelaCrua('clinic_units')
-    .select('id,name,info_text,archived_at')
-    .eq('clinic_id', clinicId)
-    .order('name', { ascending: true })
-  if (error) fail(error)
-  // A agenda da telemedicina nao e lugar: o texto dela e o da telemedicina,
-  // logo abaixo na mesma tela.
-  const tele = await idsDaTelemedicina(clinicId)
-  return ((data ?? []) as { id: string; name: string; info_text: string | null; archived_at: string | null }[])
-    .filter((u) => !u.archived_at && !tele.has(u.id))
-    .map((u) => ({ id: u.id, nome: u.name, texto: u.info_text ?? '' }))
-}
-
-export async function saveInformacoesDaUnidade(unitId: string, texto: string) {
-  const atualizar = (supabase.from as unknown as (n: string) => {
-    update: (valores: Record<string, unknown>) => {
-      eq: (coluna: string, valor: string) => PromiseLike<{ error: { message: string } | null }>
-    }
-  })('clinic_units')
-  const { error } = await atualizar.update({ info_text: texto.trim() }).eq('id', unitId)
-  if (error) fail(error)
+export type Telemedicina = {
+  ativa: boolean
+  texto: string
+  /** Valor da consulta por video, em centavos (14/10/2026). Nulo = vazio. */
+  valorCentavos?: number | null
 }
 
 export async function getTelemedicina(clinicId: string): Promise<Telemedicina> {
@@ -3325,7 +3409,26 @@ export async function getTelemedicina(clinicId: string): Promise<Telemedicina> {
     .order('clinic_id', { ascending: true })
   if (error) fail(error)
   const linha = ((data ?? []) as { telemedicine_enabled?: boolean; telemedicine_info_text?: string | null }[])[0]
-  return { ativa: Boolean(linha?.telemedicine_enabled), texto: linha?.telemedicine_info_text ?? '' }
+  return {
+    ativa: Boolean(linha?.telemedicine_enabled),
+    texto: linha?.telemedicine_info_text ?? '',
+    valorCentavos: await valorDaTelemedicina(clinicId),
+  }
+}
+
+/** Coluna nova (14/10/2026), lida a parte: sem ela, o valor so aparece vazio. */
+async function valorDaTelemedicina(clinicId: string): Promise<number | null> {
+  try {
+    const { data, error } = await tabelaCrua('clinic_settings')
+      .select('telemedicine_price_cents')
+      .eq('clinic_id', clinicId)
+      .order('clinic_id', { ascending: true })
+    if (error) throw error
+    return ((data ?? []) as { telemedicine_price_cents?: number | null }[])[0]?.telemedicine_price_cents || null
+  } catch (erro) {
+    console.warn('Sem a coluna clinic_settings.telemedicine_price_cents', erro)
+    return null
+  }
 }
 
 export async function saveTelemedicina(clinicId: string, dados: Telemedicina) {
@@ -3335,7 +3438,13 @@ export async function saveTelemedicina(clinicId: string, dados: Telemedicina) {
     }
   })('clinic_settings')
   const { error } = await atualizar
-    .update({ telemedicine_enabled: dados.ativa, telemedicine_info_text: dados.texto.trim() })
+    .update({
+      telemedicine_enabled: dados.ativa,
+      telemedicine_info_text: dados.texto.trim(),
+      // So vai junto quando a tela mandou: quem salva sem conhecer o valor
+      // nao pode apaga-lo.
+      ...(dados.valorCentavos !== undefined ? { telemedicine_price_cents: dados.valorCentavos } : {}),
+    })
     .eq('clinic_id', clinicId)
   if (error) fail(error)
 }

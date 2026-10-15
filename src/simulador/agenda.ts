@@ -20,8 +20,13 @@ export type UnidadeDaAgenda = {
   id: string
   nome: string
   endereco: string
-  /** O texto da opcao 1 do menu: valor, endereco, o que levar. */
+  /** O texto da opcao 1 do menu: valor, endereco, o que levar. Pode ter {valor}. */
   informacoes: string
+  /**
+   * Valor da consulta em centavos (clinic_units.price_cents, 14/10/2026).
+   * Opcional: agenda salva no navegador antes disso nao tem, e fica sem valor.
+   */
+  valor?: number | null
   /** Convenio aceito; vazio = so particular, e o robo nao pergunta. */
   convenio: string
   /** A agenda da telemedicina (no maximo uma), como no sistema desde 03/10/2026. */
@@ -47,6 +52,8 @@ export type AgendaDaClinica = {
     antecedencia: number
   }
   telemedicinaAtiva: boolean
+  /** clinic_settings.telemedicine_price_cents (14/10/2026). */
+  telemedicinaValor?: number | null
 }
 
 export const DIAS_DA_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
@@ -79,6 +86,7 @@ export function tabelasDaAgenda(agenda: AgendaDaClinica, clinicId: string) {
       name: u.nome,
       address: u.endereco,
       info_text: u.informacoes,
+      price_cents: u.valor ?? null,
       accepts_insurance: u.convenio.trim() || null,
       telemedicina: u.telemedicina,
       archived_at: null,
@@ -117,6 +125,7 @@ export function tabelasDaAgenda(agenda: AgendaDaClinica, clinicId: string) {
     ],
     configuracoes: {
       telemedicine_enabled: agenda.telemedicinaAtiva,
+      telemedicine_price_cents: agenda.telemedicinaValor ?? null,
       schedule_slot_minutes: agenda.preferencias.duracao,
       schedule_horizon_days: agenda.preferencias.janela,
       schedule_min_notice_hours: agenda.preferencias.antecedencia,

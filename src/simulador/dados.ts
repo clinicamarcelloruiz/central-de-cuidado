@@ -104,8 +104,9 @@ const DEMO: Identidade = {
         convenio: '',
         telemedicina: false,
         periodos: [periodo('moema-ter', 2, '08:00', '12:00'), periodo('moema-qui', 4, '08:00', '12:00')],
+        valor: 450_00,
         informacoes:
-          '💙 *Consulta em Moema: R$ 450,00.* Inclui retorno em até 30 dias.\n\n' +
+          '💙 *Consulta em Moema: {valor}.* Inclui retorno em até 30 dias.\n\n' +
           '💳 Pagamento na recepção, na chegada: pix, débito ou crédito à vista. Não atendemos convênio, mas emitimos recibo para você pedir reembolso ao seu plano.\n\n' +
           '📍 Moema: Rua das Acácias, 1000, 10º andar. Estacionamento conveniado no prédio.\n\n' +
           '🖥️ Ao chegar, faça o check-in na recepção com o nome do paciente. A Dra. Ana recebe o aviso e chama vocês na sala de espera.\n\n' +
@@ -118,8 +119,9 @@ const DEMO: Identidade = {
         convenio: '',
         telemedicina: false,
         periodos: [periodo('pinheiros-qua', 3, '14:00', '18:00')],
+        valor: 550_00,
         informacoes:
-          '💙 *Consulta em Pinheiros: R$ 550,00.* Inclui retorno em até 30 dias.\n\n' +
+          '💙 *Consulta em Pinheiros: {valor}.* Inclui retorno em até 30 dias.\n\n' +
           '💳 Pagamento em pix ou cartão. Não atendemos convênio, mas emitimos recibo para você pedir reembolso ao seu plano.\n\n' +
           '📍 Pinheiros: Rua das Flores, 250. Estacionamento particular no local.\n\n' +
           '📋 Leve um documento com foto do responsável, a carteirinha de vacinação da criança e os exames anteriores, se houver.',
@@ -129,13 +131,14 @@ const DEMO: Identidade = {
     bloqueios: [],
     preferencias: PREFERENCIAS,
     telemedicinaAtiva: true,
+    telemedicinaValor: 450_00,
   },
   respostas: respostas(DEMO_ID, [
     {
       subject: 'Valor e pagamento',
       keywords: PALAVRAS_DO_VALOR,
       answer:
-        '💙 *Valores da consulta:*\n\n• Moema: R$ 450,00\n• Pinheiros: R$ 550,00\n• Telemedicina: R$ 450,00\n\n' +
+        '💙 *Valores da consulta:*\n\n{valores}\n\n' +
         'Todas incluem retorno em até 30 dias (na telemedicina, o retorno é presencial).\n\n' +
         '💳 Pagamento por pix ou cartão. Emitimos recibo para você pedir reembolso ao seu plano.',
       ask_unit: true,
@@ -154,7 +157,7 @@ const DEMO: Identidade = {
     O_QUE_LEVAR,
   ]),
   telemedicina:
-    '💙 *Telemedicina: R$ 450,00.* Inclui um retorno presencial em até 30 dias, em Moema ou em Pinheiros.\n\n' +
+    '💙 *Telemedicina: {valor}.* Inclui um retorno presencial em até 30 dias, em Moema ou em Pinheiros.\n\n' +
     '💳 Pagamento por pix, antes da consulta. O link da chamada chega por aqui no dia.',
   textos: {
     saudacao: 'Olá! 👋 Aqui é o Consultório Central de Cuidado, da Dra. Ana Ribeiro, pediatra.',
