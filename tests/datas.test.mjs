@@ -33,6 +33,16 @@ conferir('29/02 em ano comum nao existe', ler('29/02/2021') === null)
 conferir('Mes 13 nao existe', ler('01/13/2020') === null)
 conferir('Nascimento no futuro e erro de digitacao', ler('01/12/2026') === null)
 conferir('Texto livre fica sem data', ler('março de 2019') === null)
+// Painel de familias simuladas (14/10/2026): mes por extenso e data no meio
+// da frase eram aceitos na ficha e o cadastro saia sem data.
+conferir('Mês por extenso', ler('12 de março de 2020') === '2020-03-12', `veio ${ler('12 de março de 2020')}`)
+conferir('Mês abreviado sem "de"', ler('5 mar 2019') === '2019-03-05')
+conferir('Mês por extenso em maiúsculas', ler('12 DE MARCO DE 2020') === '2020-03-12')
+conferir('Data no meio da frase', ler('Lucas Ferreira Campos, nasceu 03/05/2022') === '2022-05-03')
+conferir('Data depois de uma reclamação', ler('ja falei kkk 03/05/2022') === '2022-05-03')
+conferir('Duas datas na frase: nenhuma', ler('nasceu 03/05/2022, consulta 21/10/2026') === null)
+conferir('Hora não vira data', ler('as 10:30') === null)
+conferir('Telefone não vira data', ler('13 99123-4567') === null)
 conferir('Vazio fica sem data', ler('') === null)
 
 console.log(`Datas: ${passou} verificações passaram.`)

@@ -172,6 +172,35 @@ function focar(conversationId: string) {
   conversaEmFoco = conversationId
 }
 
+// O relogio da mensagem em tratamento. Em producao e a hora de agora; no
+// simulador e nos testes, a hora que eles fixaram - sem isto, a janela de
+// jaMandada comparava a hora fixa da conversa com a hora real da maquina e
+// nunca achava nada (14/10/2026).
+let relogioEmFoco: Date | null = null
+// O mesmo vale para o aviso de horario ("fora do expediente, alguem responde
+// amanha"): no painel de familias simuladas ele saia pela hora da maquina, e
+// uma quarta as 14h virava "fora do horario" (14/10/2026). Em producao as
+// duas horas sao a mesma.
+
+// A crianca do telefone, quando ha uma so (15/10/2026). O menu cita o nome
+// dela ("Estamos aqui para cuidar de Helena"). Presa a conversa: o menu tambem
+// e chamado por fora (whatsapp-reply), e ali vale o texto generico.
+let criancaEmFoco: { conversa: string; nome: string } | null = null
+
+/**
+ * A saudacao para quem ja e paciente, dita a quem escreve (15/10/2026).
+ *
+ * O texto da clinica comeca com "Ola, {nome}!", e {nome} e o paciente - a
+ * crianca. Quem escreve e quase sempre a mae: o robo cumprimentava a Helena
+ * como se fosse ela digitando. O vocativo vira so "Ola!"; o nome continua onde
+ * fala DA crianca, e o menu logo abaixo cita o nome dela.
+ */
+export function saudacaoParaQuemEscreve(texto: string, primeiroNome: string): string {
+  return texto
+    .replace(/^(\s*)(ol[aá]|oi|bom dia|boa tarde|boa noite)\s*,?\s*\{nome\}\s*[!.,]?/i, '$1$2!')
+    .replace(/\{nome\}/g, primeiroNome)
+}
+
 function registrar(evento: string, detalhe?: string) {
   if (!conversaEmFoco) return
   // Sem esvaziar, um caminho novo que esqueca de colher deixaria a memoria da
@@ -220,7 +249,7 @@ export type ConsultaMarcada = {
 }
 
 function normalizar(texto: string) {
-  return texto.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase()
+  return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
 }
 
 /**
@@ -482,6 +511,16 @@ function desistiu(texto: string) {
  */
 function horaEscrita(texto: string): { hora: number; minuto: number | null } | null {
   const t = normalizar(texto)
+  // "9 e 20", "10 e meia", "8 em ponto" (painel, 14/10/2026): sem "h" nem ":"
+  // nada disso era lido como hora.
+  const falada = t.match(/\b(\d{1,2})\s+e\s+(\d{2}|meia)\b/)
+  if (falada) {
+    const hora = Number(falada[1])
+    const minuto = falada[2] === 'meia' ? 30 : Number(falada[2])
+    return hora <= 23 && minuto <= 59 ? { hora, minuto } : null
+  }
+  const emPonto = t.match(/\b(\d{1,2})\s*(?:h|hs|horas)?\s+em ponto\b/)
+  if (emPonto && Number(emPonto[1]) <= 23) return { hora: Number(emPonto[1]), minuto: 0 }
   if (!/[h:]/.test(t)) return null
   const m = t.match(/(\d{1,2})\s*[:h]\s*(\d{2})?/)
   if (!m) return null
@@ -490,6 +529,16 @@ function horaEscrita(texto: string): { hora: number; minuto: number | null } | n
   if (hora > 23) return null
   if (minuto !== null && minuto > 59) return null
   return { hora, minuto }
+}
+
+/**
+ * "Qualquer dia", "o mais cedo que tiver", "tanto faz" (14/10/2026): o pai com
+ * pressa do painel recebeu quatro "Nao entendi" seguidos dizendo isso. Numa
+ * lista de dias ou de horarios, e o primeiro.
+ */
+export function qualquerUm(texto: string): boolean {
+  const t = normalizar(texto).replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  return /\b(qualquer|qlq|qq|tanto faz|o mais cedo|a mais cedo|mais cedo possivel|o primeiro|a primeira|o mais proximo|a mais proxima|o que tiver|a que tiver|o que der|primeiro que tiver|primeira que tiver|o mais rapido|mais rapido possivel)\b/.test(t)
 }
 
 /** Le "31/08" e devolve dia e mes, para quem responde a data em vez do numero. */
@@ -816,13 +865,36 @@ export function retornoAlemDaAgenda(
   agora = new Date(),
 ): { dias: number; mes: string } | null {
   const t = normalizar(texto)
+  // "inclui retorno em 30 dias ne? nao vou pagar de novo?" (14/10/2026, segunda
+  // rodada do painel): "em 30 dias" ali e a regra do retorno, nao uma data
+  // pedida. O robo anotou "retorno para novembro" duas vezes para a mae que so
+  // queria saber se pagava, e a pergunta dela ficou sem resposta. Quem fala de
+  // preco ou de direito ao retorno pergunta; nao pede data.
+  if (/\b(inclu\w*|cobr\w*|pag(a|ar|o|ou|amos|ando|amento)|gratis|gratuito|custa\w*|preco|direito)\b/.test(t)) return null
+  // "daqui uns 40 dias", "em cerca de 2 meses" (14/10/2026): no painel, "voltar
+  // daqui uns 40 dias, mais ou menos no fim de novembro" abriu a agenda de 15
+  // dias - o "uns" e os "dias" nao eram lidos.
   const m = t.match(
-    /(?:\bem|\bdaqui a|\bdaqui|\bdentro de|\bapos|\bdepois de|\bpara daqui a)\s+(\d{1,2}|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze)\s+(mes|meses|semana|semanas|ano|anos)\b/,
+    /(?:\bem|\bdaqui a|\bdaqui|\bdentro de|\bapos|\bdepois de|\bpara daqui a)\s+(?:uns |umas |cerca de |mais ou menos |aproximadamente |uns? )?(\d{1,3}|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze)\s+(dias|mes|meses|semana|semanas|ano|anos)\b/,
   )
-  if (!m) return null
-  const n = /^\d+$/.test(m[1]) ? Number(m[1]) : NUMERO_POR_EXTENSO[m[1]]
-  const porUnidade = m[2].startsWith('mes') ? 30 : m[2].startsWith('semana') ? 7 : 365
-  const dias = n * porUnidade
+  let dias = 0
+  if (m) {
+    const n = /^\d+$/.test(m[1]) ? Number(m[1]) : NUMERO_POR_EXTENSO[m[1]]
+    const porUnidade = m[2] === 'dias' ? 1 : m[2].startsWith('mes') ? 30 : m[2].startsWith('semana') ? 7 : 365
+    dias = n * porUnidade
+  } else {
+    // O mes pelo nome: "dia 25 de novembro", "fim de novembro", "em dezembro".
+    const nomes = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
+    const doMes = new RegExp(`(?:\\b(\\d{1,2})\\s+de\\s+|\\b(fim|final|inicio|comeco|meio|meados)\\s+de\\s+|\\b(?:em|pra|para|no mes de)\\s+)(${nomes.join('|')})\\b`).exec(t)
+    if (!doMes) return null
+    const mesAlvo = nomes.indexOf(doMes[3])
+    const dia = doMes[1] ? Number(doMes[1]) : doMes[2] ? ({ fim: 25, final: 25, inicio: 5, comeco: 5, meio: 15, meados: 15 } as Record<string, number>)[doMes[2]] : 15
+    const hoje = new Date(agora.getTime() - 3 * 3600 * 1000)
+    let ano = hoje.getUTCFullYear()
+    if (mesAlvo < hoje.getUTCMonth()) ano += 1
+    const alvoData = Date.UTC(ano, mesAlvo, Math.min(Math.max(dia, 1), 28))
+    dias = Math.round((alvoData - Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())) / 86400000)
+  }
   if (!dias || dias <= horizonteDias) return null
   const alvo = new Date(agora.getTime() + dias * 86400000)
   const mes = alvo.toLocaleDateString('pt-BR', { month: 'long', timeZone: 'America/Sao_Paulo' })
@@ -842,7 +914,7 @@ async function pedirRetornoDistante(
     `🗓️ Anotei seu pedido de retorno para *${pedido.mes}*.\n\n` +
     `Nossa agenda abre só ${horizonteDias} dias à frente, então esse horário a nossa equipe ` +
     'reserva para você e confirma a data por aqui.\n\n' +
-    avisoDeHorario() + '\n\n' + VOLTA
+    avisoDeHorario(relogioEmFoco ?? new Date()) + '\n\n' + VOLTA
   // Na fila da equipe ja: so responde, sem mexer no estado.
   if (jaNaFila) return { resposta: texto, atencao: 'atendente' }
   const chamada = await chamarEquipe(admin, conversationId)
@@ -1166,8 +1238,11 @@ export async function mostrarMenu(
 
   // Com aviso, o aviso ja e a instrucao. Repetir "Como podemos ajudar?" logo
   // depois de "Nao entendi, responda com o numero" dava duas ordens seguidas.
+  // Com uma crianca so no telefone, o nome dela, sem artigo (o robo nao sabe
+  // se e menina ou menino): "cuidar do seu filho" saia ate para a Helena.
+  const crianca = criancaEmFoco?.conversa === conversationId ? criancaEmFoco.nome : ''
   const cabecalho = aviso ||
-    `${saudacao}\n\nEstamos aqui para cuidar do seu filho. Como podemos ajudar hoje?`
+    `${saudacao}\n\nEstamos aqui para cuidar ${crianca ? `de ${crianca}` : 'do seu filho'}. Como podemos ajudar hoje?`
   // A instrucao vai DEPOIS das opcoes de proposito: quem ja sabe o que quer
   // responde na hora, e quem hesitou tem a saida logo abaixo do que leu.
   const instrucao = aviso ? '' : '\n\nResponda com o número ou toque em "Ver opções".'
@@ -1229,7 +1304,7 @@ async function jaMandada(admin: Admin, conversationId: string, resposta: string)
       .eq('conversation_id', conversationId)
       .eq('direction', 'outbound')
       .eq('automatic', true)
-      .gte('created_at', new Date(Date.now() - JANELA_SEM_REPETIR_MS).toISOString())
+      .gte('created_at', new Date((relogioEmFoco ?? new Date()).getTime() - JANELA_SEM_REPETIR_MS).toISOString())
       .order('created_at', { ascending: false })
       .limit(10)
     if (error) throw error
@@ -1258,6 +1333,31 @@ export function despedida(texto: string): boolean {
 }
 
 const RESPOSTA_A_DESPEDIDA = '💙 Combinado! Quando quiser, é só escrever por aqui.'
+
+/** Quantos "Nao entendi" o robo acabou de mandar, um atras do outro (30 min). */
+async function naoEntendiSeguidos(admin: Admin, conversationId: string): Promise<number> {
+  try {
+    const { data, error } = await admin
+      .from('whatsapp_messages')
+      .select('body')
+      .eq('conversation_id', conversationId)
+      .eq('direction', 'outbound')
+      .eq('automatic', true)
+      .gte('created_at', new Date((relogioEmFoco ?? new Date()).getTime() - JANELA_SEM_REPETIR_MS).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(3)
+    if (error) throw error
+    let seguidos = 0
+    for (const m of (data ?? []) as { body?: string | null }[]) {
+      if (!String(m.body ?? '').startsWith('Não entendi')) break
+      seguidos += 1
+    }
+    return seguidos
+  } catch (erro) {
+    console.warn('Nao consegui contar os "Nao entendi" seguidos', erro)
+    return 0
+  }
+}
 
 async function responderPergunta(
   admin: Admin,
@@ -1364,10 +1464,19 @@ async function responderPergunta(
 // dizer o que fazer se a crianca piorasse. A palavra URGENCIA ja funcionava de
 // qualquer etapa; so ninguem contava isso a quem descrevia um sintoma.
 function fraseClinica(clinicId: string) {
-  return (
+  const frase =
     `Essa é uma avaliação para a consulta: é lá que ${quemAtende(clinicId).o} examina a criança e decide ` +
     'o que precisa investigar. Por aqui eu não posso orientar sobre sintomas, exames ou remédios. ' +
     'Se for urgente, digite *URGÊNCIA*.'
+  // Fora do expediente o pronto-socorro vem junto, sem depender da palavra
+  // URGENCIA (14/10/2026). No painel, a mae com o filho vomitando e com febre
+  // as 22h40 so ouviu "se for urgente, digite URGENCIA" - a frase do
+  // pronto-socorro existia, mas so para quem digitava a palavra.
+  if (dentroDoExpediente(relogioEmFoco ?? new Date())) return frase
+  return (
+    frase +
+    '\n\n*O consultório está fechado agora. Se a criança está mal, não espere a nossa resposta: ' +
+    'procure o pronto-socorro mais próximo ou ligue 192.*'
   )
 }
 
@@ -1538,7 +1647,7 @@ async function chamarEquipe(admin: Admin, conversationId: string): Promise<Resul
       'Estou direcionando você para alguém da nossa equipe.\n\n' +
       'Pode já escrever sua dúvida por aqui: a pessoa que assumir o atendimento ' +
       'vai ler tudo antes de responder.\n\n' +
-      avisoDeHorario() + '\n\n' + VOLTA,
+      avisoDeHorario(relogioEmFoco ?? new Date()) + '\n\n' + VOLTA,
     atencao: 'atendente',
   }
 }
@@ -1555,6 +1664,36 @@ async function chamarEquipe(admin: Admin, conversationId: string): Promise<Resul
  * "Recibo" so conta com verbo de pedido ou "da consulta": "voces emitem
  * recibo?" e pergunta sobre a clinica, e a resposta pronta de valores ja cobre.
  */
+/**
+ * "Perdi a receita", "preciso da segunda via" (14/10/2026).
+ *
+ * No painel, "Perdi a receita do omeprazol da Helena, tem como mandar segunda
+ * via?" recebeu a frase de assunto clinico ("nao posso orientar sobre
+ * remedios") - a palavra "receita" a punha na conta do sintoma. Pedido de 2a
+ * via e a opcao 5 do menu: vai direto para ela.
+ */
+export function pediuSegundaVia(texto: string): boolean {
+  const t = normalizar(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ')
+  return (
+    /\b(segunda|2|2a|outra|nova) via\b/.test(t) ||
+    /\bperd(i|eu|emos|ido)\b.{0,25}\b(receita|pedido de exame|pedido do exame|guia)\b/.test(t) ||
+    /\b(receita|pedido de exame) (de novo|novamente|nova)\b/.test(t)
+  )
+}
+
+/**
+ * Receita E exame no mesmo pedido (15/10/2026, painel de familias).
+ *
+ * "Preciso dos dois, a receita e tbm o pedido do exame de sangue": o robo
+ * perguntava o remedio, registrava a receita e esquecia o exame. A mae
+ * escreveu de novo e ficou sem resposta - a equipe so via a receita.
+ */
+export function pediuOsDoisDocumentos(texto: string): boolean {
+  const t = normalizar(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ')
+  if (/\b(os dois|as duas|ambos|ambas|1 e 2|um e outro)\b/.test(t)) return true
+  return /\b(receita|remedio|medicamento)\b/.test(t) && /\b(exame|exames|laboratorio|ultrassom|endoscopia)\b/.test(t)
+}
+
 export function pediuNotaFiscal(texto: string): boolean {
   const t = normalizar(texto)
   if (/(^|[^a-z])(nf|nfe|nfs|nfse|nfs-e|nota fiscal|notinha)([^a-z]|$)/.test(t)) return true
@@ -1579,7 +1718,7 @@ async function registrarPedidoDeNota(admin: Admin, conversationId: string): Prom
       '🧾 Anotei o pedido de *nota fiscal / recibo*.\n\n' +
       'Para a equipe já localizar, escreva aqui o *nome do paciente* e a *data da consulta*, ' +
       'se ainda não mandou.\n\n' +
-      avisoDeHorario(),
+      avisoDeHorario(relogioEmFoco ?? new Date()),
     atencao: 'documento',
   }
 }
@@ -1710,16 +1849,35 @@ async function cancelarConsulta(admin: Admin, appointmentId: string) {
  * proprio celular. Sem esta pergunta o sistema escolhia sozinho e marcava a
  * consulta no nome do irmao errado.
  */
+/**
+ * "Outra crianca", ainda sem cadastro (14/10/2026).
+ *
+ * Guardado em booking_patient_id no lugar de um paciente: e o que impede o
+ * robo de cair no "unico paciente do telefone". No painel de familias, a mae
+ * tocou em "Marcar mais uma" para o irmao de 16 anos, que nao tinha ficha, e
+ * a consulta foi gravada no nome da Helena - a unica cadastrada. Com este
+ * marcador a consulta nasce sem paciente e a ficha pergunta o nome, como para
+ * qualquer crianca nova. A coluna e uuid sem chave estrangeira; o uuid nulo
+ * nunca e id de paciente.
+ */
+const OUTRA_CRIANCA = '00000000-0000-0000-0000-000000000000'
+
 async function perguntarPaciente(
   admin: Admin,
   conversationId: string,
   pacientes: Paciente[],
+  /** Oferece "Outra criança" - nao na remarcacao, que e sempre da mesma. */
+  comOutra = false,
 ): Promise<Resultado> {
-  const linhas = pacientes.map((p, i) => `*${i + 1}* ${p.name}`).join('\n')
+  const opcoesDeQuem = [
+    ...pacientes.map((p) => ({ id: p.id, nome: p.name })),
+    ...(comOutra ? [{ id: OUTRA_CRIANCA, nome: 'Outra criança' }] : []),
+  ]
+  const linhas = opcoesDeQuem.map((p, i) => `*${i + 1}* ${p.nome}`).join('\n')
 
   await salvarEstado(admin, conversationId, {
     booking_state: 'aguardando_paciente',
-    booking_options: pacientes.map((p) => p.id),
+    booking_options: opcoesDeQuem.map((p) => p.id),
     booking_unit_id: null,
     booking_patient_id: null,
   })
@@ -1727,14 +1885,14 @@ async function perguntarPaciente(
   return {
     resposta:
       `👶 *Vamos agendar!* Para quem é a consulta?\n\n${linhas}\n\n` +
-      `Responda com o número. ${SAIDAS}`,
+      `Responda com o número ou o nome. ${SAIDAS}`,
     // Era a unica etapa sem lista tocavel: quem chegava aqui tinha de digitar,
     // enquanto nas telas seguintes bastava tocar. A troca de gesto no meio do
     // caminho e o tipo de coisa que faz a pessoa achar que travou.
     lista: {
       rotulo: 'Escolher paciente',
       linhas: comVoltar(
-        pacientes.map((p, i) => ({ id: String(i + 1), titulo: p.name.slice(0, 24) })),
+        opcoesDeQuem.map((p, i) => ({ id: String(i + 1), titulo: p.nome.slice(0, 24) })),
       ),
     },
   }
@@ -1751,6 +1909,8 @@ async function iniciarAgendamento(
   pacientes: Paciente[],
   consultas: ConsultaMarcada[] = [],
   jaAvisouDaOutra = false,
+  /** "Marcar mais uma": pergunta para quem, com "Outra criança" (ver OUTRA_CRIANCA). */
+  maisUma = false,
 ): Promise<Resultado> {
   // Ja existe consulta futura para este telefone. Seguir direto para as datas
   // produziria uma segunda consulta em silencio - e na maioria das vezes a
@@ -1785,8 +1945,10 @@ async function iniciarAgendamento(
     }
   }
 
-  if (pacientes.length > 1) {
-    return await perguntarPaciente(admin, conversationId, pacientes)
+  // "Marcar mais uma" pergunta para quem, mesmo com um paciente so: a outra
+  // consulta quase sempre e de outro filho (ver OUTRA_CRIANCA).
+  if (pacientes.length > 1 || (maisUma && pacientes.length === 1)) {
+    return await perguntarPaciente(admin, conversationId, pacientes, maisUma)
   }
   await salvarEstado(admin, conversationId, {
     booking_patient_id: pacientes[0]?.id ?? null,
@@ -1854,6 +2016,111 @@ async function unidadePeloNome(admin: Admin, clinicId: string, texto: string): P
     return palavras.every((p) => nome.includes(p))
   })
   return candidatas.length === 1 ? candidatas[0] : null
+}
+
+/**
+ * A unidade escrita do jeito que a pessoa fala, SO na pergunta "Em qual
+ * unidade?" (14/10/2026).
+ *
+ * O painel de familias simuladas travou 7 de 16 conversas aqui: "santos",
+ * "pode ser em santos", "sao paulo", "sp" recebiam "Nao entendi. Responda com o
+ * numero". unidadePeloNome exige que TODA palavra do texto esteja no nome da
+ * unidade - certo nas outras etapas, onde um "santos" solto no meio de uma
+ * frase nao pode trocar a unidade de quem esta escolhendo o horario. Aqui a
+ * pergunta e justamente qual unidade, entao basta a frase citar uma palavra
+ * que so uma unidade tem ("santos", "paulo", "ibirapuera"), ou um apelido
+ * ("sp", "online", "video"). Duas unidades citadas: nenhuma, e a lista volta.
+ */
+const PALAVRAS_GENERICAS_DE_UNIDADE = new Set(['livance', 'liferty', 'unidade', 'clinica', 'consultorio', 'por', 'sao'])
+
+function unidadeCitada(unidades: Unidade[], texto: string): Unidade | null {
+  const t = ` ${normalizar(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()} `
+  if (!t.trim() || /^\s*\d+\s*$/.test(t)) return null
+  const palavrasDe = (u: Unidade) =>
+    normalizar(u.name).replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((p) => p.length >= 3 && !PALAVRAS_GENERICAS_DE_UNIDADE.has(p))
+  const quantas = new Map<string, number>()
+  for (const u of unidades) for (const p of new Set(palavrasDe(u))) quantas.set(p, (quantas.get(p) ?? 0) + 1)
+  const apelido = (u: Unidade) =>
+    (/ (sp|sampa) /.test(t) && /\bpaulo\b/.test(normalizar(u.name))) ||
+    (/ (online|on line|video|videochamada|chamada de video|tele|remota|a distancia) /.test(t) && u.id === TELE_ID)
+  // "nao quero santos", "santos nao da" (segunda rodada do painel): a unidade
+  // negada nao e escolhida. Sem isso, "nao precisa ser em santos" abria as
+  // datas de Santos. Basta um "nao" ate quatro palavras antes, ou logo depois.
+  const negada = (p: string) => {
+    const palavras = t.trim().split(' ')
+    return palavras.some((w, i) => w === p && (palavras.slice(Math.max(0, i - 4), i).includes('nao') || palavras[i + 1] === 'nao'))
+  }
+  const citadas = unidades.filter((u) => palavrasDe(u).some((p) => quantas.get(p) === 1 && t.includes(` ${p} `) && !negada(p)) || apelido(u))
+  return citadas.length === 1 ? citadas[0] : null
+}
+
+/**
+ * "Deixa a que ja esta marcada", "esquece", "desisti" (14/10/2026).
+ *
+ * No painel, a mae que ia remarcar mudou de ideia no meio dos horarios e ouviu
+ * "Nao entendi. Responda com o numero do horario" duas vezes; outra agradeceu
+ * ("ta bom, obrigada!") com a lista de unidades na tela e recebeu o mesmo. Nas
+ * etapas do agendamento, isso e sair - e quem estava remarcando precisa ouvir
+ * que a consulta dela continua de pe.
+ */
+export function desistiuDoAgendamento(texto: string): boolean {
+  const t = normalizar(texto).replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (/\b(deixa|deixe|pode deixar)\b.{0,30}\b(marcada|como (esta|ta)|assim|pra la|quieto|mesma|original)\b/.test(t)) return true
+  if (/\b(desisti|desisto|esquece|esqueca|deixa pra la|deixa quieto|pensando bem)\b/.test(t)) return true
+  if (/\bnao (precisa|quero|vou) (mais|remarcar|marcar|mudar)\b/.test(t)) return true
+  // "nao agora nao precisa... obrigada" (segunda rodada do painel): a mae que
+  // acabara de cancelar ouviu "Nao entendi qual unidade". So no fim da frase:
+  // "nao precisa ser em Santos" e escolha, nao desistencia.
+  if (/\b(agora nao|nao agora)\b/.test(t) && !/\b(marcar|agendar|horario)\b/.test(t)) return true
+  if (/\bnao precisa( nao)?( mais)?( agora)?( obrigad[oa]s?)?$/.test(t)) return true
+  if (/\b(mant(er|em|enha|enho)|fica com|fico com)\b.{0,20}\b(consulta|que (ja|esta|ta)|original|mesma|data)\b/.test(t)) return true
+  // Agradecimento de despedida: "ok" sozinho nao, que no meio da lista pode
+  // ser so "li". Precisa de um obrigado de verdade.
+  return soAgradecimento(texto) && /\b(obrigad|valeu|agradec)/.test(t)
+}
+
+/**
+ * Desistencia que nao deixa duvida: vale mesmo quando a frase tambem tem dia ou
+ * hora (14/10/2026, segunda rodada do painel).
+ *
+ * "deixa quieto, vou manter a de quarta dia 21 mesmo", com a lista de dias da
+ * remarcacao na tela, abriu os horarios do dia 21: o "21" era lido antes da
+ * desistencia. Um toque a mais e a consulta das 08:00 seria cancelada e trocada
+ * por outra no mesmo dia - o contrario do que ela escreveu.
+ *
+ * So as formas que nao servem para trocar de escolha. "Pensando bem, prefiro
+ * quinta" e "esquece, quero as 10" sao troca, e continuam com
+ * desistiuDoAgendamento, que so vale quando nada mais foi entendido.
+ */
+export function desistiuComCerteza(texto: string): boolean {
+  const t = normalizar(texto).replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  return (
+    /\b(deixa|deixe) (quieto|pra la|como (esta|ta))\b/.test(t) ||
+    /\b(desisti|desisto)\b/.test(t) ||
+    /\b(vou|quero|prefiro|melhor|pode) mant(er|enho)\b/.test(t) ||
+    /\bnao (vou|quero|precisa) mais (remarcar|marcar|mudar|trocar)\b/.test(t)
+  )
+}
+
+async function sairDoAgendamento(
+  admin: Admin,
+  conversationId: string,
+  clinicId: string,
+  consultaASubstituir: string | null,
+  consultas: ConsultaMarcada[],
+): Promise<Resultado> {
+  await limparEstado(admin, conversationId)
+  const mantida = consultaASubstituir ? consultas.find((c) => c.id === consultaASubstituir) : null
+  if (mantida) {
+    const timezone = await fusoDaClinica(admin, clinicId)
+    return {
+      resposta:
+        `Tudo bem! Não mudei nada: sua consulta continua marcada.\n\n${descreverConsulta(mantida, timezone)}\n\n` +
+        'Se precisar, é só escrever por aqui. ' + VOLTA,
+      concluida: true,
+    }
+  }
+  return { resposta: 'Tudo bem, não marquei nada. Quando quiser, é só escrever por aqui. 💙', concluida: true }
 }
 
 async function perguntarUnidade(
@@ -2467,8 +2734,12 @@ async function marcar(
   // Paciente completo continua sem ser interrogado: camposQueFaltam devolve
   // lista vazia para quem ja tem tudo, remarcando ou nao.
   const faltam = camposQueFaltam(paciente)
+  // O nome da crianca no comprovante (14/10/2026): com irmaos no mesmo
+  // telefone, "Consulta marcada!" sem nome deixou a mae achando que tinha
+  // marcado os dois, quando so a Helena entrou.
+  const deQuem = paciente?.name ? `👶 ${paciente.name}\n` : ''
   const comprovante =
-    `✅ ${aviso}\n\n🗓️ ${quando}\n${tele ? "💻" : "📍"} ${onde}\n\n` +
+    `✅ ${aviso}\n\n${deQuem}🗓️ ${quando}\n${tele ? "💻" : "📍"} ${onde}\n\n` +
     '*Um dia antes da consulta enviamos uma mensagem aqui pelo WhatsApp para ' +
     'você confirmar sua presença.*'
 
@@ -2560,7 +2831,7 @@ const PERGUNTAS: {
     obrigatoria: true,
     coluna: 'intake_patient_name',
     texto: '👶 Qual é o *nome completo do paciente* (a criança)?',
-    ler: (t) => (t.trim().length >= 2 ? t.trim().slice(0, 160) : null),
+    ler: (t) => nomeDaFicha(t),
     erro: 'Não consegui ler o nome. Pode escrever de novo?',
   },
   {
@@ -2584,7 +2855,7 @@ const PERGUNTAS: {
     coluna: 'intake_guardian',
     colunaDoCadastro: 'guardian_name',
     texto: '👤 Qual é o *nome do responsável* (mãe, pai ou tutor)?',
-    ler: (t) => (t.trim().length >= 2 ? t.trim().slice(0, 160) : null),
+    ler: (t) => nomeDaFicha(t),
     erro: 'Não consegui ler o nome. Pode escrever de novo?',
   },
   {
@@ -2610,13 +2881,50 @@ const PERGUNTAS: {
     colunaDoCadastro: 'email',
     texto:
       '✉️ Por fim, qual é o *e-mail* para enviarmos receitas e documentos?',
-    ler: (t) => (emailValido(t) ? t.trim().slice(0, 160) : null),
+    // O e-mail dentro da frase vale ("o meu é ana@x.com"): so a frase inteira
+    // valer fazia o robo recusar uma resposta certa (14/10/2026).
+    ler: (t) => emailNaFrase(t),
     erro: 'Esse e-mail parece incompleto. Pode mandar de novo, ou responder PULAR.',
   },
 ]
 
 function soDigitos(texto: string) {
   return texto.replace(/\D/g, '')
+}
+
+/**
+ * O nome que a familia escreveu, sem o resto da frase (14/10/2026).
+ *
+ * No painel, "Lucas Ferreira Campos, nasceu 03/05/2022" foi gravado inteiro
+ * como nome da crianca, e "Fernanda Oliveira Prado, sou a mae" como nome do
+ * responsavel - e e esse texto que vai para o cadastro e para a receita. O
+ * nome acaba na primeira virgula, parentese ou data; "o nome dela e" e "sou
+ * a" na frente saem. Tudo minusculo ou tudo maiusculo ganha iniciais
+ * maiusculas ("ANA CLARA DOS SANTOS" vira "Ana Clara dos Santos"); quem
+ * escreveu com maiusculas do jeito dele fica como escreveu.
+ */
+function nomeDaFicha(texto: string): string | null {
+  let t = texto.trim()
+  t = t.replace(/^(o\s+)?(nome\s+(completo\s+)?(dela|dele|do paciente|da paciente|e|é)?\s*(e|é|:)?|ela se chama|ele se chama|se chama|meu nome (e|é)|eu sou (a|o)|sou (a|o))\s+/i, '')
+  t = t.split(/[,;(]|\s-\s|\s+\d/)[0]
+  t = t.replace(/\s+(nascid[oa]|nasceu|tem\s|sou\s|mae|mãe|pai|avo|avó)\b.*$/i, '')
+  t = t.replace(/[.!?]+$/, '').replace(/\s+/g, ' ').trim()
+  if (t.length < 2 || !/\p{L}/u.test(t)) return null
+  const tudoIgual = t === t.toLowerCase() || t === t.toUpperCase()
+  if (tudoIgual) {
+    const minusculas = new Set(['da', 'de', 'do', 'das', 'dos', 'e'])
+    t = t
+      .toLowerCase()
+      .split(' ')
+      .map((p, i) => (i > 0 && minusculas.has(p) ? p : p.charAt(0).toUpperCase() + p.slice(1)))
+      .join(' ')
+  }
+  return t.slice(0, 160)
+}
+
+function emailNaFrase(texto: string): string | null {
+  const m = texto.trim().match(/[^\s@,;:<>()]+@[^\s@,;:<>()]+\.[a-z]{2,}/i)
+  return m ? m[0].replace(/[.]+$/, '').slice(0, 160) : null
 }
 
 /**
@@ -2638,17 +2946,42 @@ function cpfValido(texto: string) {
   return true
 }
 
-function emailValido(texto: string) {
-  return /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(texto.trim())
+/**
+ * CPF mandado depois da ficha (15/10/2026, painel de familias).
+ *
+ * A mae pulou o CPF ("mando depois") e mandou no dia seguinte. O robo nao sabia
+ * onde guardar, respondia "nao consegui entender" e passava para a equipe - e a
+ * secretaria tinha de copiar o numero da conversa para o cadastro, a mao. Se
+ * ninguem copiasse, a receita digital do medico ficava sem CPF.
+ *
+ * So CPF que confere pelo digito (um telefone nao passa) e so em mensagem curta:
+ * numa frase longa o numero pode ser outra coisa, e quem le e a equipe.
+ */
+export function cpfMandadoDepois(texto: string): string | null {
+  const achado = texto.match(/\d{3}[.\s]?\d{3}[.\s]?\d{3}\s?[-.\s]?\s?\d{2}/)
+  if (!achado || !cpfValido(achado[0])) return null
+  const resto = normalizar(texto.replace(achado[0], ' ')).replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean)
+  return resto.length <= 12 ? soDigitos(achado[0]) : null
 }
 
 /** "pular", "nao sei", "nao tenho": tudo que significa "segue sem isso". */
 function pulou(texto: string) {
   const t = normalizar(texto)
-  return (
+  if (
     t === 'pular' || t === 'pula' || t === '-' || t === 'x' ||
     t === 'nao sei' || t === 'não sei' || t === 'nao tenho' || t === 'não tenho' ||
     t === 'nao lembro' || t === 'sem cpf' || t === 'nao possui' || t === 'depois'
+  ) return true
+  // Frase inteira (14/10/2026): "nao sei o CPF dela de cabeca, posso mandar
+  // depois?" recebia "Esse CPF nao confere"; "NAO TENHO EMAIL", "e-mail
+  // parece incompleto". Quem diz que nao sabe ou que manda depois esta pulando.
+  const f = t.replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  return (
+    /\b(pular|pula|pulo)\b/.test(f) ||
+    /\bnao (sei|lembro|tenho|tem|possui|uso|usamos|sabemos|tenho agora|sei agora)\b/.test(f) ||
+    /\b(mando|envio|passo|informo|vejo|mandamos) (isso |o cpf |o email |ele )?depois\b/.test(f) ||
+    /\bdepois (eu |a gente )?(mando|envio|passo|informo|vejo)\b/.test(f) ||
+    /\bsem (cpf|email|e mail)\b/.test(f)
   )
 }
 
@@ -2726,11 +3059,11 @@ async function terminarDados(
     try {
       const { data: consulta } = await admin
         .from('appointments')
-        .select('starts_at,modality,clinic_units(name,address)')
+        .select('starts_at,modality,intake_patient_name,clinic_units(name,address)')
         .eq('id', appointmentId)
         .maybeSingle()
       // Consulta que ja passou nao vira comprovante, venha de onde vier.
-      if (consulta && new Date(consulta.starts_at).getTime() > Date.now()) {
+      if (consulta && new Date(consulta.starts_at).getTime() > (relogioEmFoco ?? new Date()).getTime()) {
         const unidade = (Array.isArray(consulta.clinic_units)
           ? consulta.clinic_units[0]
           : consulta.clinic_units) as { name?: string; address?: string } | null
@@ -2739,8 +3072,9 @@ async function terminarDados(
         const onde = tele
           ? 'Telemedicina, por vídeo. O link da consulta chega aqui pelo WhatsApp antes do horário.'
           : `${unidade?.name ?? 'nossa unidade'}${unidade?.address ? `\n${unidade.address}` : ''}`
+        const nomeDaCrianca = String((consulta as { intake_patient_name?: string | null }).intake_patient_name ?? '').trim()
         comprovante =
-          `✅ *Consulta marcada!*\n\n🗓️ ${formatarData(consulta.starts_at, timezone)}\n${tele ? '💻' : '📍'} ${onde}\n\n` +
+          `✅ *Consulta marcada!*\n\n${nomeDaCrianca ? `👶 ${nomeDaCrianca}\n` : ''}🗓️ ${formatarData(consulta.starts_at, timezone)}\n${tele ? '💻' : '📍'} ${onde}\n\n` +
           '*Um dia antes da consulta enviamos uma mensagem aqui pelo WhatsApp para ' +
           'você confirmar sua presença.*\n\n'
       }
@@ -3089,6 +3423,10 @@ type PedidoDeDocumento = {
   paciente?: string
   tipo?: 'receita' | 'exame'
   item?: string
+  /** Pediu os dois (ver pediuOsDoisDocumentos): o que ainda falta perguntar. */
+  depois?: 'receita' | 'exame'
+  /** Os itens ja anotados antes do atual, quando sao dois. */
+  feitos?: { tipo: 'receita' | 'exame'; item: string }[]
 }
 
 function pedidoEmAndamento(opcoes: unknown): PedidoDeDocumento {
@@ -3114,9 +3452,11 @@ async function perguntarDeQuemEOPedido(
   admin: Admin,
   conversationId: string,
   pacientes: Paciente[],
+  inicio: PedidoDeDocumento = {},
 ): Promise<Resultado> {
   if (pacientes.length === 1) {
     return await perguntarTipoDoDocumento(admin, conversationId, {
+      ...inicio,
       pacienteId: pacientes[0].id,
       paciente: pacientes[0].name,
     })
@@ -3125,7 +3465,7 @@ async function perguntarDeQuemEOPedido(
   const cabem = pacientes.slice(0, MAX_TOQUES - 2)
   await salvarEstado(admin, conversationId, {
     booking_state: 'documento_paciente',
-    booking_options: { pedido: {}, pacientes: cabem.map((p) => p.id) },
+    booking_options: { pedido: inicio, pacientes: cabem.map((p) => p.id) },
   })
   return {
     resposta:
@@ -3144,6 +3484,9 @@ async function perguntarTipoDoDocumento(
   conversationId: string,
   pedido: PedidoDeDocumento,
 ): Promise<Resultado> {
+  // Ja disse que sao os dois: perguntar "receita ou exame?" seria fazer a
+  // pessoa escolher um e perder o outro.
+  if (pedido.depois) return await perguntarItem(admin, conversationId, { ...pedido, tipo: 'receita', depois: 'exame' })
   await salvarEstado(admin, conversationId, {
     booking_state: 'documento_tipo',
     booking_options: { pedido },
@@ -3160,6 +3503,26 @@ async function perguntarTipoDoDocumento(
       { id: '2', titulo: 'Pedido de exame' },
     ],
   }
+}
+
+/** Qual medicamento ou exame. Com dois pedidos, avisa que anota os dois. */
+async function perguntarItem(
+  admin: Admin,
+  conversationId: string,
+  pedido: PedidoDeDocumento,
+): Promise<Resultado> {
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'documento_item',
+    booking_options: { pedido },
+  })
+  const pergunta =
+    pedido.tipo === 'receita'
+      ? 'Qual medicamento? Pode escrever como está na receita.'
+      : 'Qual exame? Pode escrever como está no pedido.'
+  const ultimo = pedido.feitos?.at(-1)
+  if (ultimo) return { resposta: `Anotei: *${ultimo.item}*.\n\nAgora o ${pedido.tipo === 'exame' ? 'pedido de exame' : 'medicamento'}. ${pergunta}` }
+  if (pedido.depois) return { resposta: `Anoto os dois: a 2ª via da receita e o pedido de exame.\n\nPrimeiro: ${pergunta.charAt(0).toLowerCase()}${pergunta.slice(1)}` }
+  return { resposta: pergunta }
 }
 
 /**
@@ -3187,8 +3550,9 @@ async function perguntarExigencia(
   // Quem devolveu o documento muda com o tipo, e a pergunta precisa nomear a
   // pessoa certa: "a farmácia pediu correção no seu ultrassom?" faz a mae parar
   // para entender uma pergunta que nao era para ela.
-  const quemRecusou =
-    pedido.tipo === 'exame' ? 'O laboratório ou a clínica de exames' : 'A farmácia'
+  const quemRecusou = pedido.feitos?.length
+    ? 'A farmácia ou o laboratório'
+    : pedido.tipo === 'exame' ? 'O laboratório ou a clínica de exames' : 'A farmácia'
   return {
     resposta:
       `${quemRecusou} pediu alguma correção?\n\n` +
@@ -3224,7 +3588,10 @@ async function registrarPedido(
     auto_replies_while_waiting: 0,
   })
   const titulo = pedido.tipo ? NOME_DO_TIPO[pedido.tipo] : '📄 Documento'
-  const linhas = [`${titulo}${pedido.paciente ? ` · ${pedido.paciente}` : ''}`]
+  const dePaciente = pedido.paciente ? ` · ${pedido.paciente}` : ''
+  // Os dois itens no mesmo comprovante: para a equipe, esta mensagem E o pedido.
+  const linhas = (pedido.feitos ?? []).flatMap((f) => [`${NOME_DO_TIPO[f.tipo]}${dePaciente}`, f.item, ''])
+  linhas.push(`${titulo}${dePaciente}`)
   if (pedido.item) linhas.push(pedido.item)
   if (exigencia) linhas.push(`_Pediram correção:_ ${exigencia}`)
 
@@ -3277,6 +3644,44 @@ async function perguntarQuemPede(admin: Admin, conversationId: string): Promise<
   }
 }
 
+/**
+ * Farmacia escrevendo direto (15/10/2026, painel de familias).
+ *
+ * "Boa tarde, sou da Drogaria Sao Paulo, estou com uma receita do Dr. Marcello"
+ * recebia o aviso de sintoma ("nao posso orientar sobre remedios") e o menu que
+ * fala em "cuidar do seu filho". O caminho da farmacia ja existia, escondido
+ * dentro da opcao 5. So vale para numero sem paciente: a mae que escreve "estou
+ * na farmacia" continua sendo a mae.
+ */
+export function falaDeFarmacia(texto: string): boolean {
+  const t = normalizar(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  return (
+    /\b(sou|somos|aqui e|falo|falando|escrevo|e) (a |o )?(d[ao]s? )?(farmacia|drogaria)\b/.test(t) ||
+    /\b(farmaceutic[oa]|balconista)\b/.test(t) ||
+    /^((bom dia|boa tarde|boa noite|oi|ola) )?(farmacia|drogaria)\b/.test(t)
+  )
+}
+
+/** O recado da farmacia, registrado para a equipe. */
+async function registrarRecadoDaFarmacia(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+): Promise<Resultado> {
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'atendente',
+    booking_options: null,
+    auto_replies_while_waiting: 0,
+  })
+  return {
+    resposta:
+      `✅ Registrado. Vou passar para ${quemAtende(clinicId).o}.\n\n` +
+      'O documento corrigido é enviado ao paciente, não por este canal.\n\n' +
+      avisoDeHorario(relogioEmFoco ?? new Date()),
+    atencao: 'farmacia',
+  }
+}
+
 async function perguntarPedidoDaFarmacia(
   admin: Admin,
   conversationId: string,
@@ -3302,9 +3707,12 @@ async function iniciarDocumento(
   admin: Admin,
   conversationId: string,
   pacientes: Paciente[],
+  /** O texto que abriu o pedido, quando ja diz que sao os dois. */
+  texto = '',
 ): Promise<Resultado> {
   if (pacientes.length === 0) return await perguntarQuemPede(admin, conversationId)
-  return await perguntarDeQuemEOPedido(admin, conversationId, pacientes)
+  const inicio: PedidoDeDocumento = texto && pediuOsDoisDocumentos(texto) ? { depois: 'exame' } : {}
+  return await perguntarDeQuemEOPedido(admin, conversationId, pacientes, inicio)
 }
 
 // ---------------------------------------------------------------
@@ -3336,6 +3744,23 @@ export async function tratarConversa(
   if (resultado && naoEntendeu && opcoes.estadoAtual && !opcoes.podeIniciarMenu) {
     registrar('calou_com_equipe')
     return null
+  }
+  // Terceiro "Nao entendi" seguido (14/10/2026): o pai com pressa do painel
+  // recebeu quatro iguais e so saiu porque digitou um numero; um pai de
+  // verdade teria desistido. Na terceira vez, gente.
+  if (resultado && !resultado.atencao && resultado.resposta.startsWith('Não entendi')) {
+    const seguidos = await naoEntendiSeguidos(opcoes.admin, opcoes.conversationId)
+    if (seguidos >= 2) {
+      registrar('nao_entendi_repetido')
+      const chamada = await chamarEquipe(opcoes.admin, opcoes.conversationId)
+      return {
+        ...chamada,
+        resposta:
+          'Desculpe, não estou conseguindo entender por aqui. 🙏 Já chamei alguém da nossa equipe, ' +
+          'que continua a conversa com você.\n\n' +
+          avisoDeHorario(relogioEmFoco ?? new Date()) + '\n\n' + VOLTA,
+      }
+    }
   }
   // Ultima porta antes da familia (14/10/2026). Resposta pronta e fecho podem
   // trazer {valores} e {enderecos}, e saem por muitos caminhos (duvida no meio
@@ -3425,6 +3850,7 @@ async function tratarConversaPorDentro(opcoes: {
 }): Promise<Resultado> {
   const { admin, clinicId, conversationId, estadoAtual, texto } = opcoes
   const agora = opcoes.agora ?? new Date()
+  relogioEmFoco = agora
 
   // De quem sao os eventos daqui para baixo. Ver EventoDoRobo, la em cima.
   focar(conversationId)
@@ -3442,13 +3868,16 @@ async function tratarConversaPorDentro(opcoes: {
   const primeiroNome = (unico?.name ?? '').trim().split(/\s+/)[0] ?? ''
   const saudacao = (
     unico && opcoes.textos.saudacaoConhecida.trim()
-      ? opcoes.textos.saudacaoConhecida.replace(/\{nome\}/g, primeiroNome)
+      ? saudacaoParaQuemEscreve(opcoes.textos.saudacaoConhecida, primeiroNome)
       : opcoes.textos.saudacao
   ).trim() || quemAtende(clinicId).saudacaoPadrao
+  criancaEmFoco = unico && primeiroNome ? { conversa: conversationId, nome: primeiroNome } : null
 
   /** Quem vai no prontuario da consulta: o escolhido, ou o unico que existe. */
   const pacienteDaConsulta =
-    opcoes.pacientes.find((p) => p.id === opcoes.pacienteEmAndamento) ?? unico ?? null
+    opcoes.pacienteEmAndamento === OUTRA_CRIANCA
+      ? null
+      : (opcoes.pacientes.find((p) => p.id === opcoes.pacienteEmAndamento) ?? unico ?? null)
 
   // MENU vem antes de tudo, ate de "a equipe assumiu": e a saida de emergencia
   // que prometemos em toda mensagem, e promessa que falha uma vez nao vale.
@@ -3553,7 +3982,7 @@ async function tratarConversaPorDentro(opcoes: {
       resposta:
         '📎 Recebi o que você enviou e já avisei a nossa equipe: alguém do consultório vai olhar e responder por aqui.\n\n' +
         'Se quiser, escreva junto o que é e o que você gostaria de saber. Isso ajuda quem for responder.\n\n' +
-        avisoDeHorario() + '\n\n' +
+        avisoDeHorario(relogioEmFoco ?? new Date()) + '\n\n' +
         VOLTA,
       atencao: 'anexo',
     }
@@ -3762,6 +4191,51 @@ async function tratarConversaPorDentro(opcoes: {
     return pedido ? { pedido, horizonte } : null
   }
 
+  /**
+   * O que vale sem etapa e com o menu na tela, antes de nota e 2a via: o CPF
+   * mandado depois e o recado da farmacia (15/10/2026).
+   */
+  async function pedidoDireto(): Promise<Resultado | null> {
+    const cpf = cpfMandadoDepois(texto)
+    if (cpf) {
+      const semCpf = opcoes.pacientes.filter((p) => !soDigitos(p.cpf ?? ''))
+      const t = ` ${normalizar(texto).replace(/[^a-z\s]/g, ' ')} `
+      // Irmaos sem CPF: so com o nome da crianca na mensagem. Chutar poria o
+      // CPF de um no cadastro do outro.
+      const alvo =
+        semCpf.length === 1
+          ? semCpf[0]
+          : semCpf.find((p) => t.includes(` ${normalizar(p.name).split(/\s+/)[0]} `))
+      if (alvo) {
+        const { error } = await admin.from('patients').update({ cpf }).eq('id', alvo.id)
+        // Falhou: segue o caminho de sempre, que passa a mensagem para a equipe.
+        if (!error) {
+          registrar('cpf_depois')
+          const nome = alvo.name.trim().split(/\s+/)[0]
+          return {
+            resposta: `✅ Recebi o CPF de *${nome}*: já está no cadastro. Obrigado!\n\n` + VOLTA,
+            concluida: true,
+          }
+        }
+        console.warn('Nao consegui guardar o CPF mandado depois', error)
+      }
+    }
+    if (opcoes.pacientes.length === 0 && falaDeFarmacia(texto)) {
+      registrar('opcao_escolhida', '5')
+      // Recado completo na primeira mensagem: registra direto. So "sou da
+      // farmacia": pergunta o paciente e o que corrigir.
+      const palavras = normalizar(texto).split(/\s+/).filter(Boolean).length
+      const resultado =
+        palavras >= 10
+          ? await registrarRecadoDaFarmacia(admin, clinicId, conversationId)
+          : await perguntarPedidoDaFarmacia(admin, conversationId)
+      if (opcoes.jaViuOMenu) return resultado
+      await salvarEstado(admin, conversationId, { menu_sent_at: new Date().toISOString() })
+      return { ...resultado, resposta: `${saudacao}\n\n${resultado.resposta}` }
+    }
+    return null
+  }
+
   // ---- Sem etapa em andamento ----
   if (!estadoAtual) {
     // Retorno para daqui a meses (05/10/2026): a agenda nao chega la, entao a
@@ -3836,7 +4310,7 @@ async function tratarConversaPorDentro(opcoes: {
             `${quemAtende(clinicId).o} fica sabendo. Se for preciso, alguém responde por aqui.\n\n` +
             // Relato de sintoma ganha a saida de urgencia (09/10/2026).
             (assuntoClinico(texto) ? 'Se a criança piorar, digite *URGÊNCIA*.\n\n' : '') +
-            avisoDeHorario() + '\n\n' + VOLTA,
+            avisoDeHorario(relogioEmFoco ?? new Date()) + '\n\n' + VOLTA,
         }
       }
     }
@@ -3854,8 +4328,21 @@ async function tratarConversaPorDentro(opcoes: {
     }
     if (despedida(texto)) return { resposta: RESPOSTA_A_DESPEDIDA, concluida: true }
 
+    // CPF mandado depois e farmacia. Ver pedidoDireto.
+    const direto = await pedidoDireto()
+    if (direto) return direto
+
     // Nota fiscal: a mensagem ja diz o que a pessoa quer. Ver pediuNotaFiscal.
     if (pediuNotaFiscal(texto)) return await registrarPedidoDeNota(admin, conversationId)
+
+    // "Perdi a receita, tem segunda via?": a opcao 5, direto. Ver pediuSegundaVia.
+    if (pediuSegundaVia(texto)) {
+      registrar('opcao_escolhida', '5')
+      const documento = await iniciarDocumento(admin, conversationId, opcoes.pacientes, texto)
+      if (opcoes.jaViuOMenu) return documento
+      await salvarEstado(admin, conversationId, { menu_sent_at: new Date().toISOString() })
+      return { ...documento, resposta: `${saudacao}\n\n${documento.resposta}` }
+    }
 
     // Quem pediu para marcar na primeira mensagem vai direto para a agenda,
     // COM a apresentacao em cima (01/10/2026).
@@ -3965,7 +4452,11 @@ async function tratarConversaPorDentro(opcoes: {
     // Pular vale nos campos opcionais, sem justificativa e sem insistir. Nos
     // obrigatorios o robo pede de novo, uma vez - e depois segue, porque
     // insistir eternamente prenderia quem nao pode responder agora.
-    if (pulou(texto)) {
+    // CPF ou e-mail validos na mesma frase vencem o "nao sei": "nao tenho o
+    // meu, o do pai e ana@x.com" respondeu a pergunta.
+    const temValorValido =
+      (perguntaAtual.chave === 'cpf' || perguntaAtual.chave === 'email') && perguntaAtual.ler(texto) !== null
+    if (pulou(texto) && !temValorValido) {
       if (perguntaAtual.obrigatoria && tentativas < 1) {
         await salvarEstado(admin, conversationId, {
           booking_options: { tentativas: tentativas + 1, faltam, manual },
@@ -4001,14 +4492,29 @@ async function tratarConversaPorDentro(opcoes: {
       return {
         resposta:
           perguntaAtual.erro +
-          (perguntaAtual.obrigatoria ? '' : '\n\n_Ou digite PULAR para seguir sem esse dado._'),
+          // O erro do CPF e do e-mail ja fala em PULAR: duas vezes na mesma
+          // mensagem era ruido (painel, 14/10/2026).
+          (perguntaAtual.obrigatoria || /PULAR/.test(perguntaAtual.erro) ? '' : '\n\n_Ou digite PULAR para seguir sem esse dado._'),
         botoes: perguntaAtual.obrigatoria ? undefined : [{ id: 'PULAR', titulo: 'Pular' }],
       }
     }
 
     await guardarDado(admin, consulta, perguntaAtual, valor, pacienteDaConsulta)
-    return restantes.length
-      ? await perguntarDados(admin, conversationId, consulta, restantes, '', manual)
+    // Nome e data na mesma mensagem ("Lucas Ferreira Campos, nasceu
+    // 03/05/2022"): a data ja vem guardada e a pergunta dela nao se repete. No
+    // painel, a mae respondeu "ja falei kkk" (14/10/2026).
+    let seguintes = restantes
+    if (perguntaAtual.chave === 'nome' && seguintes.includes('nascimento')) {
+      const nascimento = dataDeNascimentoIso(texto, agora)
+      const perguntaDaData = PERGUNTAS.find((p) => p.chave === 'nascimento')
+      if (nascimento && perguntaDaData) {
+        const [ano, mes, dia] = nascimento.split('-')
+        await guardarDado(admin, consulta, perguntaDaData, `${dia}/${mes}/${ano}`, pacienteDaConsulta)
+        seguintes = seguintes.filter((chave) => chave !== 'nascimento')
+      }
+    }
+    return seguintes.length
+      ? await perguntarDados(admin, conversationId, consulta, seguintes, '', manual)
       : await terminarDados(admin, conversationId, clinicId, consulta, manual)
   }
 
@@ -4085,7 +4591,18 @@ async function tratarConversaPorDentro(opcoes: {
     if (!opcoes.podeIniciarMenu) return null
 
     // Com o menu na tela, a pessoa pode escrever o pedido em vez de escolher.
+    const direto = await pedidoDireto()
+    if (direto) return direto
     if (pediuNotaFiscal(texto)) return await registrarPedidoDeNota(admin, conversationId)
+
+    // "Perdi a receita, tem segunda via?": a opcao 5, direto. Ver pediuSegundaVia.
+    if (pediuSegundaVia(texto)) {
+      registrar('opcao_escolhida', '5')
+      const documento = await iniciarDocumento(admin, conversationId, opcoes.pacientes, texto)
+      if (opcoes.jaViuOMenu) return documento
+      await salvarEstado(admin, conversationId, { menu_sent_at: new Date().toISOString() })
+      return { ...documento, resposta: `${saudacao}\n\n${documento.resposta}` }
+    }
 
     if (despedida(texto)) return { resposta: RESPOSTA_A_DESPEDIDA, concluida: true }
 
@@ -4110,7 +4627,7 @@ async function tratarConversaPorDentro(opcoes: {
           'Obrigado por nos contar! 💙 Sua mensagem já está com a nossa equipe, e ' +
           `${quemAtende(clinicId).o} fica sabendo. Se for preciso, alguém responde por aqui.\n\n` +
           'Se a criança piorar, digite *URGÊNCIA*.\n\n' +
-          avisoDeHorario() + '\n\n' + VOLTA,
+          avisoDeHorario(relogioEmFoco ?? new Date()) + '\n\n' + VOLTA,
       }
     }
 
@@ -4207,18 +4724,7 @@ async function tratarConversaPorDentro(opcoes: {
         resposta: 'Pode escrever o nome do paciente e o que precisa ser corrigido.',
       }
     }
-    await salvarEstado(admin, conversationId, {
-      booking_state: 'atendente',
-      booking_options: null,
-      auto_replies_while_waiting: 0,
-    })
-    return {
-      resposta:
-        `✅ Registrado. Vou passar para ${quemAtende(clinicId).o}.\n\n` +
-        'O documento corrigido é enviado ao paciente, não por este canal.\n\n' +
-        avisoDeHorario(),
-      atencao: 'farmacia',
-    }
+    return await registrarRecadoDaFarmacia(admin, clinicId, conversationId)
   }
 
   // Para qual filho.
@@ -4262,6 +4768,7 @@ async function tratarConversaPorDentro(opcoes: {
       }
     }
     return await perguntarTipoDoDocumento(admin, conversationId, {
+      ...pedidoEmAndamento(opcoes.opcoesAtuais),
       pacienteId: escolhido.id,
       paciente: escolhido.name,
     })
@@ -4312,17 +4819,13 @@ async function tratarConversaPorDentro(opcoes: {
         ],
       }
     }
-    const tipo = porPalavra ?? (escolhido === 0 ? 'receita' : 'exame')
-    await salvarEstado(admin, conversationId, {
-      booking_state: 'documento_item',
-      booking_options: { pedido: { ...pedido, tipo } },
-    })
-    return {
-      resposta:
-        tipo === 'receita'
-          ? 'Qual medicamento? Pode escrever como está na receita.'
-          : 'Qual exame? Pode escrever como está no pedido.',
+    // "Preciso dos dois": primeiro a receita, depois o exame (ver
+    // pediuOsDoisDocumentos).
+    if (pediuOsDoisDocumentos(texto)) {
+      return await perguntarItem(admin, conversationId, { ...pedido, tipo: 'receita', depois: 'exame' })
     }
+    const tipo = porPalavra ?? (escolhido === 0 ? 'receita' : 'exame')
+    return await perguntarItem(admin, conversationId, { ...pedido, tipo })
   }
 
   // Qual medicamento ou exame. Texto livre - e de proposito: ninguem tem a
@@ -4371,9 +4874,22 @@ async function tratarConversaPorDentro(opcoes: {
           'original, então a 2ª via não pode ser resolvida por aqui automaticamente.\n\n' +
           'Já avisei a equipe: alguém do consultório responde por aqui para combinar como ' +
           'retirar.\n\n' +
-          avisoDeHorario(),
+          // O exame que ainda faltava perguntar nao some: a equipe le aqui.
+          (pedido.depois ? 'Escreva aqui também qual exame você precisa, que a equipe vê junto.\n\n' : '') +
+          avisoDeHorario(relogioEmFoco ?? new Date()),
         atencao: 'documento',
       }
+    }
+
+    // Era o primeiro de dois: anota e pergunta o segundo.
+    if (pedido.depois && pedido.tipo) {
+      return await perguntarItem(admin, conversationId, {
+        ...pedido,
+        feitos: [...(pedido.feitos ?? []), { tipo: pedido.tipo, item }],
+        tipo: pedido.depois,
+        depois: undefined,
+        item: undefined,
+      })
     }
 
     return await perguntarExigencia(admin, conversationId, { ...pedido, item })
@@ -4403,6 +4919,12 @@ async function tratarConversaPorDentro(opcoes: {
 
   // ---- Informacoes: de qual unidade? ----
   if (estadoAtual === 'informacoes_unidade') {
+    // Pedido de nota fiscal com a lista de unidades na tela (14/10/2026): no
+    // painel, "preciso da nota fiscal da consulta do mes passado" casou com a
+    // resposta de idade ("mes") e o pedido nao foi anotado. Pedido de nota e
+    // pedido de nota em qualquer etapa de informacao. Pergunta sobre nota ("voces
+    // emitem no nome da empresa?") continua indo para a equipe, mais abaixo.
+    if (pediuNotaFiscal(texto) && !parecePergunta(texto)) return await registrarPedidoDeNota(admin, conversationId)
     const ids = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
     let indice = escolha(texto, ids.length)
     // A unidade pelo nome (09/10/2026). A Mayara tocou em "Livance · Santos"
@@ -4434,6 +4956,14 @@ async function tratarConversaPorDentro(opcoes: {
       // Resposta pronta continua primeiro: se a clinica ja cadastrou aquilo,
       // a familia recebe na hora. Frase curta ("oi", "sim") segue no "nao
       // entendi" de sempre.
+      // "ENTAO QUERO MARCAR EM SAO PAULO PRO MEU NETO" (segunda rodada do
+      // painel): a avo tinha visto o endereco e a idade atendida, pediu para
+      // marcar e ouviu "Passei sua pergunta para a equipe" - duas vezes. Pedido
+      // de marcar e pedido de marcar, tambem aqui. Pergunta ("da pra marcar
+      // sabado?") e sintoma continuam no caminho de baixo.
+      if (pediuAgendamento(texto) && !parecePergunta(texto) && !assuntoClinico(texto)) {
+        return await iniciarAgendamento(admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas)
+      }
       const palavrasDaDuvida = normalizar(texto).replace(/[^a-z\s]/g, ' ').trim().split(/\s+/).filter((p) => p.length > 1)
       if (palavrasDaDuvida.length >= 3) {
         const clinica = assuntoClinico(texto)
@@ -4447,7 +4977,7 @@ async function tratarConversaPorDentro(opcoes: {
           resposta:
             (clinica ? fraseClinica(clinicId) + '\n\n' : '') +
             'Passei sua pergunta para a nossa equipe, que responde por aqui.\n\n' +
-            avisoDeHorario() + '\n\n' + VOLTA,
+            avisoDeHorario(relogioEmFoco ?? new Date()) + '\n\n' + VOLTA,
         }
       }
       // A lista volta junto do "nao entendi": sem ela, o unico botao na tela
@@ -4596,7 +5126,7 @@ async function tratarConversaPorDentro(opcoes: {
     }
     if (escolhido === 1) {
       return await iniciarAgendamento(
-        admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas, true,
+        admin, clinicId, conversationId, opcoes.pacientes, opcoes.consultas, true, true,
       )
     }
     // 24/09/2026: a mae saiu do cadastro, tocou em "Marcar uma consulta",
@@ -4619,18 +5149,39 @@ async function tratarConversaPorDentro(opcoes: {
     if (pediuVoltar(texto)) return await mostrarMenu(admin, conversationId, saudacao)
 
     const ids = Array.isArray(opcoes.opcoesAtuais) ? (opcoes.opcoesAtuais as string[]) : []
-    const indice = escolha(texto, ids.length)
+    let indice = escolha(texto, ids.length)
+    // Pelo nome ("Theo") ou "outro filho" (painel, 14/10/2026: "Theo" dava
+    // "Nao entendi" aqui, embora a 2a via ja aceitasse o nome).
     if (indice === null) {
+      const t = ` ${normalizar(texto).replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()} `
+      const porNome = opcoes.pacientes.filter((p) => {
+        const primeiro = normalizar(p.name).split(/\s+/)[0]
+        return primeiro.length >= 2 && t.includes(` ${primeiro} `)
+      })
+      if (porNome.length === 1) indice = ids.indexOf(porNome[0].id)
+      else if (ids.includes(OUTRA_CRIANCA) && / (outr[oa]|irma[o]?|nov[oa]|ainda nao tem cadastro|sem cadastro) /.test(t)) {
+        indice = ids.indexOf(OUTRA_CRIANCA)
+      }
+      if (indice !== null && indice < 0) indice = null
+    }
+    if (indice === null) {
+      if (desistiuDoAgendamento(texto)) {
+        return await sairDoAgendamento(admin, conversationId, clinicId, opcoes.consultaASubstituir ?? null, opcoes.consultas)
+      }
       return {
         resposta: await naoEntendi(
           admin,
           clinicId,
           texto,
-          'Responda com o número do paciente da lista acima.\n\n' + VOLTA,
+          'Responda com o número ou o nome do paciente da lista acima.\n\n' + VOLTA,
         ),
       }
     }
 
+    if (ids[indice] === OUTRA_CRIANCA) {
+      await salvarEstado(admin, conversationId, { booking_patient_id: OUTRA_CRIANCA })
+      return await perguntarUnidade(admin, clinicId, conversationId)
+    }
     const escolhido = opcoes.pacientes.find((p) => p.id === ids[indice])
     if (!escolhido) {
       return await mostrarMenu(
@@ -4652,24 +5203,31 @@ async function tratarConversaPorDentro(opcoes: {
     // "3" aqui e ambiguo: pode ser a terceira unidade ou "falar com a equipe".
     // A lista manda, porque foi ela que a pessoa acabou de ler.
     const indice = escolha(texto, ids.length)
-    if (indice === null) {
+    const unidades = await opcoesDeAtendimento(admin, clinicId)
+    // Pelo nome, quando nao veio numero (ver unidadeCitada).
+    const citada = indice === null ? unidadeCitada(unidades, texto) : null
+    if (indice === null && !citada) {
       if (pediuVoltar(texto)) {
         return opcoes.pacientes.length > 1
           ? await perguntarPaciente(admin, conversationId, opcoes.pacientes)
           : await mostrarMenu(admin, conversationId, saudacao)
       }
+      if (desistiuDoAgendamento(texto)) {
+        return await sairDoAgendamento(admin, conversationId, clinicId, opcoes.consultaASubstituir ?? null, opcoes.consultas)
+      }
+      const naoEntendeu = await naoEntendi(admin, clinicId, texto, 'Responda com o número da unidade da lista acima.\n\n' + VOLTA)
+      // Resposta pronta (a pessoa perguntou outra coisa) fica como esta. O
+      // "nao entendi" puro volta COM a lista: sem ela, o unico botao na tela
+      // era "Voltar ao inicio" (painel de 14/10/2026).
+      if (!naoEntendeu.startsWith('Não entendi')) return { resposta: naoEntendeu }
+      const deNovo = await perguntarUnidade(admin, clinicId, conversationId)
       return {
-        resposta: await naoEntendi(
-          admin,
-          clinicId,
-          texto,
-          'Responda com o número da unidade da lista acima.\n\n' + VOLTA,
-        ),
+        ...deNovo,
+        resposta: `Não entendi qual unidade. Responda com o número da unidade ou escreva o nome (por exemplo, ${tituloCurto(unidades[0]?.name ?? 'Santos')}).\n\n${deNovo.resposta}`,
       }
     }
 
-    const unidades = await opcoesDeAtendimento(admin, clinicId)
-    const escolhida = unidades.find((u) => u.id === ids[indice])
+    const escolhida = citada ?? unidades.find((u) => u.id === ids[indice as number])
     if (!escolhida) {
       return await mostrarMenu(
         admin,
@@ -4745,6 +5303,10 @@ async function tratarConversaPorDentro(opcoes: {
     if (pediuVoltar(texto)) {
       return await perguntarUnidade(admin, clinicId, conversationId)
     }
+    // Antes da data escrita (ver desistiuComCerteza).
+    if (desistiuComCerteza(texto)) {
+      return await sairDoAgendamento(admin, conversationId, clinicId, opcoes.consultaASubstituir ?? null, opcoes.consultas)
+    }
 
     // Tocou o nome de uma unidade numa lista de cima: troca de unidade.
     const outraUnidade = await unidadePeloNome(admin, clinicId, texto)
@@ -4763,7 +5325,8 @@ async function tratarConversaPorDentro(opcoes: {
       : -1
 
     const porNome = porData >= 0 ? -1 : diaPeloNome(texto, dias, agora)
-    const indice = porData >= 0 ? porData : porNome >= 0 ? porNome : escolha(texto, dias.length)
+    let indice = porData >= 0 ? porData : porNome >= 0 ? porNome : escolha(texto, dias.length)
+    if (indice === null && dias.length > 0 && qualquerUm(texto)) indice = 0
     // Dia da semana sem vaga: "sexta" quando a unidade nao atende sexta. Dizer
     // isso e mais util que "nao entendi" - a pessoa foi entendida.
     const diaCitado = indice === null ? DIAS_DA_SEMANA.find((d) => new RegExp(`\\b${d}\\b`).test(normalizar(texto))) : undefined
@@ -4781,14 +5344,29 @@ async function tratarConversaPorDentro(opcoes: {
       }
     }
     if (indice === null) {
+      if (desistiuDoAgendamento(texto)) {
+        return await sairDoAgendamento(admin, conversationId, clinicId, opcoes.consultaASubstituir ?? null, opcoes.consultas)
+      }
+      // Data alem da agenda ("e pro dia 25 de novembro?"): a equipe reserva.
+      // No painel, a mae ouviu duas vezes "Nao entendi" (14/10/2026).
+      const horizonte = await horizonteDaAgenda(admin, clinicId)
+      const distante = retornoAlemDaAgenda(texto, horizonte, agora)
+      if (distante) return await pedirRetornoDistante(admin, conversationId, distante, horizonte, false)
       return {
         resposta: await naoEntendi(
           admin,
           clinicId,
           texto,
+          // A saida para data distante continua na tela: sem ela, quem queria
+          // novembro so tinha a lista de outubro e o "Nao entendi".
           'Responda com o número do dia da lista acima.\n' +
-            'Digite VOLTAR para escolher outra unidade, ou 0 para o início.',
+            'Digite VOLTAR para escolher outra unidade, *9* se precisar de uma data mais distante, ou 0 para o início.',
         ),
+        botoes: [
+          { id: 'VOLTAR', titulo: 'Outra unidade' },
+          { id: '9', titulo: 'Data mais distante' },
+          { id: '0', titulo: 'Voltar ao menu' },
+        ],
       }
     }
     if (!unidadeEmAndamento) {
@@ -4810,6 +5388,11 @@ async function tratarConversaPorDentro(opcoes: {
 
   // ---- Escolha do horario ----
   if (estadoAtual === 'aguardando_horario') {
+    // Antes da hora escrita: "vou manter a das 8 mesmo" e desistencia, e lida
+    // como hora trocaria a consulta (ver desistiuComCerteza).
+    if (desistiuComCerteza(texto)) {
+      return await sairDoAgendamento(admin, conversationId, clinicId, opcoes.consultaASubstituir ?? null, opcoes.consultas)
+    }
     // Mesma troca de unidade do passo do dia (ver unidadePeloNome).
     {
       const outraUnidade = await unidadePeloNome(admin, clinicId, texto)
@@ -4835,6 +5418,12 @@ async function tratarConversaPorDentro(opcoes: {
         const [hh, mm] = formatarHora(h.inicio, timezone).split(':').map(Number)
         return hh === pedida.hora && (pedida.minuto === null || mm === pedida.minuto)
       })
+
+      // "8h", "14 horas": a hora cheia, quando existe (14/10/2026). Perguntar
+      // "temos 14:00 e 14:40" a quem disse "14 horas" era um passo a toa - so
+      // quem disse "10h" para um dia de 10:00 e 10:40 sem 10:00 ainda escolhe.
+      const cheia = pedida.minuto === null ? daHora.filter((h) => formatarHora(h.inicio, timezone).endsWith(':00')) : []
+      if (cheia.length === 1) daHora.splice(0, daHora.length, cheia[0])
 
       if (daHora.length === 1) {
         if (!unidadeEmAndamento) {
@@ -4900,8 +5489,12 @@ async function tratarConversaPorDentro(opcoes: {
       }
     }
 
-    const indice = escolha(texto, lista.length)
+    let indice = escolha(texto, lista.length)
+    if (indice === null && lista.length > 0 && qualquerUm(texto)) indice = 0
     if (indice === null) {
+      if (desistiuDoAgendamento(texto)) {
+        return await sairDoAgendamento(admin, conversationId, clinicId, opcoes.consultaASubstituir ?? null, opcoes.consultas)
+      }
       return {
         resposta: await naoEntendi(
           admin,

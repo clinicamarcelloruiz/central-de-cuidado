@@ -54,6 +54,7 @@ function fazerAdmin({
   // O que o robo ja mandou nesta conversa, como o webhook grava. E daqui que
   // ele confere se uma resposta pronta acabou de sair (jaMandada).
   const enviadas = []
+  const dadosDasConsultas = []
 
   const chain = (resultado) => ({
     select: () => chain(resultado),
@@ -203,6 +204,12 @@ function fazerAdmin({
                 if (campos.status === 'cancelled') canceladas.push(valor)
                 return { error: null }
               },
+              // UPDATE com um filtro so (a ficha gravando nome, nascimento...):
+              // o que foi gravado fica em dadosDasConsultas, para o teste ler.
+              then: (resolver) => {
+                dadosDasConsultas.push({ id: valor, ...campos })
+                resolver({ error: null })
+              },
             }),
           }),
         }
@@ -232,7 +239,7 @@ function fazerAdmin({
       throw new Error('rpc nao prevista: ' + nome)
     },
   }
-  return { admin, conversa, marcadas, canceladas, fichas, enviadas }
+  return { admin, conversa, marcadas, canceladas, fichas, enviadas, dadosDasConsultas }
 }
 
 const TRES_UNIDADES = [
@@ -293,7 +300,7 @@ const VAZIO = Symbol('vazio')
 const SEXTA_23H = new Date('2026-10-10T02:00:00Z')
 
 async function caso(titulo, passos, opcoes = {}) {
-  const { admin, conversa, marcadas, canceladas, fichas, enviadas } = fazerAdmin({
+  const { admin, conversa, marcadas, canceladas, fichas, enviadas, dadosDasConsultas } = fazerAdmin({
     unidades: opcoes.unidades ?? TRES_UNIDADES,
     slotsPorUnidade: opcoes.slots ?? SLOTS_CHEIOS,
     falharSlots: opcoes.falharSlots,
@@ -430,9 +437,9 @@ async function caso(titulo, passos, opcoes = {}) {
   }
 
   if (opcoes.verificar) {
-    opcoes.verificar({ marcadas, canceladas, conversa, transcricao, titulo, ultimoToque, fichas })
+    opcoes.verificar({ marcadas, canceladas, conversa, transcricao, titulo, ultimoToque, fichas, dadosDasConsultas })
   }
-  return { marcadas, canceladas, conversa, transcricao, fichas }
+  return { marcadas, canceladas, conversa, transcricao, fichas, dadosDasConsultas }
 }
 
 // ---------------------------------------------------------------
@@ -443,7 +450,16 @@ await caso('Primeiro contato mostra o menu', [
   ['Oi', ['Aqui é o consultório', '*1* 💬 Dúvidas', '*2* 🗓️ Marcar', '*3* 🗣️ Falar com alguém', '*4* 🔄 Ver, remarcar']],
 ])
 
-await caso('Paciente cadastrado é chamado pelo nome', [['Oi', 'Olá, Ana!']], { pacientes: [ANA] })
+// Desde 15/10/2026 o nome e o da crianca, citada no menu: quem escreve e a mae,
+// e "Ola, Ana!" cumprimentava a crianca como se fosse ela digitando.
+await caso('Paciente cadastrado: a criança é citada pelo nome, sem cumprimentá-la', [['Oi', ['Olá! Aqui é', 'cuidar de Ana']]], {
+  pacientes: [ANA],
+  verificar: ({ ultimoToque, titulo }) => {
+    if (!ultimoToque.resposta.includes('Olá, Ana')) passou++
+    else falhas.push(`${titulo} | ainda cumprimenta a criança`)
+  },
+})
+await caso('Irmãos no telefone: nenhum nome, "do seu filho"', [['Oi', 'cuidar do seu filho']], { pacientes: [ANA, PEDRO] })
 
 await caso('Dois pacientes no telefone: saudação sem nome', [['Oi', 'Aqui é o consultório']], {
   pacientes: [ANA, PEDRO],
@@ -538,7 +554,7 @@ await caso('CANCELAR no meio do fluxo devolve ao menu', [
 await caso(
   'Cadastrado marca direto e a consulta sai confirmada',
   [
-    ['Oi', 'Olá, Ana!'],
+    ['Oi', 'cuidar de Ana'],
     ['2', 'Em qual unidade'],
     ['1', 'Datas disponíveis'],
     ['1', 'Horários de'],
@@ -1008,10 +1024,12 @@ await caso(
   [
     ['Oi', 'Como podemos ajudar'],
     ['2', 'Você já tem uma consulta'],
-    ['2', 'Em qual unidade'],
+    // Desde 14/10/2026 "marcar mais uma" pergunta para quem (ver OUTRA_CRIANCA).
+    ['2', ['Para quem é a consulta', 'Ana Paula Souza', 'Outra criança']],
+    ['1', 'Em qual unidade'],
     ['1', 'Datas disponíveis'],
     ['1', 'Horários de'],
-    ['1', 'Consulta marcada!'],
+    ['1', ['Consulta marcada!', '👶 Ana Paula Souza']],
   ],
   {
     consultas: [CONSULTA_ANA],
@@ -3130,7 +3148,7 @@ function exigirEvento(lista, evento, titulo, detalhe = undefined) {
 // marcar() -> registrar('agendou'), so depois do INSERT dar certo.
 {
   const eventos = await eventosDe('Evento: consulta marcada fica registrada', [
-    ['Oi', 'Olá, Ana!'],
+    ['Oi', 'cuidar de Ana'],
     ['2', 'Em qual unidade'],
     ['1', 'Datas disponíveis'],
     ['1', 'Horários de'],
@@ -3143,7 +3161,7 @@ function exigirEvento(lista, evento, titulo, detalhe = undefined) {
 // marcou mais consultas do que existem na agenda.
 {
   const eventos = await eventosDe('Evento: agendamento que falhou não conta como marcado', [
-    ['Oi', 'Olá, Ana!'],
+    ['Oi', 'cuidar de Ana'],
     ['2', 'Em qual unidade'],
     ['1', 'Datas disponíveis'],
     ['1', 'Horários de'],
@@ -3170,7 +3188,7 @@ function exigirEvento(lista, evento, titulo, detalhe = undefined) {
 await caso(
   'Real 22/09: data digitada na lista de horários mostra os horários daquele dia',
   [
-    ['Oi', 'Olá, Ana!'],
+    ['Oi', 'cuidar de Ana'],
     ['2', 'Em qual unidade'],
     ['1', 'Datas disponíveis'],
     ['1', 'Horários de'],
@@ -3189,7 +3207,7 @@ await caso(
 await caso(
   'Data sem vaga na lista de horários avisa e não marca nada',
   [
-    ['Oi', 'Olá, Ana!'],
+    ['Oi', 'cuidar de Ana'],
     ['2', 'Em qual unidade'],
     ['1', 'Datas disponíveis'],
     ['1', 'Horários de'],
@@ -3208,7 +3226,7 @@ await caso(
 await caso(
   'Número na lista de horários continua marcando aquele horário',
   [
-    ['Oi', 'Olá, Ana!'],
+    ['Oi', 'cuidar de Ana'],
     ['2', 'Em qual unidade'],
     ['1', 'Datas disponíveis'],
     ['1', 'Horários de'],
@@ -3727,6 +3745,313 @@ const pedirHorarios = (pedido) => async ({ admin }) => {
   if (PEDIDOS[0]?.erro && PEDIDOS[1]?.erro) passou++
   else falhas.push(`Mandar horários recusas | ${JSON.stringify(PEDIDOS)}`)
 }
+
+// ---------------------------------------------------------------
+// Painel de familias simuladas (14/10/2026): um caso por achado
+// ---------------------------------------------------------------
+// As 16 conversas estao em tests/painel/resultados/. PARA PROVAR: desligue a
+// correcao citada em cada bloco e o caso falha (ver a prova no relatorio do dia).
+
+// 1. Unidade pelo nome (unidadeCitada) - 7 das 16 familias travaram aqui.
+for (const [frase, onde] of [
+  ['santos', 'Liferty · Santos'],
+  ['pode ser em santos por favor', 'Liferty · Santos'],
+  ['SAO PAULO', 'Livance Ibirapuera - São Paulo'],
+  ['sp', 'Livance Ibirapuera - São Paulo'],
+  ['santo andre', 'Livance · Santo André'],
+]) {
+  await caso(`Painel: "${frase}" escolhe a unidade pelo nome`, [
+    ['quero marcar', 'Em qual unidade'],
+    [frase, `Datas disponíveis em ${onde}`],
+  ], { slots: { 'u-santos': SLOTS_CHEIOS['u-santos'], 'u-andre': SLOTS_CHEIOS['u-santos'], 'u-vila': SLOTS_CHEIOS['u-santos'] } })
+}
+await caso('Painel: unidade não entendida volta com a lista', [
+  ['quero marcar', 'Em qual unidade'],
+  ['a mais perto de casa', ['Não entendi qual unidade', 'Em qual unidade']],
+], {
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.lista?.linhas?.length >= 3) passou++
+    else falhas.push(`${titulo} | voltou sem a lista`)
+  },
+})
+
+// 2. Cadastro sem dado errado (nomeDaFicha, data no meio da frase, pulou).
+await caso('Painel: nome com data, responsável com "sou a mãe", CPF "mando depois"', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['1', 'nome completo do paciente'],
+  ['Lucas Ferreira Campos, nasceu 03/05/2022', 'nome do responsável'],
+  ['Fernanda Oliveira Prado, sou a mae', 'CPF do paciente'],
+  ['nao sei de cabeça, mando depois', 'e-mail'],
+  ['NAO TENHO EMAIL', 'Tudo certo'],
+], {
+  verificar: ({ dadosDasConsultas, titulo, transcricao }) => {
+    const gravado = Object.assign({}, ...dadosDasConsultas)
+    const confere = (campo, esperado) => {
+      if (gravado[campo] === esperado) passou++
+      else falhas.push(`${titulo} | ${campo}: esperado ${JSON.stringify(esperado)}, veio ${JSON.stringify(gravado[campo])}`)
+    }
+    confere('intake_patient_name', 'Lucas Ferreira Campos')
+    confere('intake_birth_date', '03/05/2022')
+    confere('intake_guardian', 'Fernanda Oliveira Prado')
+    if (!('intake_cpf' in gravado)) passou++
+    else falhas.push(`${titulo} | gravou CPF: ${gravado.intake_cpf}`)
+    if (!transcricao.join('\n').includes('CPF não confere')) passou++
+    else falhas.push(`${titulo} | disse "CPF não confere" para "mando depois"`)
+  },
+})
+await caso('Painel: data por extenso e nome em maiúsculas', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['1', 'nome completo do paciente'],
+  ['ANA CLARA DOS SANTOS', 'data de nascimento'],
+  ['12 de março de 2020', 'nome do responsável'],
+], {
+  verificar: ({ dadosDasConsultas, titulo }) => {
+    const gravado = Object.assign({}, ...dadosDasConsultas)
+    if (gravado.intake_patient_name === 'Ana Clara dos Santos') passou++
+    else falhas.push(`${titulo} | nome: ${gravado.intake_patient_name}`)
+  },
+})
+
+// 3. Consulta no filho certo (OUTRA_CRIANCA, nome do filho, nome no comprovante).
+await caso('Painel: "marcar mais uma" para outra criança não grava no nome da Ana', [
+  ['Oi', 'Como podemos ajudar'],
+  ['2', 'Você já tem uma consulta'],
+  ['2', 'Para quem é a consulta'],
+  ['Outra criança', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['1', 'nome completo do paciente'],
+], {
+  consultas: [CONSULTA_ANA],
+  pacientes: [ANA],
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas.length === 1 && !marcadas[0].patient_id) passou++
+    else falhas.push(`${titulo} | consulta gravada no paciente ${marcadas[0]?.patient_id}`)
+  },
+})
+await caso('Painel: o filho pelo nome', [
+  ['quero marcar', 'Para quem é a consulta'],
+  ['pedro', 'Em qual unidade'],
+], { pacientes: [ANA, PEDRO] })
+
+// 4. Pedidos que se perdiam.
+await caso('Painel: nota fiscal com a lista de unidades na tela', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['preciso da nota fiscal da consulta do mes passado pra mandar pro plano', 'nota fiscal'],
+], { respostasProntas: RESPOSTAS })
+await caso('Painel: "perdi a receita, segunda via" abre a 2ª via', [
+  ['Oi', 'Como podemos ajudar'],
+  ['Perdi a receita do omeprazol da Ana, tem como mandar segunda via?', 'receita'],
+], {
+  pacientes: [ANA],
+  verificar: ({ ultimoToque, titulo, conversa }) => {
+    if (!ultimoToque.resposta.includes('não posso orientar') && String(conversa.booking_state).startsWith('documento')) passou++
+    else falhas.push(`${titulo} | não abriu a 2ª via: ${conversa.booking_state} · ${ultimoToque.resposta.slice(0, 80)}`)
+  },
+})
+await caso('Painel: "daqui uns 40 dias" é retorno distante', [
+  ['Oi', 'Como podemos ajudar'],
+  ['o dr pediu pra voltar daqui uns 40 dias, consigo marcar ja?', ['Anotei seu pedido de retorno', 'novembro']],
+], { pacientes: [ANA], agora: QUARTA_10H })
+await caso('Painel: "e pro dia 25 de novembro?" na lista de dias', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['e pro dia 25 de novembro?', 'Anotei seu pedido de retorno para *novembro*'],
+], { agora: QUARTA_10H })
+
+// 5. Laco de "Nao entendi", desistencia e despedida nas etapas.
+await caso('Painel: terceiro "Não entendi" seguido chama a equipe', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['xyz', 'Não entendi'],
+  ['abc abc', 'Não entendi'],
+  ['hmm hmm', 'Já chamei alguém da nossa equipe'],
+])
+await caso('Painel: desistir no meio da remarcação mantém a consulta', [
+  ['Oi', 'Como podemos ajudar'],
+  ['4', 'Sua consulta'],
+  ['REMARCAR', 'Vamos remarcar'],
+  ['SIM', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['ah nao, pensando bem deixa a que ja ta marcada', ['continua marcada', '01/09']],
+], {
+  consultas: [CONSULTA_ANA],
+  pacientes: [ANA],
+  verificar: ({ canceladas, conversa, titulo }) => {
+    if (canceladas.length === 0 && !conversa.booking_state) passou++
+    else falhas.push(`${titulo} | cancelou ${canceladas.length} ou ficou na etapa ${conversa.booking_state}`)
+  },
+})
+await caso('Painel: "tá bom, obrigada!" na lista de unidades encerra', [
+  ['quero marcar', 'Em qual unidade'],
+  ['ta bom, obrigada!', 'não marquei nada'],
+])
+
+// Segunda rodada do painel (14/10/2026): desistencia clara vence data e hora
+// escritas. Sem isso, "vou manter a do dia 01/09" abria os horarios, e "vou
+// manter a das 8" trocava a consulta das 08:00 por ela mesma - cancelando a
+// original.
+for (const [titulo, ate, frase] of [
+  ['na lista de dias', 1, 'deixa quieto, vou manter a do dia 01/09 mesmo'],
+  ['na lista de horários', 2, 'nao, vou manter a das 8 mesmo'],
+]) {
+  await caso(`Painel 2: "${frase}" ${titulo} mantém a consulta`, [
+    ['Oi', 'Como podemos ajudar'],
+    ['4', 'Sua consulta'],
+    ['REMARCAR', 'Vamos remarcar'],
+    ['SIM', 'Em qual unidade'],
+    ['1', 'Datas disponíveis'],
+    ...(ate === 2 ? [['1', 'Horários de']] : []),
+    [frase, ['Não mudei nada', 'continua marcada']],
+  ], {
+    consultas: [CONSULTA_ANA],
+    pacientes: [ANA],
+    verificar: ({ canceladas, marcadas, conversa, titulo }) => {
+      if (canceladas.length === 0 && marcadas.length === 0 && !conversa.booking_state) passou++
+      else falhas.push(`${titulo} | cancelou ${canceladas.length}, marcou ${marcadas.length}, etapa ${conversa.booking_state}`)
+    },
+  })
+}
+await caso('Painel 2: "pensando bem, prefiro 01/09" continua sendo troca de dia', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['pensando bem, prefiro 01/09', 'Horários de'],
+])
+await caso('Painel 2: "nao agora nao precisa... obrigada" na lista de unidades encerra', [
+  ['quero marcar', 'Em qual unidade'],
+  ['nao agora nao precisa, so queria saber mesmo. obrigada', 'não marquei nada'],
+])
+await caso('Painel 2: "não precisa ser em Santos" não é desistência', [
+  ['quero marcar', 'Em qual unidade'],
+  ['nao precisa ser em santos', 'Não entendi'],
+])
+await caso('Painel 2: "inclui retorno em 30 dias?" é pergunta, não pedido de retorno', [
+  ['Oi', 'Como podemos ajudar'],
+  ['ah ta entao inclui retorno em 30 dias ne? nao vou pagar de novo?', ''],
+], {
+  pacientes: [ANA],
+  agora: QUARTA_10H,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (!/pedido de retorno/.test(ultimoToque.resposta ?? '')) passou++
+    else falhas.push(`${titulo} | virou pedido de retorno: ${ultimoToque.resposta.slice(0, 80)}`)
+  },
+})
+await caso('Painel 2: "quero marcar em São Paulo" com a lista de informações na tela', [
+  ['Oi', 'Como podemos ajudar'],
+  ['1', 'Para qual atendimento'],
+  ['ENTAO QUERO MARCAR EM SAO PAULO PRO MEU NETO', 'Em qual unidade'],
+])
+
+// Lote de 15/10/2026: CPF depois, farmacia, receita e exame juntos.
+const ANA_SEM_CPF = { ...ANA, cpf: null }
+await caso('15/10: CPF mandado depois entra no cadastro', [
+  ['529.982.247-25', 'Recebi o CPF de *Ana*'],
+], {
+  pacientes: [ANA_SEM_CPF],
+  verificar: ({ fichas, titulo }) => {
+    if (fichas.some((f) => f.id === 'p1' && f.cpf === '52998224725')) passou++
+    else falhas.push(`${titulo} | CPF não gravado: ${JSON.stringify(fichas)}`)
+  },
+})
+await caso('15/10: irmãos, CPF com o nome vai para quem foi citado', [
+  ['segue o cpf do pedro 52998224725', 'Recebi o CPF de *Pedro*'],
+], {
+  pacientes: [ANA, PEDRO],
+  verificar: ({ fichas, titulo }) => {
+    if (fichas.length === 1 && fichas[0].id === 'p2') passou++
+    else falhas.push(`${titulo} | gravou em ${JSON.stringify(fichas)}`)
+  },
+})
+await caso('15/10: irmãos sem CPF e sem nome: não chuta', [
+  ['52998224725', ''],
+], {
+  pacientes: [ANA_SEM_CPF, PEDRO],
+  verificar: ({ fichas, ultimoToque, titulo }) => {
+    if (fichas.length === 0 && !/Recebi o CPF/.test(ultimoToque.resposta)) passou++
+    else falhas.push(`${titulo} | gravou sem saber de quem: ${JSON.stringify(fichas)}`)
+  },
+})
+await caso('15/10: telefone de 11 dígitos não vira CPF', [
+  ['13996274790', ''],
+], {
+  pacientes: [ANA_SEM_CPF],
+  verificar: ({ fichas, titulo }) => {
+    if (fichas.length === 0) passou++
+    else falhas.push(`${titulo} | gravou telefone como CPF`)
+  },
+})
+await caso('15/10: farmácia com o recado inteiro vai direto para a equipe', [
+  ['Boa tarde, sou da Drogaria São Paulo, estou com uma receita do Dr. Marcello da paciente Laura e preciso confirmar a dosagem', ['Registrado', 'enviado ao paciente']],
+], {
+  primeiraMensagem: true,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.atencao === 'farmacia' && !ultimoToque.resposta.includes('não posso orientar')) passou++
+    else falhas.push(`${titulo} | atencao ${ultimoToque.atencao}`)
+  },
+})
+await caso('15/10: "sou da farmácia" pergunta o paciente e o que corrigir', [
+  ['oi, sou da farmácia', 'nome do paciente'],
+])
+await caso('15/10: mãe "na farmácia" continua sendo mãe', [
+  ['estou na farmacia e nao aceitaram a receita da Ana', ''],
+], {
+  pacientes: [ANA],
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.atencao !== 'farmacia') passou++
+    else falhas.push(`${titulo} | virou farmácia`)
+  },
+})
+await caso('15/10: "preciso dos dois" registra receita e exame', [
+  ['Oi', 'Como podemos ajudar'],
+  ['5', 'O que você precisa'],
+  ['na verdade preciso dos dois, a receita e o pedido do exame de sangue', 'Anoto os dois'],
+  ['omeprazol', ['Anotei: *omeprazol*', 'Qual exame']],
+  ['hemograma', 'A farmácia ou o laboratório pediu'],
+  ['não', ['Pedido registrado', '2ª via de receita', 'omeprazol', 'Pedido de exame', 'hemograma']],
+], { pacientes: [ANA] })
+await caso('15/10: receita e exame já na primeira frase', [
+  ['Oi', 'Como podemos ajudar'],
+  ['Perdi a receita do omeprazol e o pedido do exame de sangue da Ana', 'Anoto os dois'],
+], { pacientes: [ANA] })
+
+// 6. Horario digitado.
+await caso('Painel: "8h" marca as 08:00 direto', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['8h', 'às 08:00* está guardado'],
+])
+await caso('Painel: "9 e 20" é 09:20', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['tem 9 e 20?', 'às 09:20* está guardado'],
+])
+await caso('Painel: "o mais cedo que tiver" escolhe o primeiro dia', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['qualquer dia, o mais cedo que tiver', 'Horários de segunda, 31/08'],
+])
+
+// 7. Sintoma com o consultorio fechado traz o pronto-socorro.
+await caso('Painel: sintoma à noite traz pronto-socorro e 192', [
+  ['meu filho ta vomitando desde a tarde e com febre, posso dar dipirona?', ['não posso orientar', 'pronto-socorro', '192']],
+], { agora: SEXTA_23H, primeiraMensagem: true })
+await caso('Painel: sintoma no horário não fala em pronto-socorro', [
+  ['meu filho ta vomitando desde a tarde e com febre, posso dar dipirona?', 'não posso orientar'],
+], {
+  agora: QUARTA_10H,
+  primeiraMensagem: true,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (!ultimoToque.resposta.includes('pronto-socorro')) passou++
+    else falhas.push(`${titulo} | falou em pronto-socorro em horário de atendimento`)
+  },
+})
 
 // ---------------------------------------------------------------
 // Repeticao e despedida (Kalina, 14/10/2026)

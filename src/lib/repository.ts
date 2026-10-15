@@ -586,6 +586,23 @@ export async function listUnits(clinicId: string): Promise<Unit[]> {
 }
 
 /**
+ * Unidades desativadas, so para o Historico da agenda (15/10/2026, pedido do
+ * Dr. Marcello): quem foi atendido na Liferty antes da mudanca para a Livance
+ * continua consultavel. Nunca para marcar, e por isso fica fora de listUnits,
+ * que alimenta o calendario, a configuracao e o robo.
+ */
+export async function listInactiveUnits(clinicId: string): Promise<Unit[]> {
+  const { data, error } = await supabase
+    .from('clinic_units')
+    .select('id,name,address,cnes')
+    .eq('clinic_id', clinicId)
+    .not('archived_at', 'is', null)
+    .order('name')
+  if (error) fail(error)
+  return data ?? []
+}
+
+/**
  * Quais unidades sao a agenda da telemedicina (03/10/2026).
  *
  * Coluna nova, em consulta separada: se o banco ainda nao a tem, a Agenda
@@ -2444,6 +2461,29 @@ export async function resolveConversation(conversationId: string) {
  * Nao reacende a bandeira de atencao nem mexe nas nao lidas: quem reabre esta
  * olhando para a conversa agora.
  */
+/**
+ * A equipe decide voltar a falar com quem pediu para sair (15/10/2026). Sem
+ * isto, a conversa so reabria quando a pessoa escrevesse de novo (ver
+ * depoisDoPedidoDeSair no webhook), e ate la a equipe nao conseguia responder.
+ * Com paciente vinculado, tira tambem a marca do cadastro, senao lembrete e
+ * acompanhamento continuariam barrados sem ninguem saber por que.
+ */
+export async function voltarAEnviarMensagens(conversationId: string, patientId: string | null) {
+  const { error } = await supabase
+    .from('whatsapp_conversations')
+    .update({ status: 'open' })
+    .eq('id', conversationId)
+  if (error) fail(error)
+  if (patientId) {
+    // semTipo: a coluna existe desde 22/08/2026, mas os tipos gerados nao a conhecem.
+    const { error: erroDoCadastro } = await semTipo
+      .from('patients')
+      .update({ whatsapp_opt_out_at: null })
+      .eq('id', patientId)
+    if (erroDoCadastro) fail(erroDoCadastro)
+  }
+}
+
 export async function unresolveConversation(conversationId: string) {
   const { error } = await supabase
     .from('whatsapp_conversations')

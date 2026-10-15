@@ -42,8 +42,15 @@ const PROIBIDO = {
   marcello: /dra\.? ana|moema|pinheiros|central de cuidado/i,
 }
 
+// Relogio fixo, 45 s por mensagem (15/10/2026). Com o relogio de verdade, o
+// roteiro "marcar" falhava conforme a hora do dia: as 8h43 de uma quinta so
+// sobrava um horario hoje, e o toque no segundo horario nao existia. Teste que
+// passa ou falha pela hora em que alguem roda o PUBLICAR nao testa nada.
+const QUARTA_10H = Date.parse('2026-10-14T13:00:00Z')
+
 async function rodar(roteiro, chaveIdentidade) {
-  const s = new Simulacao(IDENTIDADES[chaveIdentidade], FAMILIAS[roteiro.familia])
+  let agora = QUARTA_10H
+  const s = new Simulacao(IDENTIDADES[chaveIdentidade], FAMILIAS[roteiro.familia], { relogio: () => new Date(agora) })
   const textos = []
   let ultimaComToques = null
   for (const [i, passo] of roteiro.passos.entries()) {
@@ -66,6 +73,7 @@ async function rodar(roteiro, chaveIdentidade) {
       entrada = { texto: passo.texto }
     }
     const r = await s.enviarDaFamilia(entrada)
+    agora += 45000
     for (const m of r.respostas) textos.push(m.texto)
     ultimaComToques = [...r.respostas].reverse().find((m) => m.toques) ?? (r.respostas.length ? null : ultimaComToques)
   }
@@ -352,6 +360,56 @@ await caso('conta de teste: mudanca relida com a conversa aberta vale na proxima
   s.aplicarAgenda(nova.agendaPadrao)
   const r = await s.enviarDaFamilia({ texto: 'Dúvidas sobre a consulta', idDoToque: '1' })
   assert.match(r.respostas.map((m) => m.texto).join('\n'), /Avenida Ibirapuera, 2000/)
+})
+
+// Segunda rodada do painel de familias (14/10/2026).
+// Os passos andam pelo id do toque, como a familia tocando no celular.
+async function conversar(s, passos, inicio = QUARTA_10H) {
+  let ultima = null
+  let saida = []
+  for (const passo of passos) {
+    let entrada = { texto: passo }
+    if (passo.startsWith('#')) {
+      const id = passo.slice(1)
+      const opcao = ultima?.toques?.opcoes.find((o) => o.id === id)
+      assert.ok(opcao, `o toque ${id} nao existe (tem: ${ultima?.toques?.opcoes.map((o) => o.id).join(', ') ?? 'nenhum'})`)
+      entrada = { texto: opcao.titulo, idDoToque: id }
+    }
+    const r = await s.enviarDaFamilia(entrada)
+    saida = r.respostas
+    ultima = [...r.respostas].reverse().find((m) => m.toques) ?? ultima
+  }
+  return saida.map((m) => m.texto).join('\n')
+}
+
+await caso('painel: consulta da "Outra criança" vira cadastro do irmao, nao da Helena', async () => {
+  let agora = QUARTA_10H
+  const s = new Simulacao(IDENTIDADES.marcello, FAMILIAS.com_consulta, { relogio: () => new Date((agora += 45000)) })
+  const helena = s.pacientes()[0]
+  const fim = await conversar(s, [
+    'quero marcar outra consulta', '#2', '#2', '#1', '#1', '#1',
+    'Pedro Souza Lima', '12/05/2010', 'Marina Souza Lima', '#PULAR', 'marina@exemplo.com',
+  ])
+  assert.match(fim, /Pedro Souza Lima/, 'o comprovante devia trazer o Pedro')
+  const pedro = s.pacientes().find((p) => /pedro/i.test(String(p.name)))
+  assert.ok(pedro, 'o Pedro devia ganhar cadastro proprio')
+  const nova = s.consultas().find((c) => c.patient_id !== helena.id)
+  assert.ok(nova && nova.patient_id === pedro.id, 'a consulta nova foi ligada ao cadastro da Helena')
+  assert.equal(s.consultas().filter((c) => c.patient_id === helena.id).length, 1, 'a Helena devia continuar com a consulta dela, so')
+})
+
+await caso('painel: "ta bom, obrigada" depois de cancelar nao apaga o aviso para a equipe', async () => {
+  let agora = Date.parse('2026-10-14T20:00:00Z')
+  const s = new Simulacao(IDENTIDADES.marcello, FAMILIAS.com_consulta, { relogio: () => new Date((agora += 45000)) })
+  await conversar(s, ['boa tarde, pode cancelar a consulta da Helena, ela ja melhorou', '#CANCELAR', 'sim pode cancelar'])
+  assert.equal(s.motivo, 'cancelou_sozinho', 'o cancelamento devia acender a conversa')
+  // Ela abre a agenda pelo "digite 2" e desiste com um obrigado: o robo
+  // encerra o agendamento (concluida), e era isso que apagava a bandeira.
+  await conversar(s, ['2'])
+  const r = await conversar(s, ['ta bom, obrigada!'])
+  assert.match(r, /não marquei nada/, 'o robo devia encerrar o agendamento')
+  assert.equal(s.situacao, 'aguardando_equipe', 'o obrigado apagou o aviso do cancelamento')
+  assert.equal(s.motivo, 'cancelou_sozinho')
 })
 
 console.warn = warnOriginal

@@ -336,7 +336,8 @@ export class Simulacao {
     // ja havia (ou "atendente"). Calar sem acender e o defeito de 22/09/2026.
     const eventos = colherEventos(CONVERSA)
     if (resultado) {
-      if (resultado.concluida && !resultado.atencao) {
+      // Bandeira que ja estava acesa nao se apaga por conclusao do robo.
+      if (resultado.concluida && !resultado.atencao && !atencaoAntes.ligada) {
         Object.assign(conversa, { status: 'resolved', needs_attention: false, attention_reason: null })
       }
       if (resultado.atencao) Object.assign(conversa, { needs_attention: true, attention_reason: resultado.atencao })
@@ -344,6 +345,14 @@ export class Simulacao {
       if (resultado.concluida) eventos.push({ evento: 'concluiu_sozinho' })
     } else {
       Object.assign(conversa, { needs_attention: true, attention_reason: conversa.attention_reason || 'atendente' })
+    }
+
+    // As mensagens tambem no banco falso, como o webhook grava: e dali que o
+    // robo confere se uma resposta pronta acabou de sair (jaMandada).
+    const historico = this.banco.linhas('whatsapp_messages')
+    historico.push({ conversation_id: CONVERSA, direction: 'inbound', automatic: false, body: familia.texto, created_at: agora.toISOString() })
+    if (resultado?.resposta) {
+      historico.push({ conversation_id: CONVERSA, direction: 'outbound', automatic: true, body: resultado.resposta, created_at: agora.toISOString() })
     }
 
     const respostas: Mensagem[] = []
@@ -411,6 +420,9 @@ export class Simulacao {
     }
     this.equipeConversando = true
     Object.assign(this.conversa, { needs_attention: false, attention_reason: null, status: 'open' })
+    this.banco.linhas('whatsapp_messages').push({
+      conversation_id: CONVERSA, direction: 'outbound', automatic: false, body: texto, created_at: agora.toISOString(),
+    })
     return { mensagem: this.mensagem('equipe', texto, agora), registros }
   }
 

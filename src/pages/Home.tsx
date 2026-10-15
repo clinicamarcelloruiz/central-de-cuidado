@@ -189,6 +189,9 @@ export default function Home() {
   })
   // Paciente cuja conversa deve abrir ao entrar em Respostas pelo atalho.
   const [conversaFoco, setConversaFoco] = useState<string | null>(null)
+  // Prontuario pedido pela Agenda (15/10/2026, a pedido do Dr. Marcello): abre
+  // na aba de Pacientes, onde o prontuario mora, e fechar volta para a Agenda.
+  const [prontuarioDaAgenda, setProntuarioDaAgenda] = useState<string | null>(null)
   /**
    * Conversa pedida pelo toque na notificacao do celular (28/09/2026). Vem
    * pelo endereco (?conversa=, app fechado) ou por mensagem do service worker
@@ -926,6 +929,16 @@ export default function Home() {
                 patients={db.patients}
                 onSolicitacoesMudaram={carregarSolicitacoes}
                 onCadastrarContato={(dados) => cadastrarContato(dados, 'agenda')}
+                // So para quem atende: a recepcao nao ve o prontuario (o banco
+                // nem entrega as consultas), entao o botao nem aparece.
+                onAbrirProntuario={
+                  role === 'owner' || role === 'clinician'
+                    ? (patientId) => {
+                        setProntuarioDaAgenda(patientId)
+                        setTab('pacientes')
+                      }
+                    : undefined
+                }
               />
             )}
             {tab === 'conversas' && (
@@ -949,6 +962,9 @@ export default function Home() {
                 addConsultation={addConsultation}
                 updateConsultation={updateConsultation}
                 openCreateSignal={newPatientSignal}
+                abrirProntuarioDe={prontuarioDaAgenda}
+                onProntuarioDaAgendaAberto={() => setProntuarioDaAgenda(null)}
+                onVoltarParaAgenda={() => setTab('agenda')}
                 preCadastro={preCadastro}
                 onPacienteCriado={() => {
                   const destino = preCadastro?.voltarPara

@@ -96,9 +96,11 @@ export default function QuemEstaOnline({
 
   return (
     <div className="relative flex items-center">
-      {/* Colegas: sobrepostos, com o ponto verde de "online". */}
+      {/* Colegas: lado a lado, com o ponto verde de "online". Sobrepostos
+          (ate 15/10/2026), um cobria o ponto verde do outro e a fileira
+          parecia intercalada. */}
       {visiveis.length > 0 && (
-        <div className="mr-2 flex -space-x-2.5" aria-label={`${outros.length} colega(s) online`}>
+        <div className="mr-2 flex items-center gap-1.5" aria-label={`${outros.length} colega(s) online`}>
           {visiveis.map((p) => (
             <span key={p.userId} className="relative" title={`${p.nome} · online`}>
               <Avatar nome={p.nome} caminho={p.foto} tamanho={tamanho} anel={anel} />

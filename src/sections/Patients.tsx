@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDialogos } from '@/components/dialogos-contexto'
 import {
   CalendarDays,
@@ -228,6 +228,14 @@ interface Props {
    * agenda, nao cair no registro clinico.
    */
   onPacienteCriado?: () => void
+  /**
+   * Prontuario pedido pela Agenda (15/10/2026). Abre ao chegar, e fechar
+   * devolve o medico para a Agenda, de onde ele veio.
+   */
+  abrirProntuarioDe?: string | null
+  /** O pedido foi atendido: o Home esquece, para nao reabrir na proxima visita. */
+  onProntuarioDaAgendaAberto?: () => void
+  onVoltarParaAgenda?: () => void
 }
 
 export default function Patients({
@@ -243,6 +251,9 @@ export default function Patients({
   openCreateSignal = 0,
   preCadastro = null,
   onPacienteCriado,
+  abrirProntuarioDe = null,
+  onProntuarioDaAgendaAberto,
+  onVoltarParaAgenda,
 }: Props) {
   const unidadesDaClinica = useUnidades()
   const { avisar, perguntar } = useDialogos()
@@ -387,6 +398,19 @@ export default function Patients({
     () => patients.find((patient) => patient.id === recordPatientId) ?? null,
     [patients, recordPatientId],
   )
+
+  // Veio da Agenda? Entao fechar o prontuario volta para la. Ref, e nao estado:
+  // so decide para onde ir no fechamento, nao muda nada na tela.
+  const veioDaAgenda = useRef(false)
+  useEffect(() => {
+    if (!abrirProntuarioDe) return
+    veioDaAgenda.current = true
+    setRecordPatientId(abrirProntuarioDe)
+    onProntuarioDaAgendaAberto?.()
+    // O aviso ao Home fica fora das dependencias: e uma funcao nova a cada
+    // render do pai, e reagir a ela reabriria o prontuario sem parar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abrirProntuarioDe])
 
   /**
    * Reabre o prontuario quando o medico volta da assinatura.
@@ -1081,12 +1105,18 @@ export default function Patients({
           if (!open) {
             setRecordPatientId(null)
             setStartConsultationPatientId(null)
+            if (veioDaAgenda.current) {
+              veioDaAgenda.current = false
+              onVoltarParaAgenda?.()
+            }
           }
         }}
         listConsultations={listConsultations}
         addConsultation={addConsultation}
         updateConsultation={updateConsultation}
         onEditRegistration={(patient) => {
+          // Editar o cadastro acontece aqui, em Pacientes: nao volta para a Agenda.
+          veioDaAgenda.current = false
           setRecordPatientId(null)
           editRegistration(patient)
         }}

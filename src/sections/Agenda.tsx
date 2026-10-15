@@ -7,6 +7,8 @@ import {
   CalendarOff,
   CalendarPlus,
   Clock,
+  FileText,
+  Pencil,
   Phone,
   Plus,
   RefreshCw,
@@ -46,6 +48,7 @@ import {
   listAvailableSlots,
   listScheduleExceptions,
   listUnits,
+  listInactiveUnits,
   saveSchedulePreferences,
   updateAppointmentDetails,
   WEEKDAY_LABEL,
@@ -178,14 +181,52 @@ function agruparPorDia(slots: string[], appointments: Appointment[], bloqueios: 
  * conta uma versão otimista do mês e some justamente com o número que a clínica
  * precisa olhar.
  */
+/**
+ * Prontuario direto da agenda (15/10/2026, pedido do Dr. Marcello). So aparece
+ * para quem atende (o Home so passa onAbrirProntuario para dono e medico) e so
+ * em consulta com cadastro: sem paciente vinculado nao ha prontuario para abrir.
+ *
+ * Botao, e nao pergunta no clique: clicar na consulta continua abrindo o ajuste,
+ * como a recepcao ja faz todo dia, e o medico chega ao prontuario com um clique
+ * em vez de dois.
+ */
+function BotaoDaConsulta({
+  rotulo,
+  icone: Icone,
+  onClick,
+  destaque = false,
+}: {
+  rotulo: string
+  icone: typeof FileText
+  onClick: () => void
+  destaque?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={rotulo === 'Prontuário' ? 'Abrir o prontuário do paciente' : 'Abrir para editar a consulta'}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-[9px] font-extrabold transition ${
+        destaque ? 'bg-[#2f7fc1] text-white hover:bg-[#3b8fd6]' : 'bg-white/15 text-white hover:bg-white/25'
+      }`}
+    >
+      <Icone className="h-3 w-3" strokeWidth={2.5} />
+      {rotulo}
+    </button>
+  )
+}
+
 function HistoricoDaAgenda({
   itens,
   marcando,
   onMarcar,
+  onProntuario,
 }: {
   itens: Appointment[]
   marcando: string | null
   onMarcar: (id: string, presenca: 'attended' | 'no_show' | 'scheduled') => void
+  /** Nulo para quem nao ve prontuario, ou quando a consulta nao tem cadastro. */
+  onProntuario: (item: Appointment) => (() => void) | null
 }) {
   const dias = new Map<string, Appointment[]>()
   for (const item of itens) {
@@ -266,6 +307,10 @@ function HistoricoDaAgenda({
                   </span>
                 ) : (
                   <div className="flex items-center gap-1">
+                    {/* Depois da consulta e quando o medico mais escreve. */}
+                    {onProntuario(item) && (
+                      <BotaoDaConsulta rotulo="Prontuário" icone={FileText} destaque onClick={onProntuario(item)!} />
+                    )}
                     <BotaoPresenca
                       ativo={item.status === 'attended'}
                       corAtiva="#3fa88a"
@@ -572,8 +617,11 @@ export default function Agenda({
   /** Avisa o Home para o contador do menu e o aviso da Visao geral acompanharem. */
   onSolicitacoesMudaram,
   onCadastrarContato,
+  onAbrirProntuario,
 }: {
   patients: Patient[]
+  /** So para dono e medico (ver BotaoDaConsulta). */
+  onAbrirProntuario?: (patientId: string) => void
   onSolicitacoesMudaram?: () => void
   /** Abre a tela de pacientes com nome e telefone da consulta ja preenchidos. */
   onCadastrarContato?: (dados: {
@@ -596,6 +644,10 @@ export default function Agenda({
   const [ligarHoje, setLigarHoje] = useState<PendenciaDeLigar[]>([])
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [units, setUnits] = useState<Unit[]>([])
+  // Desativadas (Liferty, Trasmontano): so aparecem no Historico. Ver
+  // listInactiveUnits.
+  const [inativas, setInativas] = useState<Unit[]>([])
+  const unidadeInativa = inativas.some((u) => u.id === unitId)
   // Texto, valor e liga/desliga da telemedicina, para o cartao dela em
   // Configuracao. Falhar aqui nao derruba a agenda: o cartao so fica sem dados.
   const [tele, setTele] = useState<Telemedicina | null>(null)
@@ -634,6 +686,16 @@ export default function Agenda({
   const [bloqueandoDia, setBloqueandoDia] = useState<{ dia: string; motivo: string } | null>(null)
   const { perguntar } = useDialogos()
 
+  // O clique do botao Prontuario, ou nulo quando ele nao deve aparecer: sem
+  // acesso, sem paciente vinculado, ou paciente fora da lista (arquivado), que
+  // abriria um prontuario vazio.
+  function prontuarioDe(item: Appointment): (() => void) | null {
+    if (!onAbrirProntuario || !item.patientId) return null
+    const id = item.patientId
+    if (!patients.some((p) => p.id === id)) return null
+    return () => onAbrirProntuario(id)
+  }
+
   // Dia com consulta marcada pede confirmacao antes de bloquear (ver
   // bloqueio-de-dia.ts): bloquear nao cancela nem avisa ninguem.
   async function podeBloquear(dia: string) {
@@ -664,7 +726,7 @@ export default function Agenda({
       const membership = await getCurrentMembership()
       if (!membership) throw new Error('Não foi possível identificar a clínica do seu usuário.')
       setClinicId(membership.clinicId)
-      const [lista, preferencias, excecoes, telemedicina] = await Promise.all([
+      const [lista, preferencias, excecoes, telemedicina, desativadas] = await Promise.all([
         listUnits(membership.clinicId),
         getSchedulePreferences(membership.clinicId),
         listScheduleExceptions(membership.clinicId),
@@ -672,8 +734,14 @@ export default function Agenda({
           console.warn('Nao consegui ler a telemedicina para o cartao dela', erro)
           return null
         }),
+        // Falhar aqui so tira as antigas do Historico; a agenda segue inteira.
+        listInactiveUnits(membership.clinicId).catch((erro) => {
+          console.warn('Nao consegui listar as unidades desativadas para o historico', erro)
+          return [] as Unit[]
+        }),
       ])
       setUnits(lista)
+      setInativas(desativadas)
       setTele(telemedicina)
       setPrefs(preferencias)
       setExceptions(excecoes)
@@ -692,6 +760,20 @@ export default function Agenda({
       setAppointments([])
       setHistorico([])
       setVagas([])
+      return
+    }
+    // Unidade desativada: so o historico. Horario livre, regra e vaga nao
+    // existem mais ali, e perguntar ao banco por eles so traria erro.
+    if (unidadeInativa) {
+      try {
+        setRules([])
+        setSlots([])
+        setAppointments([])
+        setVagas([])
+        setHistorico(await listAppointmentHistory(clinicId, unitId))
+      } catch (causa) {
+        setError(causa instanceof Error ? causa.message : 'Não foi possível carregar o histórico.')
+      }
       return
     }
     try {
@@ -747,7 +829,7 @@ export default function Agenda({
     } catch (causa) {
       setError(causa instanceof Error ? causa.message : 'Não foi possível carregar os horários.')
     }
-  }, [clinicId, unitId, units])
+  }, [clinicId, unitId, units, unidadeInativa])
 
   useEffect(() => {
     void carregarBase()
@@ -1096,13 +1178,31 @@ export default function Agenda({
                     {u.telemedicina ? `💻 ${u.name} (por vídeo)` : u.name}
                   </option>
                 ))}
+                {/* As desativadas so no Historico: ali o medico consulta quem
+                    ja foi atendido nelas; no calendario e na configuracao nao
+                    ha mais nada a fazer com elas. */}
+                {aba === 'historico' && inativas.length > 0 && (
+                  <optgroup label="Desativadas (só histórico)">
+                    {inativas.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} · desativada
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
               <div className="flex rounded-xl bg-[#eef3f2] p-0.5">
                 {(['calendario', 'historico', 'configuracao'] as Aba[]).map((chave) => (
                   <button
                     key={chave}
                     type="button"
-                    onClick={() => setAba(chave)}
+                    onClick={() => {
+                      setAba(chave)
+                      // Saindo do Historico com uma desativada escolhida: volta
+                      // para a primeira ativa, que e a unica coisa que o
+                      // calendario e a configuracao sabem mostrar.
+                      if (chave !== 'historico' && unidadeInativa) setUnitId(units[0]?.id ?? null)
+                    }}
                     className={`rounded-lg px-3 py-1.5 text-[10px] font-extrabold transition ${
                       aba === chave ? 'bg-white text-[#081b2c] shadow-sm' : 'text-[#557f75]'
                     }`}
@@ -1145,6 +1245,7 @@ export default function Agenda({
               itens={historico}
               marcando={marcando}
               onMarcar={registrarPresenca}
+              onProntuario={prontuarioDe}
             />
           ) : aba === 'calendario' ? (
             <div className="space-y-3">
@@ -1462,6 +1563,14 @@ export default function Agenda({
                             >
                               Confirmar
                             </button>
+                          )}
+                          {/* Prontuario e Editar (15/10/2026): so para quem
+                              atende, e so com cadastro. Ver BotaoDaConsulta. */}
+                          {item.confirmedByClinic && prontuarioDe(item) && (
+                            <div className="flex shrink-0 items-center gap-1">
+                              <BotaoDaConsulta rotulo="Prontuário" icone={FileText} destaque onClick={prontuarioDe(item)!} />
+                              <BotaoDaConsulta rotulo="Editar" icone={Pencil} onClick={() => abrirConsulta(item)} />
+                            </div>
                           )}
                           {/* Presenca no proprio dia (24/09/2026). So para
                               consulta confirmada e de hoje: reserva provisoria

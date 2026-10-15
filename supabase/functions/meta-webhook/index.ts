@@ -23,6 +23,7 @@ import {
   acompanhamentoEncerraConversa,
   avisoDaResposta,
   depoisDoAcompanhamento,
+  depoisDoPedidoDeSair,
   lembreteRecente,
   unidadeNoLembrete,
   respostaAoAcompanhamento,
@@ -508,7 +509,7 @@ Deno.serve(async (req) => {
             'id,booking_state,booking_options,booking_unit_id,booking_patient_id,' +
             'booking_replaces_id,booking_intake_id,booking_modality,needs_attention,' +
             'attention_reason,profile_name,booking_updated_at,auto_replies_while_waiting,' +
-            'menu_sent_at'
+            'menu_sent_at,status'
 
           const { data: linhaAnterior } = await admin
             .from('whatsapp_conversations')
@@ -731,6 +732,15 @@ Deno.serve(async (req) => {
           // sumia da lista de quem esperava retorno.
           // A bandeira so sobe, nunca desce por mensagem do paciente: quem
           // baixa e a equipe, abrindo a conversa na tela.
+          // Pediu para sair: o "ok, obrigado" seguinte nao desfaz o pedido, e o
+          // robo nao responde a ele. Mensagem de verdade reabre e o robo atende.
+          // Ver depoisDoPedidoDeSair.
+          const statusDaConversa = depoisDoPedidoDeSair(
+            linhaAnterior?.status as string | null | undefined,
+            optedOut,
+            body,
+          )
+          const foraDaLista = statusDaConversa === 'opted_out'
           const marcarAtencao =
             Boolean(conversaAnterior?.needs_attention) || Boolean(motivoAtencao)
 
@@ -749,7 +759,7 @@ Deno.serve(async (req) => {
               ...(patient?.id ? { patient_id: patient.id } : {}),
               wa_id: waId,
               display_phone: waId,
-              status: optedOut ? 'opted_out' : 'open',
+              status: statusDaConversa,
               needs_attention: marcarAtencao,
               last_message_at: receivedAt,
               ...(nomeDoPerfil ? { profile_name: nomeDoPerfil } : {}),
@@ -761,7 +771,7 @@ Deno.serve(async (req) => {
           const atualizacaoConversa: Record<string, unknown> = {
             unread_count: (conversation.unread_count ?? 0) + 1,
             needs_attention: marcarAtencao,
-            status: optedOut ? 'opted_out' : 'open',
+            status: statusDaConversa,
           }
           if (motivoAtencao) atualizacaoConversa.attention_reason = motivoAtencao
           if (nomeDoPerfil) atualizacaoConversa.profile_name = nomeDoPerfil
@@ -879,6 +889,7 @@ Deno.serve(async (req) => {
           // acabou de dizer que precisa de ajuda.
           if (
             !optedOut &&
+            !foraDaLista &&
             !respondeuLembrete &&
             !isWell &&
             !pediuAjuda &&
@@ -941,7 +952,14 @@ Deno.serve(async (req) => {
               //
               // A bandeira de atenção vence: se o mesmo resultado pedir a
               // equipe, quem manda é o pedido, e o `else` abaixo garante isso.
-              if (resultado.concluida && !resultado.atencao) {
+              //
+              // E a que já estava acesa também (14/10/2026, painel de
+              // famílias). Fechar a ficha ou dizer "ta bom, obrigada" apagava o
+              // pedido que ninguém tinha atendido: a dúvida da dipirona, o "precisa
+              // de app?", o aviso "Cancelou pelo WhatsApp" de 3 minutos antes. A
+              // família achava que alguém ia responder; a lista dizia "Resolvida".
+              // Quem baixa a bandeira é a equipe, como no resto deste arquivo.
+              if (resultado.concluida && !resultado.atencao && !conversaAnterior?.needs_attention) {
                 await admin
                   .from('whatsapp_conversations')
                   .update({
@@ -1061,13 +1079,12 @@ Deno.serve(async (req) => {
              * aviso no log e ultimo_erro no aparelho, nunca mensagem perdida.
              */
             try {
+              // Concluida nao apaga bandeira que ja estava acesa (ver acima).
               const motivoAgora = resultado
                 ? resultado.atencao ??
-                  (resultado.concluida
-                    ? null
-                    : conversaAnterior?.needs_attention
-                      ? String(conversaAnterior.attention_reason ?? '') || null
-                      : null)
+                  (conversaAnterior?.needs_attention
+                    ? String(conversaAnterior.attention_reason ?? '') || null
+                    : null)
                 : String(conversaAnterior?.attention_reason ?? '') || 'atendente'
               const aviso = montarAviso({
                 conversationId: conversation.id,
@@ -1256,8 +1273,13 @@ Deno.serve(async (req) => {
 
           // "Nao quero receber" apertado no acompanhamento: confirma de volta.
           // Sem isso a pessoa apertava e o silencio parecia que nao pegou.
-          if (optedOut && patient?.id) {
-            const texto = respostaAoAcompanhamento(resposta)
+          // Quem nao e paciente tambem ouve a confirmacao (14/10/2026): no
+          // painel, um senhor que recebeu mensagem por engano pediu tres vezes
+          // para tirarem o numero e ficou sem resposta nenhuma.
+          if (optedOut) {
+            const texto = patient?.id
+              ? respostaAoAcompanhamento(resposta)
+              : 'Pronto, retiramos este número: não vamos mais enviar mensagens. Desculpe o incômodo. 🙏'
             if (texto) await responder(texto)
           }
         }

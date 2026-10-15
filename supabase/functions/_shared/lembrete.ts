@@ -222,7 +222,14 @@ export function interpretarResposta(
     respondeuLembrete: confirma || remarca || cancela,
     // "sair" continua exato: contido, ele apareceria em "vou sair de viagem" e
     // descadastraria quem so estava avisando que viaja.
-    optedOut: r === 'sair' || tem('nao quero receber', 'nao quero mais receber'),
+    // "Tirem meu numero da lista" (14/10/2026): no painel, um senhor que
+    // recebeu mensagem por engano pediu tres vezes e nao foi descadastrado.
+    optedOut:
+      r === 'sair' ||
+      tem('nao quero receber', 'nao quero mais receber', 'descadastr', 'nao me mandem mais', 'nao mandem mais') ||
+      /\b(tir(a|e|em|ar)|remov(a|e|am|er)|exclu(a|i|am|ir)) (o )?(meu )?(numero|telefone|contato)\b/.test(r) ||
+      /\b(me )?(tir(a|e|em)|remov(a|am)|exclu(a|am)) (da|dessa|desta) lista\b/.test(r) ||
+      /\bpar(e|em|ar) de (me )?(mandar|enviar|ligar)\b/.test(r),
     // Nada de "tudo bem" aqui: "bom dia, tudo bem?" e cumprimento, nao resposta
     // ao acompanhamento, e trata-lo como resposta faria o robo se calar.
     isWell: tem('estou bem', 'estamos bem', 'ele esta bem', 'ela esta bem'),
@@ -456,4 +463,31 @@ export function unidadeNoLembrete(
  */
 export function acompanhamentoEncerraConversa(resposta: Pick<Resposta, 'isWell'>, temPendencia: boolean): boolean {
   return resposta.isWell && !temPendencia
+}
+
+/**
+ * Pedido de sair e a mensagem seguinte (15/10/2026).
+ *
+ * Toda mensagem nova devolvia a conversa para "aberta", ate o "ok, obrigado"
+ * de quem acabou de pedir para sair - e para quem nao e paciente o pedido so
+ * existia aqui, entao se desfazia com um agradecimento.
+ *
+ * Agora so a confirmacao ("ok", "obrigado") mantem a conversa fora, com o robo
+ * calado. Mensagem de verdade - a mae que volta meses depois para marcar
+ * retorno - reabre a conversa e o robo atende normalmente: foi o que a
+ * resposta ao "Nao quero receber" prometeu ("se precisar da clinica, e so
+ * escrever por aqui"). O que para de vez sao os envios automaticos do
+ * paciente, guardados no cadastro (whatsapp_opt_out_at), que isto nao toca.
+ */
+export function depoisDoPedidoDeSair(
+  statusAntes: string | null | undefined,
+  pediuParaSair: boolean,
+  texto: string,
+): 'open' | 'opted_out' {
+  if (pediuParaSair) return 'opted_out'
+  if (statusAntes !== 'opted_out') return 'open'
+  const r = normalizarResposta(texto).replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  const soConfirmou =
+    !r || /^(ok|okay|obrigad[oa]s?|muito obrigad[oa]|valeu|grat[oa]|beleza|blz|certo|ta bom|ta|tudo bem|otimo|perfeito)( obrigad[oa]s?)?$/.test(r)
+  return soConfirmou ? 'opted_out' : 'open'
 }

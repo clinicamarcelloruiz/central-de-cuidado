@@ -27,6 +27,30 @@ export type ConsultaParaCadastro = {
 }
 
 /**
+ * O nome da ficha e o do cadastro sao da mesma crianca?
+ *
+ * Todas as palavras do nome mais curto aparecem no mais longo: "Helena" e
+ * "Helena Martins Costa" sao a mesma; "Maria Clara Souza" e "Maria Eduarda
+ * Souza", nao - comparar so o primeiro nome juntaria as duas Marias. Apelido
+ * ("Juju" para Julia) vira cadastro novo, que a equipe confere e junta.
+ */
+export function mesmaCrianca(cadastro: string, ficha: string): boolean {
+  const palavras = (nome: string) =>
+    nome
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, ' ')
+      .split(/\s+/)
+      .filter((p) => p.length >= 2 && !['de', 'da', 'do', 'das', 'dos'].includes(p))
+  const a = palavras(cadastro)
+  const b = palavras(ficha)
+  if (!a.length || !b.length) return false
+  const [curto, longo] = a.length <= b.length ? [a, b] : [b, a]
+  return curto.every((p) => longo.includes(p))
+}
+
+/**
  * Cria o cadastro de quem marcou pelo WhatsApp e ainda nao tem prontuario.
  *
  * Roda assim que a familia termina de responder a ficha, e de novo na vespera
@@ -37,7 +61,9 @@ export type ConsultaParaCadastro = {
  *
  * Tres cuidados, porque o dado veio por mensagem e ninguem conferiu:
  *  - telefone ja conhecido nao vira cadastro novo, vira vinculo. Duplicar o
- *    paciente e pior do que nao criar: o historico se parte em dois;
+ *    paciente e pior do que nao criar: o historico se parte em dois. A
+ *    excecao e o irmao: nome na ficha que nao e de ninguem do telefone (ver
+ *    mesmaCrianca);
  *  - sem nome nenhum nao cria. "Consulta de quem?" nao se responde chutando;
  *  - o que nasce aqui fica marcado como automatico ate alguem da equipe abrir,
  *    conferir e salvar.
@@ -51,15 +77,29 @@ export async function cadastrarDaFicha(
 
   // Ja existe alguem com este telefone? Entao a consulta e dessa pessoa, e o
   // que faltava era so o vinculo.
+  //
+  // Menos quando a ficha traz o nome de OUTRA crianca (14/10/2026, painel de
+  // familias). A mae da Helena marcou o Pedro, irmao dela, pelo "Outra
+  // crianca"; a ficha veio com "Pedro Souza Lima" e a consulta foi ligada ao
+  // cadastro da Helena, o unico daquele telefone. O comprovante dizia Pedro, o
+  // prontuario aberto no dia seria o da Helena. Irmaos no mesmo celular sao
+  // comuns, e consulta no prontuario errado e pior do que um cadastro a mais
+  // para a equipe conferir (o novo nasce marcado como automatico).
   if (telefone) {
-    const { data: conhecido } = await admin
+    const { data: doTelefone } = await admin
       .from('patients')
       .select('id,name,phone,whatsapp_opt_out_at')
       .eq('clinic_id', clinicId)
       .eq('phone', telefone)
       .is('archived_at', null)
-      .limit(1)
-      .maybeSingle()
+      .limit(20)
+    const conhecidos = (doTelefone ?? []) as { id: string; name: string; phone: string; whatsapp_opt_out_at: string | null }[]
+    const nomeNaFicha = (consulta.intake_patient_name ?? '').trim()
+    // Sem nome na ficha, o de sempre: o primeiro do telefone. contact_name nao
+    // entra aqui de proposito - no site ele costuma ser o nome da mae.
+    const conhecido = nomeNaFicha
+      ? conhecidos.find((p) => mesmaCrianca(p.name, nomeNaFicha))
+      : conhecidos[0]
     if (conhecido) {
       await admin.from('appointments').update({ patient_id: conhecido.id }).eq('id', consulta.id)
       return conhecido

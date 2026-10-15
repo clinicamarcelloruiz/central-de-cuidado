@@ -9,6 +9,7 @@ import {
   acompanhamentoEncerraConversa,
   avisoDaResposta,
   depoisDoAcompanhamento,
+  depoisDoPedidoDeSair,
   lembreteRecente,
   respostaAoAcompanhamento,
   equipeFalouRecentemente,
@@ -493,6 +494,26 @@ conferir(
 conferir('"Estamos bem" sem pendência encerra a conversa', acompanhamentoEncerraConversa(interpretarResposta('Estamos bem', true), false) === true)
 conferir('"Estamos bem" com pedido em aberto não encerra', acompanhamentoEncerraConversa(interpretarResposta('Estamos bem', true), true) === false)
 conferir('"Preciso de ajuda" não encerra', acompanhamentoEncerraConversa(interpretarResposta('Preciso de ajuda', true), false) === false)
+
+// "Tirem meu numero da lista" (painel, 14/10/2026) e descadastro; frase com
+// "parar" sobre remedio nao e.
+for (const [frase, esperado] of [
+  ['tirem meu número da lista por favor', true],
+  ['remove meu telefone', true],
+  ['parem de me mandar mensagem', true],
+  ['quero me descadastrar', true],
+  ['o médico mandou parar de dar o remédio', false],
+  ['pode tirar uma dúvida?', false],
+]) {
+  conferir(`Descadastro: "${frase}"`, interpretarResposta(frase, false).optedOut === esperado)
+}
+
+// Pedido de sair e a mensagem seguinte (15/10/2026). O "ok, obrigado" nao
+// desfaz o pedido; a mae que volta para marcar e atendida normalmente.
+conferir('Pedido de sair: fica fora da lista', depoisDoPedidoDeSair('open', true, 'tirem meu numero') === 'opted_out')
+conferir('"Ok, obrigado" depois de sair: continua fora', depoisDoPedidoDeSair('opted_out', false, 'Ok, obrigado!') === 'opted_out')
+conferir('Volta meses depois para marcar: conversa reabre e o robô atende', depoisDoPedidoDeSair('opted_out', false, 'Oi, queria marcar o retorno do Lorenzo') === 'open')
+conferir('Conversa comum: continua aberta', depoisDoPedidoDeSair('resolved', false, 'oi') === 'open')
 
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)
 console.log(`FALHAS: ${falhas.length}`)

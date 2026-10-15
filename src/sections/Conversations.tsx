@@ -53,6 +53,7 @@ import {
   resumoDoPaciente,
   resolveConversation,
   unresolveConversation,
+  voltarAEnviarMensagens,
   saveAutoReply,
   sendConversationReply,
   sendConversationMenu,
@@ -65,6 +66,7 @@ import {
 } from '@/lib/repository'
 import { lugaresDoRobo } from '@/lib/lugares'
 import MandarHorarios from '@/sections/MandarHorarios'
+import { useDialogos } from '@/components/dialogos-contexto'
 import {
   preencherCampos,
   problemasDoTexto,
@@ -549,6 +551,7 @@ export default function Conversations({
   const [loading, setLoading] = useState(true)
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [error, setError] = useState('')
+  const { perguntar } = useDialogos()
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [prontas, setProntas] = useState<RespostaPronta[]>([])
   // Valor e endereco de cada atendimento: a resposta pronta com {valores}
@@ -1113,6 +1116,28 @@ export default function Conversations({
     }
   }
 
+  // Quem pediu para sair so volta a receber por decisao da equipe. Ver
+  // voltarAEnviarMensagens.
+  async function voltarAEnviar(conversa: Conversation) {
+    const sim = await perguntar({
+      titulo: 'Voltar a enviar mensagens?',
+      detalhe:
+        `${conversa.patientName} pediu para não receber mensagens. Voltando, o sistema torna a mandar ` +
+        'lembretes e avisos, e a equipe pode responder por aqui. Faça isso só se a pessoa pediu ou concordou.',
+      confirmar: 'Voltar a enviar',
+      cancelar: 'Manter fora',
+    })
+    if (!sim) return
+    try {
+      await voltarAEnviarMensagens(conversa.id, conversa.patientId ?? null)
+      setConversations((current) =>
+        current.map((item) => (item.id === conversa.id ? { ...item, status: 'open' } : item)),
+      )
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível voltar a enviar mensagens.')
+    }
+  }
+
   async function reabrir(conversationId: string) {
     try {
       await unresolveConversation(conversationId)
@@ -1503,8 +1528,9 @@ export default function Conversations({
               className="mt-1 w-full resize-y rounded-[14px] border border-[#081b2c]/10 bg-white p-3 text-[11px] leading-relaxed outline-none focus:border-[#2f7fc1]"
             />
             <p className="mt-2 text-[10px] text-slate-500">
-              O sistema identifica o paciente pelo telefone. Escreva <strong>{'{nome}'}</strong> onde
-              quiser o primeiro nome dele.
+              O sistema identifica o paciente pelo telefone. <strong>{'{nome}'}</strong> é o primeiro nome
+              da criança. Quem escreve costuma ser a mãe, então &quot;Olá, {'{nome}'}!&quot; sai como
+              &quot;Olá!&quot;, e o nome da criança aparece logo abaixo, no menu.
             </p>
 
             <p className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
@@ -2121,7 +2147,17 @@ export default function Conversations({
                       </div>
                     )}
                   </div>
-                  {selected.status === 'resolved' ? (
+                  {selected.status === 'opted_out' ? (
+                    <button
+                      type="button"
+                      onClick={() => void voltarAEnviar(selected)}
+                      title="A pessoa pediu para não receber mensagens. Só a equipe pode desfazer."
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-[10px] font-extrabold text-red-700 transition hover:bg-red-100"
+                    >
+                      <CircleSlash className="h-3.5 w-3.5" />
+                      Voltar a enviar mensagens
+                    </button>
+                  ) : selected.status === 'resolved' ? (
                     <button
                       type="button"
                       onClick={() => void reabrir(selected.id)}
