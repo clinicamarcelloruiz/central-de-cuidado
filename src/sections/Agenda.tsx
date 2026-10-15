@@ -647,12 +647,15 @@ export default function Agenda({
   // Desativadas (Liferty, Trasmontano): so aparecem no Historico. Ver
   // listInactiveUnits.
   const [inativas, setInativas] = useState<Unit[]>([])
-  const unidadeInativa = inativas.some((u) => u.id === unitId)
   // Texto, valor e liga/desliga da telemedicina, para o cartao dela em
   // Configuracao. Falhar aqui nao derruba a agenda: o cartao so fica sem dados.
   const [tele, setTele] = useState<Telemedicina | null>(null)
   const lugares = useMemo(() => lugaresDoRobo(units, tele), [units, tele])
   const [unitId, setUnitId] = useState<string | null>(null)
+  // Depois de unitId, e nao junto de inativas (15/10/2026): lida antes da
+  // declaracao, a linha derrubava a Agenda inteira em producao ("Cannot access
+  // before initialization"). O tsc nao acusa porque o uso fica dentro da seta.
+  const unidadeInativa = inativas.some((u) => u.id === unitId)
   const [rules, setRules] = useState<AvailabilityRule[]>([])
   const [exceptions, setExceptions] = useState<ScheduleException[]>([])
   const [prefs, setPrefs] = useState<SchedulePreferences>({
