@@ -4019,6 +4019,37 @@ await caso('15/10: receita e exame já na primeira frase', [
   ['Perdi a receita do omeprazol e o pedido do exame de sangue da Ana', 'Anoto os dois'],
 ], { pacientes: [ANA] })
 
+// Exames pelo convenio (15/10/2026): "exame" de papel nao e assunto medico, e
+// o assunto mais certeiro ganha mesmo com o Convenios cadastrado em quatro
+// grafias.
+const CONVENIOS_INFLADO = {
+  id: 'r2', subject: 'Convênios',
+  keywords: ['convenio', 'convênio', 'convenios', 'convênios', 'plano', 'planos', 'unimed', 'reembolso', 'carteirinha'],
+  answer: 'O atendimento é particular. Emitimos recibo para reembolso.', is_active: true, position: 2,
+}
+const EXAMES_PELO_CONVENIO = {
+  id: 'r9', subject: 'Exames pelo convênio',
+  keywords: ['convenio', 'convênio', 'plano', 'unimed', 'exame', 'exames', 'solicitar', 'pedir', 'pede', 'pedido', 'guia', 'autorizar'],
+  answer: 'Sim! O Dr. Marcello pode solicitar os exames pelo seu convênio.', is_active: true, position: 99,
+}
+const COM_EXAMES = [...RESPOSTAS.filter((r) => r.id !== 'r2'), CONVENIOS_INFLADO, EXAMES_PELO_CONVENIO]
+// "a guia pode ser pelo convênio?": com a contagem antiga o Convenios fazia 4
+// pontos so com "convenio" escrito em quatro grafias, e ganhava.
+for (const frase of ['o dr pede exame pelo convênio?', 'o pedido de exames pode ser pelo convenio?', 'O dr consegue solicitar os exames pela Unimed?', 'a guia pode ser pelo convênio?']) {
+  await caso(`15/10: "${frase}" responde exames pelo convênio`, [
+    ['Oi', 'Como podemos ajudar'],
+    [frase, 'pode solicitar os exames pelo seu convênio'],
+  ], { respostasProntas: COM_EXAMES })
+}
+await caso('15/10: "aceita Unimed?" continua com a resposta de convênios', [
+  ['Oi', 'Como podemos ajudar'],
+  ['aceita Unimed?', 'Emitimos recibo para reembolso'],
+], { respostasProntas: COM_EXAMES })
+await caso('15/10: resultado de exame continua sendo de médico', [
+  ['Oi', 'Como podemos ajudar'],
+  ['o resultado do exame pelo convenio saiu, o dr pode ver?', 'não posso orientar'],
+], { respostasProntas: COM_EXAMES })
+
 // 6. Horario digitado.
 await caso('Painel: "8h" marca as 08:00 direto', [
   ['quero marcar', 'Em qual unidade'],

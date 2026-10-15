@@ -1,3 +1,4 @@
+import AbaProtegida from '@/components/AbaProtegida'
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
 import {
   Bell,
@@ -906,6 +907,8 @@ export default function Home() {
           )}
 
           <div key={tab} className="animate-enter">
+            {/* Erro numa aba fica nela: ver AbaProtegida. */}
+            <AbaProtegida key={tab} nome={tab}>
             {tab === 'dashboard' && (
               <Dashboard
                 patients={db.patients}
@@ -980,6 +983,7 @@ export default function Home() {
               <Settings db={db} setTemplates={setTemplates} importDb={importDb} clearAll={clearAll} />
             )}
             {tab === 'admin' && role === 'owner' && <AccessAdmin />}
+            </AbaProtegida>
           </div>
         </div>
       </main>

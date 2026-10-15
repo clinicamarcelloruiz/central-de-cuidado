@@ -721,7 +721,11 @@ Deno.serve(async (req) => {
             respondendoEnvioNosso,
             comLembreteRecente && !equipeFalouRecentemente,
           )
-          const { respondeuLembrete, optedOut, isWell, pediuAjuda, motivoAtencao } = resposta
+          const { respondeuLembrete, optedOut, paraTudo, isWell, pediuAjuda, motivoAtencao } = resposta
+          // A conversa so fica "nao quer receber" quando e para nao receber
+          // nada. Paciente que saiu so do acompanhamento continua com lembrete
+          // e com a equipe podendo responder (15/10/2026). Quem nao e paciente
+          // nao tem acompanhamento: qualquer pedido de sair e para tudo.
           const receivedAt = message.timestamp
             ? new Date(Number(message.timestamp) * 1000).toISOString()
             : new Date().toISOString()
@@ -737,7 +741,7 @@ Deno.serve(async (req) => {
           // Ver depoisDoPedidoDeSair.
           const statusDaConversa = depoisDoPedidoDeSair(
             linhaAnterior?.status as string | null | undefined,
-            optedOut,
+            optedOut && (paraTudo || !patient?.id),
             body,
           )
           const foraDaLista = statusDaConversa === 'opted_out'
@@ -816,7 +820,21 @@ Deno.serve(async (req) => {
           if (messageError) throw messageError
 
           if (patient?.id && optedOut) {
-            await admin.from('patients').update({ whatsapp_opt_out_at: receivedAt }).eq('id', patient.id)
+            if (paraTudo) {
+              await admin.from('patients').update({ whatsapp_opt_out_at: receivedAt }).eq('id', patient.id)
+            } else {
+              // Coluna nova (migration 20261015120000), gravada a parte. Sem
+              // ela, vale a marca antiga, que barra tudo: perder a separacao e
+              // arranhao; perder o pedido de sair nao pode acontecer.
+              const { error: semColuna } = await admin
+                .from('patients')
+                .update({ followup_opt_out_at: receivedAt })
+                .eq('id', patient.id)
+              if (semColuna) {
+                console.warn('Sem followup_opt_out_at; gravando o pedido de sair como total', semColuna)
+                await admin.from('patients').update({ whatsapp_opt_out_at: receivedAt }).eq('id', patient.id)
+              }
+            }
           }
 
           /** Envia texto livre. Vale porque a mensagem que acabou de chegar

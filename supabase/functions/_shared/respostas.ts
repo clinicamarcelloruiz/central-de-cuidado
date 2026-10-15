@@ -66,10 +66,29 @@ const CLINICO = [
   'posso dar', 'pode tomar', 'e normal',
 ]
 
+/**
+ * Exame como papel, e nao como saude (15/10/2026).
+ *
+ * "O dr consegue solicitar os exames pela Unimed?" e pergunta de secretaria:
+ * quem pede, quem autoriza, quem paga. Com "exame" na lista de cima, o
+ * singular ("o dr pede exame pelo convenio?") virava assunto medico e a mae
+ * ouvia "nao posso orientar sobre exames". Em frase de convenio, plano, guia,
+ * pedido ou autorizacao, o exame e o nome do papel - "exame de sangue"
+ * inclusive. O RESULTADO continua de medico, e qualquer outra palavra da lista
+ * (dor, febre, remedio) continua valendo.
+ */
+const ADMINISTRATIVO =
+  /\b(convenios?|planos?|unimed|amil|bradesco|sulamerica|hapvida|notredame|seguradora|cobre|cobertura|coberto|autoriza\w*|guias?|pedidos?|solicit\w*|pede|pedir|reembolso)\b/
+const NOME_DE_EXAME = /\bexames? d[eo] (sangue|fezes|urina)\b/g
+
 /** A mensagem fala de sintoma, remédio ou queixa? */
 export function assuntoClinico(texto: string): boolean {
-  const limpo = normalizar(texto)
-  const palavras = new Set(palavrasDe(texto))
+  let limpo = normalizar(texto)
+  let palavras = new Set(palavrasDe(texto))
+  if (ADMINISTRATIVO.test(limpo)) {
+    limpo = limpo.replace(NOME_DE_EXAME, 'exames')
+    palavras = new Set(palavrasDe(limpo).filter((p) => p !== 'exame'))
+  }
   return CLINICO.some((termo) =>
     termo.includes(' ') ? limpo.includes(termo) : palavras.has(termo),
   )
@@ -122,31 +141,37 @@ export function medicamentoControlado(texto: string): boolean {
 }
 
 /**
- * Quantas palavras do assunto aparecem na mensagem.
+ * Quantas palavras DA MENSAGEM o assunto explica.
  *
  * Palavra com cinco letras ou mais também vale por começo ("convenio" acha
  * "convenios", "conveniada"). Abaixo disso a comparação é exata: "fica" não
  * pode casar com "ficar", "ficha", "ficou".
+ *
+ * Conta a palavra da mensagem uma vez só (15/10/2026). Antes contava a chave:
+ * o assunto Convenios tem "convenio", "convênio", "convenios" e "convênios", e
+ * um "convenio" escrito valia quatro pontos - mais que "pedido" + "exames" +
+ * "convenio" de um assunto mais certeiro. Ganhar por ter cadastrado mais
+ * grafias da mesma palavra nao e entender melhor a pergunta.
  */
 function pontos(palavras: string[], daMensagem: Set<string>): number {
-  let total = 0
+  const explicadas = new Set<string>()
   for (const bruta of palavras) {
     const chave = normalizar(bruta).trim()
     if (!chave) continue
     if (daMensagem.has(chave)) {
-      total += 1
+      explicadas.add(chave)
       continue
     }
     if (chave.length >= 5) {
       for (const palavra of daMensagem) {
-        if (palavra.startsWith(chave) || chave.startsWith(palavra) && palavra.length >= 5) {
-          total += 1
+        if (palavra.startsWith(chave) || (chave.startsWith(palavra) && palavra.length >= 5)) {
+          explicadas.add(palavra)
           break
         }
       }
     }
   }
-  return total
+  return explicadas.size
 }
 
 /**

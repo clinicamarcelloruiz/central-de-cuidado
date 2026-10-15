@@ -1974,6 +1974,17 @@ export default function Conversations({
                         Não quer receber
                       </span>
                     )}
+                    {/* Saiu so do acompanhamento: lembrete e resposta seguem
+                        normais, mas a equipe precisa saber antes de mandar um. */}
+                    {conversation.status !== 'opted_out' && conversation.semAcompanhamento && (
+                      <span
+                        title="Pediu para não receber acompanhamento. Lembrete de consulta e respostas continuam normais."
+                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-extrabold text-slate-500"
+                      >
+                        <CircleSlash className="h-2.5 w-2.5" />
+                        Sem acompanhamento
+                      </span>
+                    )}
                     {/* Concluida normalmente encolhe. Chega aqui em cartao
                         inteiro em dois casos: quando esta aberta ao lado, e
                         quando o robo ficou preso numa etapa e o botao de

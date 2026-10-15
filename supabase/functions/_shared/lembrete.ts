@@ -25,6 +25,13 @@ export type Resposta = {
   /** Qualquer uma das tres acima. Atalho para o que o webhook faz depois. */
   respondeuLembrete: boolean
   optedOut: boolean
+  /**
+   * O pedido e para nao receber NADA (15/10/2026): "tirem meu numero", "parem
+   * de mandar". Sem isso, o optedOut e so do acompanhamento - o botao "Nao quero
+   * receber" e o SAIR, que respondem ao acompanhamento e ouvem "nao enviaremos
+   * mais mensagens de acompanhamento". Lembrete de consulta continua saindo.
+   */
+  paraTudo: boolean
   isWell: boolean
   pediuAjuda: boolean
   /** O que a equipe precisa ver na plataforma, se for o caso. */
@@ -215,6 +222,22 @@ export function interpretarResposta(
 
   const pediuAjuda = tem('preciso de ajuda', 'preciso falar')
 
+  // Dois pedidos de sair (15/10/2026). O do acompanhamento - o botao "Nao
+  // quero receber" e o SAIR que o proprio modelo ensina - para so o
+  // acompanhamento: foi o que a resposta sempre prometeu, e a mae do Lorenzo,
+  // que tocou o botao, continua precisando do lembrete da consulta que marcar.
+  // O resto e para nao receber nada.
+  // "sair" continua exato: contido, ele apareceria em "vou sair de viagem" e
+  // descadastraria quem so estava avisando que viaja.
+  const soAcompanhamento = r === 'sair' || tem('nao quero receber', 'nao quero mais receber')
+  const paraTudo =
+    // "Nao quero receber nada" e para tudo; o botao sozinho, so acompanhamento.
+    (soAcompanhamento && /\b(nada|nenhuma)\b/.test(r)) ||
+    tem('descadastr', 'nao me mandem mais', 'nao mandem mais') ||
+    /\b(tir(a|e|em|ar)|remov(a|e|am|er)|exclu(a|i|am|ir)) (o )?(meu )?(numero|telefone|contato)\b/.test(r) ||
+    /\b(me )?(tir(a|e|em)|remov(a|am)|exclu(a|am)) (da|dessa|desta) lista\b/.test(r) ||
+    /\bpar(e|em|ar) de (me )?(mandar|enviar|ligar)\b/.test(r)
+
   return {
     confirma,
     remarca,
@@ -224,12 +247,8 @@ export function interpretarResposta(
     // descadastraria quem so estava avisando que viaja.
     // "Tirem meu numero da lista" (14/10/2026): no painel, um senhor que
     // recebeu mensagem por engano pediu tres vezes e nao foi descadastrado.
-    optedOut:
-      r === 'sair' ||
-      tem('nao quero receber', 'nao quero mais receber', 'descadastr', 'nao me mandem mais', 'nao mandem mais') ||
-      /\b(tir(a|e|em|ar)|remov(a|e|am|er)|exclu(a|i|am|ir)) (o )?(meu )?(numero|telefone|contato)\b/.test(r) ||
-      /\b(me )?(tir(a|e|em)|remov(a|am)|exclu(a|am)) (da|dessa|desta) lista\b/.test(r) ||
-      /\bpar(e|em|ar) de (me )?(mandar|enviar|ligar)\b/.test(r),
+    optedOut: soAcompanhamento || paraTudo,
+    paraTudo,
     // Nada de "tudo bem" aqui: "bom dia, tudo bem?" e cumprimento, nao resposta
     // ao acompanhamento, e trata-lo como resposta faria o robo se calar.
     isWell: tem('estou bem', 'estamos bem', 'ele esta bem', 'ela esta bem'),
@@ -294,6 +313,12 @@ export function respostaAoAcompanhamento(resposta: Resposta): string | null {
       'Já avisei a nossa equipe. Pode escrever sua dúvida por aqui: quem assumir o ' +
       'atendimento vai ler tudo antes de responder.\n\n' +
       avisoDeHorario()
+    )
+  }
+  if (resposta.optedOut && resposta.paraTudo) {
+    return (
+      'Pronto: não vamos mais enviar mensagens para este número, nem lembrete de consulta. ' +
+      'Se precisar da clínica, é só escrever por aqui que respondemos.'
     )
   }
   if (resposta.optedOut) {

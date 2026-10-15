@@ -1405,7 +1405,10 @@ export default function Agenda({
                       ) : (
                         <div
                           key={item.id}
-                          className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 ${
+                          // No celular os botoes descem para uma linha propria
+                          // (15/10/2026): espremidos ao lado, o nome virava
+                          // "Enrico..." e a etiqueta quebrava em tres linhas.
+                          className={`flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 sm:flex-nowrap ${
                             item.confirmedByClinic
                               ? 'bg-[#081b2c]'
                               : 'border border-[#2f7fc1] bg-[#16456b]'
@@ -1569,7 +1572,9 @@ export default function Agenda({
                           )}
                           {/* Prontuario e Editar (15/10/2026): so para quem
                               atende, e so com cadastro. Ver BotaoDaConsulta. */}
-                          {item.confirmedByClinic && prontuarioDe(item) && (
+                          {item.confirmedByClinic && (prontuarioDe(item) || ehHoje(item.startsAt)) && (
+                          <div className="order-last flex w-full flex-wrap items-center gap-1 sm:order-none sm:w-auto sm:shrink-0 sm:flex-nowrap">
+                          {prontuarioDe(item) && (
                             <div className="flex shrink-0 items-center gap-1">
                               <BotaoDaConsulta rotulo="Prontuário" icone={FileText} destaque onClick={prontuarioDe(item)!} />
                               <BotaoDaConsulta rotulo="Editar" icone={Pencil} onClick={() => abrirConsulta(item)} />
@@ -1578,7 +1583,7 @@ export default function Agenda({
                           {/* Presenca no proprio dia (24/09/2026). So para
                               consulta confirmada e de hoje: reserva provisoria
                               ainda nao e consulta, e amanha ninguem chegou. */}
-                          {item.confirmedByClinic && ehHoje(item.startsAt) && (
+                          {ehHoje(item.startsAt) && (
                             <div className="flex shrink-0 items-center gap-1">
                               <BotaoPresenca
                                 ativo={item.status === 'attended'}
@@ -1599,6 +1604,8 @@ export default function Agenda({
                                 }
                               />
                             </div>
+                          )}
+                          </div>
                           )}
                           <button
                             type="button"

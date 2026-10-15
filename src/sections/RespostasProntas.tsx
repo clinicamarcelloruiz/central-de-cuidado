@@ -26,8 +26,21 @@ const campo =
 
 const rotulo = 'flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wide text-slate-400'
 
-/** Linha em edição: o id vazio é a que ainda não existe no banco. */
-type Item = RespostaPronta & { removida?: boolean }
+/**
+ * Linha em edição: o id vazio é a que ainda não existe no banco.
+ *
+ * textoDasPalavras guarda o campo como a pessoa digita (15/10/2026). O campo
+ * era montado da lista a cada tecla: a vírgula recém-digitada virava um item
+ * vazio, sumia, e "convenio, plano" saía "convenioplano". Só dava para colar.
+ */
+type Item = RespostaPronta & { removida?: boolean; textoDasPalavras?: string }
+
+/** O limite do banco (bot_answers_keywords_limit). */
+const MAXIMO_DE_PALAVRAS = 40
+
+function palavrasDoTexto(texto: string): string[] {
+  return texto.split(',').map((p) => p.trim()).filter(Boolean)
+}
 
 const NOVA: Omit<Item, 'ordem'> = {
   id: '',
@@ -128,6 +141,17 @@ export default function RespostasProntas() {
     )
     if (incompleto) {
       avisar('Um assunto ligado precisa de nome, palavras e resposta. Desligue-o ou complete os campos.', 'erro')
+      return
+    }
+    // Antes do banco, e em portugues: a recusa dele chegava como "violates check
+    // constraint bot_answers_keywords_limit" (15/10/2026).
+    const demais = validos.find((item) => item.palavras.length > MAXIMO_DE_PALAVRAS)
+    if (demais) {
+      avisar(
+        `Não salvei. "${demais.assunto || 'Um assunto'}" tem ${demais.palavras.length} palavras; o máximo é ${MAXIMO_DE_PALAVRAS}. ` +
+          'Acento e plural não precisam de palavra própria: "convenio" já acha "convênios".',
+        'erro',
+      )
       return
     }
     // Campo que o robo nao conseguiria preencher: nada e salvo, o que esta no
@@ -250,10 +274,19 @@ export default function RespostasProntas() {
                 </span>
                 <input
                   className={campo}
-                  value={item.palavras.join(', ')}
-                  onChange={(e) => mudar(indice, { palavras: e.target.value.split(',').map((p) => p.trim()).filter(Boolean) })}
+                  value={item.textoDasPalavras ?? item.palavras.join(', ')}
+                  onChange={(e) =>
+                    mudar(indice, { textoDasPalavras: e.target.value, palavras: palavrasDoTexto(e.target.value) })
+                  }
                   placeholder="valor, quanto custa, preço, pix, cartão"
                 />
+                <span
+                  className={`mt-1 block text-right text-[9px] font-bold ${
+                    item.palavras.length > MAXIMO_DE_PALAVRAS ? 'text-red-600' : 'text-slate-300'
+                  }`}
+                >
+                  {item.palavras.length}/{MAXIMO_DE_PALAVRAS} palavras
+                </span>
               </label>
 
               <label className="mt-3 block">

@@ -106,6 +106,19 @@ export async function sendFollowup(followupId: string, options: SendOptions = {}
   if (patient.whatsapp_opt_out_at) {
     return { ok: false, status: 409, error: 'Este contato pediu para não receber mensagens.', code: 'OPTED_OUT' }
   }
+  // Saiu so do acompanhamento (15/10/2026): coluna nova, lida a parte. Sem a
+  // coluna, segue como antes - quem pediu tudo continua barrado acima.
+  {
+    const { data: soAcompanhamento, error: semColuna } = await admin
+      .from('patients')
+      .select('followup_opt_out_at')
+      .eq('id', patient.id)
+      .maybeSingle()
+    if (semColuna) console.warn('Sem patients.followup_opt_out_at; seguindo sem essa trava', semColuna)
+    if ((soAcompanhamento as { followup_opt_out_at?: string | null } | null)?.followup_opt_out_at) {
+      return { ok: false, status: 409, error: 'Este paciente pediu para não receber acompanhamento.', code: 'OPTED_OUT' }
+    }
+  }
   // Clinica de teste (27/09/2026): fora dos celulares cadastrados no numero de
   // teste da Meta, nao tenta. Volta como TEST_LIST, que o disparo conta como
   // "pulado" e nao como falha.

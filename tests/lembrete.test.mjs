@@ -508,6 +508,25 @@ for (const [frase, esperado] of [
   conferir(`Descadastro: "${frase}"`, interpretarResposta(frase, false).optedOut === esperado)
 }
 
+// Dois pedidos de sair (15/10/2026): o do acompanhamento para so o
+// acompanhamento; "tirem meu numero" para tudo, lembrete inclusive.
+for (const [frase, tudo] of [
+  ['Não quero receber', false],
+  ['SAIR', false],
+  ['não quero mais receber', false],
+  ['não quero receber nada', true],
+  ['tirem meu número da lista por favor', true],
+  ['parem de me mandar mensagem', true],
+  ['quero me descadastrar', true],
+]) {
+  const r = interpretarResposta(frase, false)
+  conferir(`Sair "${frase}": ${tudo ? 'tudo' : 'só acompanhamento'}`, r.optedOut && r.paraTudo === tudo)
+}
+conferir('Só acompanhamento: a resposta fala em acompanhamento',
+  /acompanhamento/.test(respostaAoAcompanhamento(interpretarResposta('Não quero receber', false)) ?? ''))
+conferir('Tudo: a resposta diz que nem lembrete sai',
+  /nem lembrete/.test(respostaAoAcompanhamento(interpretarResposta('tirem meu número', false)) ?? ''))
+
 // Pedido de sair e a mensagem seguinte (15/10/2026). O "ok, obrigado" nao
 // desfaz o pedido; a mae que volta para marcar e atendida normalmente.
 conferir('Pedido de sair: fica fora da lista', depoisDoPedidoDeSair('open', true, 'tirem meu numero') === 'opted_out')

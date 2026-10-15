@@ -1827,6 +1827,8 @@ export interface Conversation {
     | null
   /** Etapa em que o robo parou nesta conversa. Nulo quando nao ha nada aberto. */
   bookingState: string | null
+  /** Saiu so do acompanhamento (15/10/2026): lembrete e resposta continuam. */
+  semAcompanhamento?: boolean
   unreadCount: number
   lastMessageAt: string | null
   lastMessage: string
@@ -1904,9 +1906,25 @@ export async function listConversations(clinicId: string): Promise<Conversation[
       ? await supabase.from('patients').select('id,name').in('id', patientIds)
       : { data: [] as { id: string; name: string }[] }
     const nomePorId = new Map((pacientes ?? []).map((p) => [p.id, p.name]))
+    // Coluna nova, lida a parte: sem ela, so a etiqueta some.
+    const semAcompanhamento = new Set<string>()
+    if (patientIds.length) {
+      try {
+        const { data: sairam, error } = await semTipo
+          .from('patients')
+          .select('id')
+          .in('id', patientIds)
+          .not('followup_opt_out_at', 'is', null)
+        if (error) throw error
+        for (const p of (sairam ?? []) as { id: string }[]) semAcompanhamento.add(p.id)
+      } catch (erro) {
+        console.warn('Sem patients.followup_opt_out_at; a etiqueta "Sem acompanhamento" fica de fora', erro)
+      }
+    }
     return linhas.map((row) => ({
       id: row.id,
       patientId: row.patient_id,
+      semAcompanhamento: Boolean(row.patient_id && semAcompanhamento.has(row.patient_id)),
       patientName: (row.patient_id && nomePorId.get(row.patient_id)) || 'Contato sem cadastro',
       profileName: row.profile_name ?? '',
       phone: formatarTelefone(row.display_phone || row.wa_id || ''),
@@ -2481,6 +2499,12 @@ export async function voltarAEnviarMensagens(conversationId: string, patientId: 
       .update({ whatsapp_opt_out_at: null })
       .eq('id', patientId)
     if (erroDoCadastro) fail(erroDoCadastro)
+    // A marca so do acompanhamento (15/10/2026), a parte: a coluna pode faltar.
+    const { error: semColuna } = await semTipo
+      .from('patients')
+      .update({ followup_opt_out_at: null })
+      .eq('id', patientId)
+    if (semColuna) console.warn('Sem patients.followup_opt_out_at para limpar', semColuna)
   }
 }
 
