@@ -26,6 +26,7 @@ import { editarComMascara, mascararCpf, mascararTelefone } from '@/lib/mascaras'
 import { FOLLOWUP_LABEL } from '@/types/patient'
 import { opcoesDeUnidade, useUnidades } from '@/lib/unidades'
 import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco'
+import { useVoltarDoCelular } from '@/lib/voltar-do-celular'
 import {
   Sheet,
   SheetContent,
@@ -402,6 +403,18 @@ export default function Patients({
   // Veio da Agenda? Entao fechar o prontuario volta para la. Ref, e nao estado:
   // so decide para onde ir no fechamento, nao muda nada na tela.
   const veioDaAgenda = useRef(false)
+  function fecharProntuario() {
+    setRecordPatientId(null)
+    setStartConsultationPatientId(null)
+    if (veioDaAgenda.current) {
+      veioDaAgenda.current = false
+      onVoltarParaAgenda?.()
+    }
+  }
+  // O voltar do celular fecha o prontuario, como o X (ver useVoltarDoCelular).
+  // O rascunho do atendimento ja se salva sozinho enquanto o medico escreve.
+  useVoltarDoCelular(recordPatient !== null, fecharProntuario)
+
   useEffect(() => {
     if (!abrirProntuarioDe) return
     veioDaAgenda.current = true
@@ -1102,14 +1115,7 @@ export default function Patients({
         open={recordPatient !== null}
         startInConsultationForm={recordPatient?.id === startConsultationPatientId}
         onOpenChange={(open) => {
-          if (!open) {
-            setRecordPatientId(null)
-            setStartConsultationPatientId(null)
-            if (veioDaAgenda.current) {
-              veioDaAgenda.current = false
-              onVoltarParaAgenda?.()
-            }
-          }
+          if (!open) fecharProntuario()
         }}
         listConsultations={listConsultations}
         addConsultation={addConsultation}

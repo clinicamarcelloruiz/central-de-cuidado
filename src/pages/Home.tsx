@@ -1,4 +1,5 @@
 import AbaProtegida from '@/components/AbaProtegida'
+import { useAbasNoHistorico } from '@/lib/voltar-do-celular'
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
 import {
   Bell,
@@ -382,6 +383,8 @@ export default function Home() {
   const tabs = role === 'owner'
     ? TABS
     : TABS.filter((item) => item.key !== 'admin' && item.key !== 'config')
+  // O voltar do celular volta para a aba de antes (ver useAbasNoHistorico).
+  useAbasNoHistorico(tab, setTab, (aba) => tabs.some((item) => item.key === aba))
 
   /**
    * Aquece a Memed no login, e nao no prontuario.

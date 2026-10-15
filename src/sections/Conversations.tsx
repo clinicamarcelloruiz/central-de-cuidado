@@ -67,6 +67,7 @@ import {
 import { lugaresDoRobo } from '@/lib/lugares'
 import MandarHorarios from '@/sections/MandarHorarios'
 import { useDialogos } from '@/components/dialogos-contexto'
+import { useVoltarDoCelular } from '@/lib/voltar-do-celular'
 import {
   preencherCampos,
   problemasDoTexto,
@@ -1399,6 +1400,9 @@ export default function Conversations({
     setSelectedId(null)
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'auto' }))
   }
+  // No celular a conversa aberta cobre a lista: o voltar do aparelho volta
+  // para ela, como a seta de cima (ver useVoltarDoCelular).
+  useVoltarDoCelular(telaDeCelular && selected !== null, voltarParaALista)
 
   if (loading) {
     return (
