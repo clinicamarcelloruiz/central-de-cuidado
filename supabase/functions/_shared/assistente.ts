@@ -19,9 +19,12 @@
  * horarios livres sem reservar nada.
  *
  * Fica sempre com o robo, mesmo ligado: anexo (o Claude nao ve a imagem),
- * urgencia, assunto clinico e resposta automatica de empresa. Os tres primeiros
- * tem resposta escrita e conferida; o ultimo, solto com uma IA, vira duas
- * maquinas conversando.
+ * urgencia e resposta automatica de empresa. Os dois primeiros tem resposta
+ * escrita e conferida; o ultimo, solto com uma IA, vira duas maquinas
+ * conversando. Sintoma ficava com o robo ate 16/10/2026, mas "minha filha tem
+ * refluxo, ele trata?" recebia "nao posso orientar" e um menu; agora o Claude
+ * responde a parte do servico e passa a conduta para a equipe (ver
+ * orientouConduta, a trava para o caso de ele escorregar).
  *
  * Os quatro assuntos que sao da equipe (combinado com o Edu em 15/10): conduta
  * medica, documento assinado, excecao as regras, dinheiro e conflito. Pedido de
@@ -180,23 +183,53 @@ function ferramentasDoClaude(emEtapa: boolean) {
 }
 
 function instrucoes(s: Situacao, emEtapa: boolean): string {
+  const medico = s.quemAtende.replace(/^(o|a) /, '')
   return [
-    `Você é o atendente virtual do consultório de ${s.quemAtende.replace(/^(o|a) /, '')}, gastroenterologista pediátrico, no WhatsApp. Fala com mães, pais e responsáveis.`,
+    `Você é o atendente virtual do consultório de ${medico}, gastroenterologista pediátrico, no WhatsApp. Fala com mães, pais e responsáveis.`,
     '',
-    'Como responder:',
-    '- Português do Brasil, acolhedor e direto. Mensagens curtas, no máximo 4 frases, no estilo do WhatsApp. Pode usar *negrito*. Sem listas longas.',
-    '- Use SOMENTE o que está em <clinica>. Se a resposta não estiver lá, não invente: diga que vai confirmar com a equipe e use chamar_equipe com motivo sem_informacao.',
-    '- Nunca invente valor, endereço, horário, convênio, prazo ou regra.',
-    '- Para marcar, remarcar, cancelar, ver a consulta ou pedir 2ª via, use abrir_fluxo: o sistema conduz a família com botões. Você pode responder antes, em uma frase, o que ela perguntou.',
-    '- Para dizer quando tem vaga, use ver_horarios. Não prometa horário: quem reserva é o fluxo de agendamento.',
-    '- Não peça CPF, e-mail nem dados da criança: o cadastro é feito pelo fluxo de agendamento.',
+    'Seu trabalho é entender o que a família quer e dar a resposta certa, como a secretária mais experiente do consultório daria.',
+    '- Interprete. Erro de digitação, abreviação ("vcs", "qnto", "sp"), áudio transcrito, pergunta indireta: descubra a intenção. Se vierem várias perguntas, responda todas.',
+    '- Junte as informações de <clinica>. A resposta certa muitas vezes combina partes diferentes: o valor da unidade, o que está incluído e como se paga; o que o médico trata e como marcar.',
+    '- Use a <conversa>: o que já foi dito (unidade, criança, assunto) não se pergunta de novo.',
+    '- Pergunta com mais de um sentido: responda o mais provável. Só pergunte de volta se não der mesmo para saber.',
+    '- Tudo o que você afirma tem de estar em <clinica> ou no <contexto>. Sem a informação exata, mas com uma próxima que já ajuda, responda com ela: "aceita cartão?" se responde com como é o pagamento, dizendo só o que está escrito. Se nada em <clinica> ajudar, não invente (valor, horário, endereço, convênio, prazo, regra): diga que vai confirmar com a equipe e use chamar_equipe com motivo sem_informacao.',
+    '- As respostas oficiais foram escritas para o robô antigo: use o conteúdo, mas ignore instruções como "digite 9" ou "digite 2". No lugar delas, ofereça você mesmo o próximo passo ("Quer que eu veja um horário?").',
+    '- Responda o que foi perguntado, e não tudo o que sabe sobre o assunto. Regra ou restrição que a família não perguntou (parcelamento, por exemplo) fica de fora.',
+    '- Quando fizer sentido, termine oferecendo o próximo passo: marcar, ver horários, mandar o endereço.',
     '',
-    'Sempre da equipe (use chamar_equipe e diga que a equipe responde por aqui, sem responder o conteúdo):',
-    '1. Conduta médica: sintoma, remédio, dose, resultado de exame, se é grave, se precisa de consulta.',
-    '2. Documento assinado pelo médico: receita nova, pedido de exame novo, atestado, relatório, declaração. (2ª via de algo já emitido: abrir_fluxo segunda_via.)',
-    '3. Exceção às regras: encaixe fora da agenda, desconto, retorno fora do prazo, atender adulto, mudar valor.',
+    'Como escrever:',
+    '- Responda já na primeira frase. Nunca repita nem resuma a pergunta ("Você perguntou se..."). Cumprimente só no começo da conversa, não a cada mensagem.',
+    '- Português do Brasil, acolhedor e natural, como no WhatsApp. De 1 a 4 frases. Pode usar *negrito*. Sem listas longas.',
+    '- Nunca escreva menu numerado nem peça "responda com um número": o sistema tem o menu com botões (abrir_fluxo com menu).',
+    '- Se a pessoa só cumprimentou ("oi", "olá", "bom dia") sem perguntar nada, use abrir_fluxo com menu e não escreva nada junto: o menu já cumprimenta.',
+    `- Diga "gastroenterologista pediátrico"; nunca "especialista".`,
+    '- Pronto-socorro e 192 só quando a criança parece mal agora, ou quando a família contou um sintoma e o consultório está fechado.',
+    '- Horário da equipe só quando você estiver passando a conversa para ela.',
+    '',
+    'Ferramentas:',
+    '- abrir_fluxo: marcar, remarcar, cancelar, ver a consulta, 2ª via. O sistema conduz com botões e faz o cadastro; antes, você pode responder em uma frase o que ela perguntou. Não peça CPF, e-mail nem dados da criança.',
+    '- ver_horarios: para dizer quando tem vaga numa unidade, e para responder em que dias e horários o médico atende ("atende sábado?", "tem à noite?"): consulte a agenda das unidades em vez de chamar a equipe. Não prometa horário: quem reserva é o fluxo de agendamento.',
+    '- chamar_equipe: só nas quatro situações abaixo, ou quando faltar a informação.',
+    '',
+    'É da equipe (use chamar_equipe e diga, em uma frase, que a equipe responde por aqui):',
+    '1. Conduta médica sobre esta criança: o que fazer com um sintoma, remédio, dose, o que significa um resultado de exame, se é grave, se ela precisa de tal exame ou tratamento.',
+    '2. Documento assinado pelo médico: receita nova, pedido de exame novo sem consulta, atestado, relatório, declaração. (2ª via de algo já emitido: abrir_fluxo segunda_via.)',
+    '3. Exceção às regras: encaixe fora da agenda, desconto, retorno fora do prazo, mudar valor.',
     '4. Dinheiro e conflito: estorno, cobrança contestada, reclamação.',
-    'Se pedirem para falar com uma pessoa: se o assunto for um desses quatro, chame a equipe; se não, resolva você e só chame a equipe se insistirem.',
+    'Se pedirem para falar com uma pessoa: se for uma dessas quatro, chame a equipe; se não, resolva você, e chame só se insistirem.',
+    '',
+    'Falar de sintoma não é pedir conduta. "Minha filha tem refluxo, ele trata?" pergunta sobre o serviço: responda (se a condição está em <clinica>) e ofereça marcar. Pergunta sobre o serviço é sua: se o médico pede exames, se atende tal idade ou tal problema, como é a consulta, consulta online, valor, convênio, reembolso, endereço, estacionamento. Nunca diga o que fazer com o sintoma nem cite remédio.',
+    '"É refluxo?", "é normal?" de quem está procurando atendimento: diga que é exatamente o que o médico avalia na consulta e ofereça marcar, sem chamar a equipe. Chame a equipe quando pedirem o que fazer agora, quando for sobre resultado de exame ou tratamento que a criança já faz, ou quando parecer urgente.',
+    '',
+    'Exemplos do jeito de responder (os fatos valem sempre os de <clinica>):',
+    `Família: "o doutor pode fazer exame para meu filho?"`,
+    `Você: "Pode sim! Na consulta ${s.quemAtende} avalia e, se for preciso, já pede os exames, e eles podem ser feitos pelo convênio. Quer que eu veja um horário?"`,
+    `Família: "vcs aceitam unimed?"`,
+    `Você (se <clinica> diz que a consulta é particular): "A consulta é particular, mas emitimos recibo com CRM e CNPJ para você pedir reembolso à Unimed. E os exames que ${s.quemAtende} pedir podem ser feitos pelo plano."`,
+    `Família: "minha filha tem 17 anos e vive com dor de barriga, ele atende?"`,
+    `Você (se <clinica> diz que atende até 19 anos): "Atende sim! ${s.quemAtende.replace(/^./, (l) => l.toUpperCase())} acompanha até os 19 anos, e dor de barriga que volta é uma das coisas mais investigadas no consultório. Quer que eu veja um horário?"`,
+    `Família: "meu filho ta com febre desde ontem, posso dar dipirona?"`,
+    `Você: chamar_equipe com motivo medico, texto: "Sobre remédio, quem orienta é ${s.quemAtende}: já passei para a equipe, que responde por aqui. Se ele piorar, procure o pronto-socorro."`,
     '',
     'Urgência: se a criança parece mal agora, oriente procurar o pronto-socorro mais próximo ou ligar 192, e use chamar_equipe com motivo urgencia.',
     'Se perguntarem, você é o assistente virtual do consultório, e a equipe acompanha as conversas.',
@@ -219,6 +252,9 @@ function contexto(s: Situacao): string {
     `Agora: ${quando} (${dentroDoExpediente(s.agora) ? 'dentro' : 'fora'} do horário de atendimento da equipe).`,
     `Crianças cadastradas neste telefone: ${s.criancas.length ? s.criancas.join(', ') : 'nenhuma (contato novo)'}.`,
     `Consultas marcadas: ${s.consultas.length ? s.consultas.join('; ') : 'nenhuma'}.`,
+    ...(relatoDeSintoma(s.texto)
+      ? ['Atenção: a mensagem nova fala de sintoma ou remédio. Responda o que for do serviço; o que fazer com a criança é da equipe (chamar_equipe, medico).']
+      : []),
     '</contexto>',
     '<conversa>',
     conversa || '(primeira mensagem)',
@@ -239,8 +275,8 @@ export function roboNaoEntendeu(r: Resultado | null): boolean {
  * filho?" foi parar no robo: "exame" esta na lista clinica, e a familia ouviu
  * "nao posso orientar sobre exames" e, de noite, o aviso do pronto-socorro. Para
  * a IA, exame, receita, resultado e tratamento sao assunto de conversa - e ela
- * chama a equipe quando for conduta medica. Sintoma (febre, dor, vomito,
- * remedio, dose) continua indo para o robo, que tem a resposta conferida.
+ * chama a equipe quando for conduta medica. Relato de sintoma (febre, dor,
+ * vomito, remedio, dose) liga o aviso no contexto e a trava orientouConduta.
  */
 export function relatoDeSintoma(texto: string): boolean {
   return assuntoClinico(texto.replace(/\b(exames?|resultados?|receitas?|tratamentos?)\b/gi, ' '))
@@ -251,12 +287,71 @@ export function ficaComORobo(s: Situacao): string | null {
   if (s.equipeConversando) return 'equipe_conversando'
   if (s.anexo) return 'anexo'
   if (pediuUrgencia(s.texto)) return 'urgencia'
-  if (relatoDeSintoma(s.texto)) return 'assunto_clinico'
   if (respostaAutomaticaDaFamilia(s.texto)) return 'resposta_automatica'
   return null
 }
 
 const ATE = 4
+
+/**
+ * Primeiro teste real com familia (15/10/2026): para um "ola" o Claude escreveu
+ * o proprio menu numerado, sem os botoes do sistema; para "o doutor pode fazer
+ * exame?" comecou repetindo a pergunta ("Voce perguntou se...") e terminou
+ * mandando procurar o pronto-socorro. A instrucao pede para nao fazer; estas
+ * travas garantem, porque o modelo nem sempre obedece.
+ */
+export function menuEscritoAMao(t: string): boolean {
+  const itens = t.split('\n').filter((l) => /^\s*[*_]*\s*(\d{1,2}\s*[).:\-–]|\d️?⃣)/.test(l)).length
+  return itens >= 3 || /respond[ae]\s+com\s+(o\s+|um\s+)?n[uú]mero/i.test(t)
+}
+
+// "Dr." nao termina frase: sem isso o eco cortava em "Voce perguntou se o Dr."
+// e deixava "Marcello pode pedir exame..." sozinho.
+const ABREVIADO = String.raw`\b(?:Dr|Dra|Sr|Sra|Prof|Profa)\.`
+const ECO = new RegExp(
+  String.raw`^((?:oi|ol[aá]|bom dia|boa tarde|boa noite)[!,.]*\s*)?(?:voc[eê]\s+(?:me\s+)?pergunt(?:ou|a)|sua\s+pergunta\s+(?:[eé]|foi))(?:${ABREVIADO}|[^.!?\n])*[.!?]?\s*`,
+  'i',
+)
+const FIM_DE_FRASE = /(?<!\b(?:Dr|Dra|Sr|Sra|Prof|Profa))(?<=[.!?])\s+/
+const PRONTO_SOCORRO = /pronto[\s-]?socorro|\b192\b|\bsamu\b|\bupa\b/i
+const FAMILIA_FALOU_DE_URGENCIA = /pronto[\s-]?socorro|\b192\b|\bsamu\b|\bupa\b|emerg[eê]ncia|urg[eê]n/i
+
+/**
+ * O Claude deu conduta numa mensagem com sintoma? (16/10/2026)
+ *
+ * A instrucao proibe, mas e a unica coisa que nao pode escapar: remedio, dose
+ * e "faca isso" sao do medico. Lista grosseira de proposito - errar para o
+ * lado de chamar a equipe custa uma espera; deixar passar custa uma crianca
+ * medicada pelo WhatsApp.
+ */
+const CONDUTA = new RegExp(
+  [
+    String.raw`\b\d+([.,]\d+)?\s*(mg|ml|mcg|gotas?|comprimidos?|sach[eê]s?)\b`,
+    String.raw`\bde\s+\d+\s+em\s+\d+\s*(h|horas)\b`,
+    String.raw`\b(dose|posologia|dosagem)\b`,
+    String.raw`\b(pode|podem|deve|devem)\s+(dar|tomar|oferecer|aplicar|suspender)\b`,
+    String.raw`\b(d[eê]|ofere[cç]a|suspenda|aplique|use|tente)\s+(a\s+ele|a\s+ela|pra\s+ele|pra\s+ela|um|uma|o|a)?\s*(rem[eé]dio|xarope|soro|antit[eé]rmico|dipirona|paracetamol|ibuprofeno|omeprazol|simeticona|lactulose|probi[oó]tico|ch[aá])`,
+    String.raw`\b(dipirona|paracetamol|ibuprofeno|omeprazol|domperidona|bromoprida|ondansetrona|simeticona|lactulose|macrogol|probi[oó]tico|buscopan|tylenol|novalgina|plasil|vonau)\b`,
+  ].join('|'),
+  'i',
+)
+
+export function orientouConduta(t: string): boolean {
+  return CONDUTA.test(t)
+}
+
+export function limparTexto(t: string, manterProntoSocorro: boolean): string {
+  let r = t.replace(ECO, '')
+  // Pronto-socorro so quando o Claude tratou como urgencia ou a familia
+  // tocou no assunto. Em duvida comum, a frase assusta a mae e nao ajuda.
+  if (!manterProntoSocorro) {
+    r = r
+      .split('\n')
+      .map((linha) => linha.split(FIM_DE_FRASE).filter((frase) => !PRONTO_SOCORRO.test(frase)).join(' '))
+      .join('\n')
+  }
+  return r.replace(/\n{3,}/g, '\n\n').trim()
+}
 
 /**
  * Uma conversa com o Claude, ate ele dar a resposta final ou usar uma
@@ -280,13 +375,34 @@ async function conversarComClaude(
       resta,
     )
     const blocos = Array.isArray(resposta?.content) ? resposta.content : []
-    const texto = blocos
+    const usos = blocos.filter((b): b is Extract<Bloco, { type: 'tool_use' }> => b.type === 'tool_use')
+    const sintoma = relatoDeSintoma(s.texto)
+    // Sintoma com o consultorio fechado: o pronto-socorro fica, como no robo
+    // (fraseClinica). Em duvida comum, sai (ver limparTexto).
+    const urgente =
+      usos.some((u) => u.name === 'chamar_equipe' && u.input?.motivo === 'urgencia') ||
+      FAMILIA_FALOU_DE_URGENCIA.test(s.texto) ||
+      (sintoma && !dentroDoExpediente(s.agora))
+    const bruto = blocos
       .filter((b): b is Extract<Bloco, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
       .join('\n')
       .trim()
       .slice(0, 1500)
-    const usos = blocos.filter((b): b is Extract<Bloco, { type: 'tool_use' }> => b.type === 'tool_use')
+    // Menu escrito a mao sai sem os botoes: vale o menu de verdade do sistema.
+    if (!emEtapa && menuEscritoAMao(bruto) && !usos.some((u) => u.name === 'chamar_equipe')) {
+      const menu = await ferramentas.robo(FLUXOS.menu.texto, FLUXOS.menu.etapa)
+      if (menu) return { resultado: menu, acao: 'fluxo:menu' }
+    }
+    const texto = limparTexto(bruto, urgente)
+    const avisoDaEquipe = usos.find((u) => u.name === 'chamar_equipe')?.input?.texto
+    if (sintoma && (orientouConduta(bruto) || orientouConduta(String(avisoDaEquipe ?? '')))) {
+      const fechado = !dentroDoExpediente(s.agora)
+      const aviso =
+        `Sobre o que fazer agora, quem orienta é ${s.quemAtende}: já passei para a equipe, que responde por aqui.` +
+        (fechado ? ' Se a criança estiver mal, procure o pronto-socorro mais próximo ou ligue 192.' : '')
+      return { resultado: await ferramentas.equipe('atendente', aviso), acao: 'equipe:medico (trava de conduta)' }
+    }
     if (usos.length === 0) {
       if (!texto) throw new Error('resposta vazia')
       return { resultado: { resposta: texto }, acao: 'conversou' }
@@ -302,7 +418,11 @@ async function conversarComClaude(
       if (final.name === 'abrir_fluxo') {
         const fluxo = FLUXOS[String(final.input?.fluxo ?? '')]
         if (!fluxo) throw new Error(`fluxo desconhecido: ${final.input?.fluxo}`)
-        return { resultado: juntar(await ferramentas.robo(fluxo.texto, fluxo.etapa)), acao: `fluxo:${final.input.fluxo}` }
+        const doRobo = await ferramentas.robo(fluxo.texto, fluxo.etapa)
+        // O menu ja cumprimenta: o "Ola! Sou o assistente..." do Claude antes
+        // dele saia como dois cumprimentos seguidos.
+        if (final.input.fluxo === 'menu') return { resultado: doRobo ?? { resposta: texto || 'Certo!' }, acao: 'fluxo:menu' }
+        return { resultado: juntar(doRobo), acao: `fluxo:${final.input.fluxo}` }
       }
       if (final.name === 'responder_etapa') {
         const r = await ferramentas.robo(String(final.input?.texto ?? '').slice(0, 200), 'mesma')
@@ -313,7 +433,7 @@ async function conversarComClaude(
       }
       if (final.name === 'chamar_equipe') {
         const motivo = String(final.input?.motivo ?? 'pessoa')
-        const aviso = String(final.input?.texto ?? '').trim() || texto || 'Já avisei a nossa equipe: alguém responde por aqui.'
+        const aviso = limparTexto(String(final.input?.texto ?? ''), urgente) || texto || 'Já avisei a nossa equipe: alguém responde por aqui.'
         return { resultado: await ferramentas.equipe(MOTIVOS[motivo] ?? 'atendente', aviso.slice(0, 800)), acao: `equipe:${motivo}` }
       }
       throw new Error(`ferramenta desconhecida: ${final.name}`)

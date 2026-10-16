@@ -18,7 +18,7 @@
  * meta-webhook, que ja tem o token e o numero em maos.
  */
 
-import { avisoDeHorario, dentroDoExpediente } from './expediente.ts'
+import { avisoDeHorario, dentroDoExpediente, EXPEDIENTE } from './expediente.ts'
 import { dataDeNascimentoIso } from './datas.ts'
 import type { adminClient } from './whatsapp.ts'
 import { cadastrarDaFicha, type ConsultaParaCadastro } from './cadastro.ts'
@@ -1104,32 +1104,96 @@ async function lugaresComValor(admin: Admin, clinicId: string): Promise<Lugar[]>
 }
 
 /**
+ * O texto livre do cartao "Atendente com IA" e o que mais a IA precisa saber
+ * do consultorio (16/10/2026). Duas consultas, cada uma no seu try/catch: a
+ * coluna do texto e nova, e sem ela o Claude perde so este bloco - nunca o
+ * atendimento.
+ */
+async function sobreOConsultorio(admin: Admin, clinicId: string) {
+  const sobre = { texto: '', descricao: '', horizonte: 0, antecedencia: 0 }
+  try {
+    const { data, error } = await admin
+      .from('clinic_settings')
+      .select('whatsapp_profile_description,schedule_horizon_days,schedule_min_notice_hours')
+      .eq('clinic_id', clinicId)
+      .maybeSingle()
+    if (error) throw error
+    const linha = (data ?? {}) as { whatsapp_profile_description?: string | null; schedule_horizon_days?: number | null; schedule_min_notice_hours?: number | null }
+    sobre.descricao = (linha.whatsapp_profile_description ?? '').trim()
+    sobre.horizonte = Number(linha.schedule_horizon_days) || 0
+    sobre.antecedencia = Number(linha.schedule_min_notice_hours) || 0
+  } catch (erro) {
+    console.warn('Atendente com IA: nao li a descricao e a agenda da clinica', erro)
+  }
+  try {
+    const { data, error } = await admin.from('clinic_settings').select('assistente_ia_conhecimento').eq('clinic_id', clinicId).maybeSingle()
+    if (error) throw error
+    sobre.texto = ((data as { assistente_ia_conhecimento?: string | null } | null)?.assistente_ia_conhecimento ?? '').trim()
+  } catch (erro) {
+    console.warn('Sem clinic_settings.assistente_ia_conhecimento; a IA responde sem o texto do consultorio', erro)
+  }
+  return sobre
+}
+
+/**
  * O que o atendente com IA sabe da clinica (15/10/2026, ver assistente.ts).
  *
- * Sai do mesmo lugar de onde o robo tira as respostas: os cartoes das unidades
- * (endereco, valor, texto) e as respostas prontas. Nada escrito so para a IA -
- * a equipe muda um texto na tela e os dois passam a dizer a mesma coisa.
+ * Os cartoes das unidades e as respostas prontas sao os mesmos do robo: a
+ * equipe muda um texto na tela e os dois passam a dizer a mesma coisa. Em
+ * 16/10/2026 entraram o resto do que uma secretaria sabe - o medico, o que
+ * ele trata, o convenio de cada unidade, como o atendimento funciona -
+ * porque sem isso o Claude recusava perguntas simples por nao ter a resposta.
  */
 export async function conhecimentoDaClinica(admin: Admin, clinicId: string): Promise<string> {
-  const [lugares, unidades, tele, respostas] = await Promise.all([
+  const [lugares, unidades, tele, respostas, sobre] = await Promise.all([
     lugaresComValor(admin, clinicId),
     opcoesDeAtendimento(admin, clinicId),
     telemedicinaDaClinica(admin, clinicId),
     carregarRespostas(admin, clinicId),
+    sobreOConsultorio(admin, clinicId),
   ])
   const partes: string[] = []
   for (const lugar of lugares) {
-    const unidade = unidades.find((u) => u.id === lugar.id) as { info_text?: string | null } | undefined
+    const unidade = unidades.find((u) => u.id === lugar.id)
     const texto = lugar.telemedicina ? tele.informacoes : (unidade?.info_text ?? '')
+    // Vazio = so particular, como o robo entende (ver o tipo Unidade).
+    const convenio = lugar.telemedicina
+      ? ''
+      : `Convênio: ${unidade?.accepts_insurance?.trim() ? unidade.accepts_insurance.trim() : 'não atende convênio, consulta particular'}\n`
     partes.push(
       `## ${lugar.nome}\n` +
         (lugar.endereco ? `Endereço: ${lugar.endereco}\n` : 'Atendimento por vídeo.\n') +
         `Valor da consulta: ${lugar.valorCentavos ? formatarValor(lugar.valorCentavos) : 'não cadastrado (não informe valor)'}\n` +
+        convenio +
         preencherCampos(texto, lugar, lugares).texto,
     )
   }
-  for (const r of respostas) partes.push(`## ${r.assunto}\n${preencherCampos(r.resposta, null, lugares).texto}`)
-  return partes.join('\n\n')
+
+  // O que o sistema faz pela familia, para o Claude oferecer o caminho certo
+  // em vez de "vou verificar com a equipe".
+  const funcionamento = [
+    `- A família marca, remarca, cancela e vê a consulta por aqui mesmo, pelo WhatsApp, na hora.`,
+    sobre.horizonte ? `- A agenda fica aberta para os próximos ${sobre.horizonte} dias.` : '',
+    sobre.antecedencia ? `- Dá para marcar até ${sobre.antecedencia} h antes do horário.` : '',
+    `- A equipe responde as mensagens de ${EXPEDIENTE.texto}, menos feriados. Fora disso, responde no próximo dia útil.`,
+    `- 2ª via de receita ou de pedido de exame já emitidos: pedida por aqui. Remédio controlado não tem 2ª via por WhatsApp (a receita fica retida na farmácia): a equipe orienta.`,
+    `- Foto ou arquivo (exame, laudo, receita) pode ser mandado por aqui: chega para a equipe, que olha e responde.`,
+    `- Na véspera da consulta, a família recebe um lembrete por aqui.`,
+    tele.ativa ? '- Também há consulta online (telemedicina).' : '',
+  ].filter(Boolean)
+
+  // Rotulos de proposito (15/10/2026): sem eles o Claude tratava a resposta
+  // pronta "Exames pelo convenio" como mais um texto solto e preferia dizer
+  // que "essa avaliacao e medica".
+  const prontas = respostas.map((r) => `## ${r.assunto}\n${preencherCampos(r.resposta, null, lugares).texto}`)
+  return [
+    ...(sobre.descricao || sobre.texto ? ['# Sobre o consultório', [sobre.descricao, sobre.texto].filter(Boolean).join('\n\n')] : []),
+    '# Como funciona o atendimento',
+    funcionamento.join('\n'),
+    '# Unidades de atendimento',
+    partes.join('\n\n'),
+    ...(prontas.length ? ['# Respostas oficiais do consultório (use o conteúdo delas quando responderem a pergunta)', prontas.join('\n\n')] : []),
+  ].join('\n\n')
 }
 
 /**

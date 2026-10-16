@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios } from './atendimento.build.mjs'
+import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 import { montarMensagens } from './conteudo.build.mjs'
 
@@ -35,6 +35,8 @@ function fazerAdmin({
   // Horarios alem da agenda aberta: so a funcao com periodo os enxerga, como
   // available_slots_periodo no banco (14/10/2026).
   slotsAlemDaAgenda = {},
+  // O que o cartao "Atendente com IA" e o perfil do WhatsApp dizem (16/10/2026).
+  sobre = {},
 }) {
   const conversa = {
     booking_state: null,
@@ -154,6 +156,7 @@ function fazerAdmin({
                 telemedicine_enabled: telemedicina.ativa,
                 telemedicine_info_text: telemedicina.texto,
                 telemedicine_price_cents: telemedicina.valor ?? null,
+                ...sobre,
               },
             })
           },
@@ -4175,6 +4178,37 @@ await caso('Campos: texto sem campo continua exatamente igual', [
   unidades: [TRES_UNIDADES[0], TRES_UNIDADES[1], { ...TRES_UNIDADES[2], info_text: '*Consulta em São Paulo: R$ 550,00.*' }],
   colunasAusentes: ['price_cents'],
 })
+
+// O que o atendente com IA sabe da clinica (16/10/2026). No segundo teste real
+// o Claude recusou "o doutor pode fazer exame?" por nao saber o que qualquer
+// secretaria sabe; o convenio de cada unidade nem chegava a ele.
+{
+  const confere = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  const unidadesDaIA = [
+    { id: 'u-sp', name: 'Livance Ibirapuera - São Paulo', address: 'Rua Y, 30', info_text: 'Consulta em São Paulo: {valor}.', accepts_insurance: '', price_cents: 60000 },
+    { id: 'u-st', name: 'Livance · Santos', address: 'Av. Ana Costa, 228', info_text: '', accepts_insurance: 'Trasmontano', price_cents: 45000 },
+  ]
+  const sobre = {
+    whatsapp_profile_description: 'Consultório de gastroenterologia pediátrica.',
+    schedule_horizon_days: 45,
+    schedule_min_notice_hours: 2,
+    assistente_ia_conhecimento: 'Trata refluxo, APLV e constipação.',
+  }
+  const { admin } = fazerAdmin({ unidades: unidadesDaIA, slotsPorUnidade: {}, sobre, respostasProntas: [{ id: 'r1', subject: 'Exames pelo convênio', keywords: ['exame'], answer: 'Pode pedir pelo convênio.' }] })
+  const k = await conhecimentoDaClinica(admin, 'clinica-1')
+  confere('IA: texto do cartao entra', k.includes('# Sobre o consultório') && k.includes('Trata refluxo, APLV'), k)
+  confere('IA: descricao do perfil entra', k.includes('Consultório de gastroenterologia pediátrica.'))
+  confere('IA: convenio de cada unidade', k.includes('Convênio: não atende convênio, consulta particular') && k.includes('Convênio: Trasmontano'), k)
+  confere('IA: como funciona (agenda, antecedencia, equipe)', k.includes('próximos 45 dias') && k.includes('até 2 h antes') && k.includes('segunda a sexta'))
+  confere('IA: valor preenchido no texto da unidade', k.includes('Consulta em São Paulo: R$ 600,00.'))
+  confere('IA: respostas oficiais rotuladas', k.includes('# Respostas oficiais') && k.includes('Pode pedir pelo convênio.'))
+
+  // Coluna nova ausente: perde so o texto do cartao, nunca as unidades.
+  const semColuna = fazerAdmin({ unidades: unidadesDaIA, slotsPorUnidade: {}, sobre, colunasAusentes: ['assistente_ia_conhecimento'] })
+  const k2 = await conhecimentoDaClinica(semColuna.admin, 'clinica-1')
+  confere('IA sem a coluna nova: unidades seguem', k2.includes('Livance · Santos') && k2.includes('Convênio: Trasmontano') && !k2.includes('Trata refluxo'), k2)
+  confere('IA sem a coluna nova: descricao segue', k2.includes('Consultório de gastroenterologia pediátrica.'))
+}
 
 console.log('\n============================================')
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)

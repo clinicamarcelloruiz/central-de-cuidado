@@ -2172,6 +2172,34 @@ export async function saveAtendenteIA(clinicId: string, modo: ModoDoAtendenteIA)
 }
 
 /**
+ * O texto livre que a IA usa para responder (16/10/2026): o medico, o que
+ * trata, como e a consulta. Coluna nova: sem ela, nulo, e a tela avisa que a
+ * atualizacao do banco ainda nao chegou.
+ */
+export async function getConhecimentoIA(clinicId: string): Promise<string | null> {
+  try {
+    const { data, error } = await semTipo
+      .from('clinic_settings')
+      .select('assistente_ia_conhecimento')
+      .eq('clinic_id', clinicId)
+      .maybeSingle()
+    if (error) throw error
+    return (data as { assistente_ia_conhecimento?: string | null } | null)?.assistente_ia_conhecimento ?? ''
+  } catch (erro) {
+    console.warn('Sem clinic_settings.assistente_ia_conhecimento', erro)
+    return null
+  }
+}
+
+export async function saveConhecimentoIA(clinicId: string, texto: string) {
+  const { error } = await semTipo
+    .from('clinic_settings')
+    .update({ assistente_ia_conhecimento: texto.trim() || null })
+    .eq('clinic_id', clinicId)
+  if (error) fail(error)
+}
+
+/**
  * Os anexos da conversa, cada um com um link temporario.
  *
  * Consulta a parte, dentro de try/catch, porque as colunas sao mais novas que

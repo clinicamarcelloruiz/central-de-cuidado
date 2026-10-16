@@ -4,8 +4,11 @@
 // que o modo sombra nao mexe em nada, que CPF nao sai para fora.
 import {
   atenderComAssistente,
+  orientouConduta,
   ficaComORobo,
   lerModo,
+  limparTexto,
+  menuEscritoAMao,
   semDadosPessoais,
 } from './assistente.build.mjs'
 
@@ -100,7 +103,6 @@ confere('modo desconhecido vale desligado', lerModo('qualquer') === 'desligado' 
 
 // 4. O que fica com o robo mesmo ligado.
 for (const [nome, extra] of [
-  ['assunto clinico', { texto: 'meu filho esta com febre e vomitando, o que dou?' }],
   ['urgencia', { texto: 'é urgente' }],
   ['anexo', { anexo: true, texto: '' }],
   ['equipe conversando', { equipeConversando: true }],
@@ -209,6 +211,94 @@ for (const [nome, extra] of [
   })
   confere('etapa: frase clinica do robo com nao_entendi registrado vai para o Claude', d.origem === 'ia' && c.chamadas.length === 1)
 }
+
+// 13. Segundo teste real (15/10/2026, "ta zoado ainda"): para "ola" o Claude
+// escreveu um menu numerado sem botoes e mandou ligar 192; para "o doutor pode
+// fazer exame?" repetiu a pergunta e terminou no pronto-socorro.
+{
+  const menuDoClaude =
+    'Olá! 👋 Sou o assistente virtual do consultório. Responda com um número:\n1 Dúvidas\n2 Marcar consulta\n3 Falar com a equipe\n4 Minha consulta\n5 2ª via\nSe a criança estiver mal agora, procure o pronto-socorro mais próximo ou ligue 192.'
+  const c = claudeFalso([texto(menuDoClaude)])
+  const f = ferramentasFalsas()
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'olá' }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('menu escrito a mao: vale o menu do sistema, com botoes', d.resultado.resposta === 'ROBO(menu)' && d.resultado.botoes?.length === 1, d.resultado.resposta)
+  confere('menu escrito a mao: detectado', menuEscritoAMao(menuDoClaude) && !menuEscritoAMao('Atendemos em Santos e em São Paulo.'))
+}
+{
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'menu' }, 'Olá! Sou o assistente virtual do consultório.')])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'bom dia' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('abrir_fluxo menu: sem cumprimento dobrado', d.resultado.resposta === 'ROBO(menu)', d.resultado.resposta)
+}
+{
+  const c = claudeFalso([
+    texto(
+      'Oi! Você perguntou se o Dr. Marcello pode pedir exame para seu filho. Pode sim! Na consulta o Dr. Marcello avalia e solicita os exames. Se a criança estiver mal agora, procure o pronto-socorro mais próximo ou ligue 192.',
+    ),
+  ])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'o doutor pode fazer exame para meu filho ?' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('sem repetir a pergunta', d.resultado.resposta.startsWith('Pode sim!'), d.resultado.resposta)
+  confere('sem pronto-socorro em duvida comum', !/pronto-socorro|192/.test(d.resultado.resposta), d.resultado.resposta)
+  confere('frase com "Dr." fica inteira', d.resultado.resposta.includes('Na consulta o Dr. Marcello avalia e solicita os exames.'), d.resultado.resposta)
+}
+{
+  const c = claudeFalso([usa('chamar_equipe', { motivo: 'medico', texto: 'A equipe responde por aqui. Se a criança estiver mal agora, ligue 192.' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'quero tirar uma dúvida com o doutor' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('equipe por conduta medica: sem 192', d.resultado.resposta === 'A equipe responde por aqui.', d.resultado.resposta)
+}
+confere('urgencia: pronto-socorro fica', limparTexto('Procure o pronto-socorro agora. Já avisei a equipe.', true) === 'Procure o pronto-socorro agora. Já avisei a equipe.')
+{
+  const c = claudeFalso([texto('Que bom que vieram! Se ele piorar de novo, volte ao pronto-socorro. Quer que eu veja um horário?')])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'o pronto-socorro mandou procurar um gastro, quando tem vaga?' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('familia falou do pronto-socorro: a frase fica', d.resultado.resposta.includes('pronto-socorro'), d.resultado.resposta)
+}
+{
+  const c = claudeFalso([texto('ok')])
+  await atenderComAssistente({ modo: 'ligado', situacao: situacao(), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  const sistema = String(c.chamadas[0].system)
+  confere('instrucao: nao repetir a pergunta', sistema.includes('Nunca repita nem resuma a pergunta'))
+  confere('instrucao: sem menu numerado', sistema.includes('Nunca escreva menu numerado'))
+  confere('instrucao: sintoma nao e pedido de conduta', sistema.includes('Falar de sintoma não é pedir conduta'))
+  confere('instrucao: interpretar e juntar', sistema.includes('Interprete') && sistema.includes('Junte as informações'))
+  confere('instrucao: ignorar "digite 9" das respostas oficiais', sistema.includes('ignore instruções como "digite 9"'))
+  // 16/10/2026: "aceita cartao? parcela?" virou "vou confirmar com a equipe" com o pagamento escrito ali.
+  // 16/10/2026: "nao precisa falar que nao parcelamos, somente se perguntar".
+  confere('instrucao: so o que foi perguntado', sistema.includes('Regra ou restrição que a família não perguntou'))
+  confere('instrucao: responder com a informacao mais proxima', sistema.includes('"aceita cartão?" se responde com como é o pagamento'))
+}
+
+// 14. Sintoma vai para o Claude (16/10/2026): "minha filha tem refluxo, ele
+// trata?" recebia do robo "nao posso orientar" e um menu. O Claude responde o
+// que e do servico; conduta continua da equipe, com trava no codigo.
+{
+  const c = claudeFalso([texto('Trata sim! Refluxo é uma das condições que o Dr. Marcello mais acompanha. Quer que eu veja um horário?')])
+  const rd = roboDireto()
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'minha filha tem refluxo e vomita muito, ele trata?' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: rd.fn })
+  confere('sintoma com pergunta de servico: responde o Claude', d.origem === 'ia' && rd.chamado.vezes === 0 && d.resultado.resposta.startsWith('Trata sim'))
+  confere('sintoma: aviso no contexto', JSON.stringify(c.chamadas[0]?.messages ?? []).includes('fala de sintoma ou remédio'))
+}
+{
+  const c = claudeFalso([texto('Pode dar dipirona 10 gotas de 6 em 6 horas e observar.')])
+  const f = ferramentasFalsas()
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'ele está com febre, posso dar remédio?' }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('trava de conduta: vai para a equipe', f.feito.some(([q]) => q === 'equipe') && d.resultado.atencao === 'atendente')
+  confere('trava de conduta: nada de remedio na resposta', !/dipirona|gotas/i.test(d.resultado.resposta) && d.resultado.resposta.includes('quem orienta é o Dr. Marcello'), d.resultado.resposta)
+}
+{
+  const c = claudeFalso([usa('chamar_equipe', { motivo: 'medico', texto: 'Dê paracetamol enquanto a equipe não responde.' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'ele está com febre alta, o que faço?' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('trava de conduta tambem no texto da equipe', !/paracetamol/i.test(d.resultado.resposta), d.resultado.resposta)
+}
+{
+  // 22h30 em Sao Paulo: sintoma com o consultorio fechado mantem o pronto-socorro.
+  const c = claudeFalso([usa('chamar_equipe', { motivo: 'medico', texto: 'A equipe responde amanhã cedo. Se ele piorar, procure o pronto-socorro.' })])
+  const d = await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ texto: 'ele está com dor de barriga, o que faço?', agora: new Date('2026-10-15T01:30:00Z') }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn,
+  })
+  confere('sintoma de noite: pronto-socorro fica', d.resultado.resposta.includes('pronto-socorro'), d.resultado.resposta)
+}
+confere('conduta: detecta dose e remedio', orientouConduta('10 gotas') && orientouConduta('pode dar') && orientouConduta('de 8 em 8 horas') && orientouConduta('use simeticona'))
+confere('conduta: nao pega frase de servico', !orientouConduta('Você pode usar o convênio para os exames. Quer que eu veja um horário?') && !orientouConduta('A consulta dura de 40 minutos a 1 hora.'))
 
 // 11. Mascara.
 confere('mascara telefone', semDadosPessoais('me liga no (13) 99706-6339') === 'me liga no [telefone]')
