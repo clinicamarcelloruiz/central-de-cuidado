@@ -5,6 +5,7 @@
 import {
   atenderComAssistente,
   orientouConduta,
+  semRepetir,
   ficaComORobo,
   lerModo,
   limparTexto,
@@ -299,6 +300,33 @@ confere('urgencia: pronto-socorro fica', limparTexto('Procure o pronto-socorro a
 }
 confere('conduta: detecta dose e remedio', orientouConduta('10 gotas') && orientouConduta('pode dar') && orientouConduta('de 8 em 8 horas') && orientouConduta('use simeticona'))
 confere('conduta: nao pega frase de servico', !orientouConduta('Você pode usar o convênio para os exames. Quer que eu veja um horário?') && !orientouConduta('A consulta dura de 40 minutos a 1 hora.'))
+
+// 15. Despedida no meio do agendamento (16/10/2026, teste do Edu as 00:52):
+// "vou pensar" ja tinha recebido o lembrete das unidades, e o "boa noite"
+// seguinte recebeu o mesmo lembrete de novo.
+{
+  const lembrete = 'Tudo bem, pode pensar com calma! Quando decidir, é só me dizer se prefere *Santos*, *São Paulo* ou *telemedicina* que eu sigo com o agendamento.'
+  const c = claudeFalso([texto('Boa noite! Quando decidir, é só me dizer se prefere *Santos*, *São Paulo* ou *telemedicina* que eu sigo com o agendamento.')])
+  const d = await atenderComAssistente({
+    modo: 'ligado',
+    situacao: situacao({
+      etapa: 'aguardando_unidade', texto: 'boa noite', ultimaDoConsultorio: lembrete,
+      historico: [{ de: 'familia', texto: 'vou pensar' }, { de: 'consultorio', texto: lembrete }],
+    }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar,
+    roboDireto: roboDireto({ resposta: 'Não entendi. Responda com o número da unidade.' }).fn,
+  })
+  confere('despedida: sem repetir o lembrete', d.resultado.resposta === 'Boa noite!', d.resultado.resposta)
+  confere('instrucao: despedida curta', String(c.chamadas[0]?.system ?? '').includes('Se ela se despediu ou disse que vai pensar, só se despeça.'))
+}
+// O lembrete que traduz a lista do robo em palavras NAO e repeticao (foi o
+// "parcela amigao?" do mesmo teste, e estava certo).
+confere(
+  'lembrete com outras palavras fica',
+  semRepetir('Não parcelamos. Para seguir, qual unidade você prefere: Santos, São Paulo ou telemedicina?', '📍 Vamos agendar! Em qual unidade você prefere ser atendido?\n\n1 Livance · Santos\n2 Livance Ibirapuera - São Paulo\n3 Telemedicina (por vídeo)\n\nResponda com o número.')
+    .includes('qual unidade você prefere'),
+)
+confere('so frase repetida: devolve o texto inteiro', semRepetir('Quando decidir, é só me dizer a unidade que eu sigo.', 'Quando decidir, é só me dizer a unidade que eu sigo.') === 'Quando decidir, é só me dizer a unidade que eu sigo.')
 
 // 11. Mascara.
 confere('mascara telefone', semDadosPessoais('me liga no (13) 99706-6339') === 'me liga no [telefone]')

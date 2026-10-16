@@ -196,6 +196,7 @@ function instrucoes(s: Situacao, emEtapa: boolean): string {
     '- As respostas oficiais foram escritas para o robô antigo: use o conteúdo, mas ignore instruções como "digite 9" ou "digite 2". No lugar delas, ofereça você mesmo o próximo passo ("Quer que eu veja um horário?").',
     '- Responda o que foi perguntado, e não tudo o que sabe sobre o assunto. Regra ou restrição que a família não perguntou (parcelamento, por exemplo) fica de fora.',
     '- Quando fizer sentido, termine oferecendo o próximo passo: marcar, ver horários, mandar o endereço.',
+    '- Despedida ou adiamento ("vou pensar", "depois vejo", "obrigada", "boa noite" no fim da conversa): responda só com uma despedida curta e calorosa. Não repita oferta nem lembrete que já está na conversa: quando a família voltar, o sistema retoma de onde parou.',
     '',
     'Como escrever:',
     '- Responda já na primeira frase. Nunca repita nem resuma a pergunta ("Você perguntou se..."). Cumprimente só no começo da conversa, não a cada mensagem.',
@@ -234,7 +235,7 @@ function instrucoes(s: Situacao, emEtapa: boolean): string {
     'Urgência: se a criança parece mal agora, oriente procurar o pronto-socorro mais próximo ou ligar 192, e use chamar_equipe com motivo urgencia.',
     'Se perguntarem, você é o assistente virtual do consultório, e a equipe acompanha as conversas.',
     emEtapa
-      ? `\nA família está no passo "${s.etapa}" do sistema e o sistema não entendeu a última resposta dela. A última mensagem do consultório foi:\n«${semDadosPessoais(s.ultimaDoConsultorio ?? '').slice(0, 900)}»\nSe der para traduzir o que ela quis dizer numa opção, use responder_etapa. Se ela perguntou outra coisa, responda e lembre o passo em aberto.`
+      ? `\nA família está no passo "${s.etapa}" do sistema e o sistema não entendeu a última resposta dela. A última mensagem do consultório foi:\n«${semDadosPessoais(s.ultimaDoConsultorio ?? '').slice(0, 900)}»\nSe der para traduzir o que ela quis dizer numa opção, use responder_etapa. Se ela perguntou outra coisa, responda e lembre o passo em aberto, a não ser que ele já tenha sido lembrado na última mensagem do consultório. Se ela se despediu ou disse que vai pensar, só se despeça.`
       : '',
     '',
     `<clinica>\n${s.conhecimento}\n</clinica>`,
@@ -317,6 +318,53 @@ const PRONTO_SOCORRO = /pronto[\s-]?socorro|\b192\b|\bsamu\b|\bupa\b/i
 const FAMILIA_FALOU_DE_URGENCIA = /pronto[\s-]?socorro|\b192\b|\bsamu\b|\bupa\b|emerg[eê]ncia|urg[eê]n/i
 
 /**
+ * Tira as frases que o consultorio acabou de dizer (16/10/2026).
+ *
+ * Teste do Edu: "vou pensar" recebeu "Tudo bem, pode pensar com calma! Quando
+ * decidir, e so me dizer se prefere Santos, Sao Paulo ou telemedicina...", e o
+ * "boa noite" seguinte recebeu "Boa noite!" e o MESMO lembrete, um minuto
+ * depois. A instrucao pede para so se despedir; aqui garante que frase ja dita
+ * na ultima mensagem do consultorio nao sai de novo. Se sobrar nada, vale o
+ * texto inteiro: repetir e melhor que ficar sem resposta.
+ */
+function palavrasDaFrase(frase: string): Set<string> {
+  return new Set(
+    frase
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((p) => p.length > 2),
+  )
+}
+
+export function semRepetir(texto: string, anterior: string | null | undefined): string {
+  if (!anterior?.trim()) return texto
+  const ditas = anterior
+    .split(/\n+/)
+    .flatMap((linha) => linha.split(FIM_DE_FRASE))
+    .map(palavrasDaFrase)
+    .filter((p) => p.size >= 5)
+  const repetida = (frase: string) => {
+    const nova = palavrasDaFrase(frase)
+    if (nova.size < 5) return false
+    return ditas.some((velha) => {
+      let comuns = 0
+      for (const p of nova) if (velha.has(p)) comuns++
+      return comuns / Math.max(nova.size, velha.size) >= 0.7
+    })
+  }
+  const limpo = texto
+    .split('\n')
+    .map((linha) => linha.split(FIM_DE_FRASE).filter((frase) => !repetida(frase)).join(' '))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return limpo || texto
+}
+
+/**
  * O Claude deu conduta numa mensagem com sintoma? (16/10/2026)
  *
  * A instrucao proibe, mas e a unica coisa que nao pode escapar: remedio, dose
@@ -394,7 +442,8 @@ async function conversarComClaude(
       const menu = await ferramentas.robo(FLUXOS.menu.texto, FLUXOS.menu.etapa)
       if (menu) return { resultado: menu, acao: 'fluxo:menu' }
     }
-    const texto = limparTexto(bruto, urgente)
+    const ultimaNossa = [...s.historico].reverse().find((m) => m.de === 'consultorio')?.texto
+    const texto = semRepetir(limparTexto(bruto, urgente), ultimaNossa)
     const avisoDaEquipe = usos.find((u) => u.name === 'chamar_equipe')?.input?.texto
     if (sintoma && (orientouConduta(bruto) || orientouConduta(String(avisoDaEquipe ?? '')))) {
       const fechado = !dentroDoExpediente(s.agora)
