@@ -36,6 +36,8 @@ import Dashboard from '@/sections/Dashboard'
 import Patients from '@/sections/Patients'
 import Followups from '@/sections/Followups'
 import Conversations from '@/sections/Conversations'
+import InstagramInbox from '@/sections/InstagramInbox'
+import { estadoDoInstagram } from '@/lib/instagram'
 import { prepararPrescricao } from '@/lib/memed'
 import Agenda from '@/sections/Agenda'
 import Settings from '@/sections/Settings'
@@ -237,6 +239,20 @@ export default function Home() {
   // Clinica atual, para o logo do menu (ver lib/marca.ts). Comeca pela ultima
   // vista neste navegador para o menu nao piscar a cada recarga.
   const [clinicaId, setClinicaId] = useState<string | null>(ultimaClinicaVista)
+  // Instagram (16/10/2026): a aba so aparece com a conta conectada. Sem as
+  // tabelas novas no banco, estadoDoInstagram devolve vazio e nada muda aqui.
+  const [temInstagram, setTemInstagram] = useState(false)
+  const [canalDasRespostas, setCanalDasRespostas] = useState<'whatsapp' | 'instagram'>('whatsapp')
+  useEffect(() => {
+    if (!clinicaId) return
+    let vivo = true
+    void estadoDoInstagram(clinicaId).then((e) => {
+      if (vivo) setTemInstagram(Boolean(e.conta))
+    })
+    return () => {
+      vivo = false
+    }
+  }, [clinicaId])
   const marca = clinicaId ? marcaDaClinica(clinicaId) : null
   // Altura do cabecalho do celular, publicada como --altura-topo-celular (27/09/2026).
   // O cabecalho da conversa tambem e grudado no topo, e ficava POR TRAS deste:
@@ -949,14 +965,34 @@ export default function Home() {
                 }
               />
             )}
-            {tab === 'conversas' && (
-              <Conversations
-                focoPatientId={conversaFoco}
-                focoConversa={conversaDoAviso}
-                onCadastrarContato={cadastrarContato}
-                compacto={topoRecolhido}
-                onAlternarCompacto={tela.computador ? alternarTopo : undefined}
-              />
+            {tab === 'conversas' && temInstagram && clinicaId && (
+              <div className="mb-3 flex gap-2">
+                {(['whatsapp', 'instagram'] as const).map((canal) => (
+                  <button
+                    key={canal}
+                    type="button"
+                    onClick={() => setCanalDasRespostas(canal)}
+                    className={`rounded-full px-4 py-1.5 text-[11px] font-extrabold transition ${
+                      canalDasRespostas === canal ? 'bg-[#081b2c] text-white' : 'bg-white text-[#1f4f78] hover:bg-[#e3ecf5]'
+                    }`}
+                  >
+                    {canal === 'whatsapp' ? 'WhatsApp' : 'Instagram'}
+                  </button>
+                ))}
+              </div>
+            )}
+            {tab === 'conversas' && temInstagram && clinicaId && canalDasRespostas === 'instagram' ? (
+              <InstagramInbox clinicId={clinicaId} />
+            ) : (
+              tab === 'conversas' && (
+                <Conversations
+                  focoPatientId={conversaFoco}
+                  focoConversa={conversaDoAviso}
+                  onCadastrarContato={cadastrarContato}
+                  compacto={topoRecolhido}
+                  onAlternarCompacto={tela.computador ? alternarTopo : undefined}
+                />
+              )
             )}
             {tab === 'pacientes' && (
               <Patients

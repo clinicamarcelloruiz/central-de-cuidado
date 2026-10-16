@@ -26,6 +26,7 @@ import {
 import DadosDaClinica from '@/sections/DadosDaClinica'
 import RespostasProntas from '@/sections/RespostasProntas'
 import AtendenteComIA from '@/sections/AtendenteComIA'
+import InstagramConexao from '@/sections/InstagramConexao'
 import InformacoesDoWhatsApp from '@/sections/InformacoesDoWhatsApp'
 import NotificacoesNoCelular from '@/sections/NotificacoesNoCelular'
 import { marcaSemClinicaConhecida } from '@/lib/marca'
@@ -178,6 +179,7 @@ export default function Settings({ db, importDb, clearAll }: Props) {
       <InformacoesDoWhatsApp />
       <RespostasProntas />
       <AtendenteComIA clinicId={clinicId} />
+      <InstagramConexao clinicId={clinicId} />
       {/* Ate 24/09/2026 esta secao deixava editar tres textos (15, 30 e 90
           dias) que nunca chegavam a familia: o envio automatico usa o modelo
           aprovado na Meta, e fora da conversa o WhatsApp so aceita modelo

@@ -77,6 +77,11 @@ export type Situacao = {
   agora: Date
   /** Alguem da equipe falou ha pouco: quem responde e ela, nao robo nem IA. */
   equipeConversando: boolean
+  /**
+   * Onde a conversa acontece (16/10/2026). Sem o campo, WhatsApp, como sempre.
+   * No Instagram nao ha agenda nem cadastro: os fluxos viram o link do WhatsApp.
+   */
+  canal?: 'WhatsApp' | 'Instagram'
 }
 
 export type Ferramentas = {
@@ -197,7 +202,12 @@ function ferramentasDoClaude(emEtapa: boolean) {
 function instrucoes(s: Situacao, emEtapa: boolean): string {
   const medico = s.quemAtende.replace(/^(o|a) /, '')
   return [
-    `Você é o atendente virtual do consultório de ${medico}, gastroenterologista pediátrico, no WhatsApp. Fala com mães, pais e responsáveis.`,
+    `Você é o atendente virtual do consultório de ${medico}, gastroenterologista pediátrico, no ${s.canal ?? 'WhatsApp'}. Fala com mães, pais e responsáveis.`,
+    ...(s.canal === 'Instagram'
+      ? [
+          'Você está no direct do Instagram. Aqui não há agenda nem cadastro: marcar, remarcar, cancelar, ver a consulta e 2ª via são pelo WhatsApp da clínica, e abrir_fluxo manda o link certo. Não peça telefone, CPF nem dados da criança.',
+        ]
+      : []),
     '',
     'Seu trabalho é entender o que a família quer e dar a resposta certa, como a secretária mais experiente do consultório daria.',
     '- Interprete. Erro de digitação, abreviação ("vcs", "qnto", "sp"), áudio transcrito, pergunta indireta: descubra a intenção. Se vierem várias perguntas, responda todas.',
@@ -212,7 +222,7 @@ function instrucoes(s: Situacao, emEtapa: boolean): string {
     '',
     'Como escrever:',
     '- Responda já na primeira frase. Nunca repita nem resuma a pergunta ("Você perguntou se..."). Cumprimente só no começo da conversa, não a cada mensagem.',
-    '- Português do Brasil, acolhedor e natural, como no WhatsApp. De 1 a 4 frases. Pode usar *negrito*. Sem listas longas.',
+    `- Português do Brasil, acolhedor e natural, como no ${s.canal ?? 'WhatsApp'}. De 1 a 4 frases. Pode usar *negrito*. Sem listas longas.`,
     '- Nunca escreva menu numerado nem peça "responda com um número": o sistema tem o menu com botões (abrir_fluxo com menu).',
     '- Se a pessoa só cumprimentou ("oi", "olá", "bom dia") sem perguntar nada, use abrir_fluxo com menu e não escreva nada junto: o menu já cumprimenta.',
     `- Diga "gastroenterologista pediátrico"; nunca "especialista".`,

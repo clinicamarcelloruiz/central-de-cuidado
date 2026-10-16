@@ -46,3 +46,12 @@ verify_jwt = true
 # Reserva sem cadastro (01/10/2026): chamada a cada 15 min pelo pg_cron, sem
 # sessao de usuario. Exige x-cron-secret, como o lembrete.
 verify_jwt = false
+
+[functions.instagram-webhook]
+# Instagram (16/10/2026): a Meta nao envia JWT. A funcao valida a assinatura
+# com INSTAGRAM_APP_SECRET (ou META_APP_SECRET).
+verify_jwt = false
+
+[functions.instagram-equipe]
+# Resposta da equipe e conexao da conta pela tela. Exige sessao e checa RLS.
+verify_jwt = true

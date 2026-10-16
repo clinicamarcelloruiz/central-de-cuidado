@@ -12,6 +12,7 @@ import type {
 import type { PatientDraft } from '@/lib/store'
 import type { Database } from '@/types/database'
 import { buscarTodas } from '@/lib/paginar'
+import { comNonoDigito } from '../../supabase/functions/_shared/telefone-br.ts'
 
 type PatientInsert = Database['public']['Tables']['patients']['Insert']
 type PatientUpdate = Database['public']['Tables']['patients']['Update']
@@ -255,7 +256,9 @@ function patientCreatePayload(
     guardian_name: draft.responsavel.trim(),
     birth_date: draft.nascimento || null,
     sex: draft.sexo,
-    phone: draft.telefone.replace(/\D/g, ''),
+    // Celular sem o 9 ganha o 9 ao gravar (16/10/2026): o envio para o numero
+    // de 8 digitos voltava "Message undeliverable". Ver telefone-br.ts.
+    phone: comNonoDigito(draft.telefone),
     city: draft.cidade.trim(),
     neighborhood: draft.bairro.trim(),
     insurance: draft.convenio.trim(),
@@ -274,7 +277,7 @@ function patientUpdatePayload(patch: Partial<Patient>): PatientUpdate & ColunasN
   if (patch.responsavel !== undefined) payload.guardian_name = patch.responsavel.trim()
   if (patch.nascimento !== undefined) payload.birth_date = patch.nascimento || null
   if (patch.sexo !== undefined) payload.sex = patch.sexo
-  if (patch.telefone !== undefined) payload.phone = patch.telefone.replace(/\D/g, '')
+  if (patch.telefone !== undefined) payload.phone = comNonoDigito(patch.telefone)
   if (patch.cidade !== undefined) payload.city = patch.cidade.trim()
   if (patch.bairro !== undefined) payload.neighborhood = patch.bairro.trim()
   if (patch.convenio !== undefined) payload.insurance = patch.convenio.trim()
@@ -1466,7 +1469,7 @@ export async function updateAppointmentDetails(
     .from('appointments')
     .update({
       contact_name: dados.contactName.trim().slice(0, 160),
-      contact_phone: dados.contactPhone.replace(/\D/g, '').slice(0, 20),
+      contact_phone: comNonoDigito(dados.contactPhone).slice(0, 20),
       staff_note: dados.staffNote.trim(),
       patient_id: dados.patientId,
     })
@@ -1563,7 +1566,7 @@ export async function createAppointment(
     source: 'clinic',
     staff_note: staffNote.trim(),
     contact_name: contato.nome.trim(),
-    contact_phone: contato.telefone.replace(/\D/g, ''),
+    contact_phone: comNonoDigito(contato.telefone),
   })
   // O indice unico do banco e a garantia real contra dois pacientes no mesmo
   // horario. Traduzimos o erro tecnico para algo que a recepcao entenda.

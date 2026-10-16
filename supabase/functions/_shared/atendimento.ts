@@ -1197,6 +1197,34 @@ export async function conhecimentoDaClinica(admin: Admin, clinicId: string): Pro
 }
 
 /**
+ * Unidades e telemedicina para o robo do Instagram (16/10/2026): os mesmos
+ * cartoes que o WhatsApp manda, com os campos ({valor}, {endereco}) ja
+ * preenchidos. Ver _shared/instagram.ts.
+ */
+export async function lugaresParaOInstagram(
+  admin: Admin,
+  clinicId: string,
+): Promise<{ unidades: { nome: string; endereco: string; texto: string }[]; tele: string | null }> {
+  const [lugares, unidades, tele] = await Promise.all([
+    lugaresComValor(admin, clinicId),
+    opcoesDeAtendimento(admin, clinicId),
+    telemedicinaDaClinica(admin, clinicId),
+  ])
+  const fisicas = lugares
+    .filter((l) => !l.telemedicina)
+    .map((l) => ({
+      nome: l.nome,
+      endereco: l.endereco,
+      texto: preencherCampos(unidades.find((u) => u.id === l.id)?.info_text ?? '', l, lugares).texto,
+    }))
+  const lugarTele = lugares.find((l) => l.telemedicina) ?? null
+  return {
+    unidades: fisicas,
+    tele: tele.ativa ? preencherCampos(tele.informacoes, lugarTele, lugares).texto || 'Consulta por vídeo.' : null,
+  }
+}
+
+/**
  * Horarios livres de uma unidade, em texto, para o atendente com IA consultar
  * antes de responder "pra quando tem?" (15/10/2026). So leitura: quem reserva e
  * o fluxo de agendamento, como sempre.

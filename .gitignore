@@ -66,6 +66,7 @@ tests/rajada.build.mjs
 tests/ficha-pendente.build.mjs
 tests/conteudo.build.mjs
 tests/assistente.build.mjs
+tests/instagram.build.mjs
 tests/simulador.build/
 
 # Saida do SIMULAR CONVERSAS.bat
