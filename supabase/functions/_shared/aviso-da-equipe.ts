@@ -18,7 +18,9 @@
  * Regra pura, sem banco, para o teste cobrir (tests/aviso-da-equipe.test.mjs).
  */
 
-export const MOTIVOS_QUE_AVISAM = ['atendente', 'urgencia', 'documento', 'farmacia'] as const
+// 'nao_suportada' (16/10/2026): alguem tentou falar - talvez ligando pelo
+// WhatsApp - e so a equipe, com um modelo, consegue responder.
+export const MOTIVOS_QUE_AVISAM = ['atendente', 'urgencia', 'documento', 'farmacia', 'nao_suportada'] as const
 
 export type Aviso = {
   titulo: string
@@ -86,6 +88,7 @@ export function montarAviso(entrada: EntradaDoAviso): Aviso | null {
     atendente: `${nome} quer falar com a equipe`,
     documento: `${nome} pediu 2ª via ou exame`,
     farmacia: `Farmácia pediu correção de receita (${nome})`,
+    nao_suportada: `${nome} tentou falar com a clínica (talvez uma ligação)`,
   }
   return { ...base, titulo: titulos[motivo], corpo }
 }

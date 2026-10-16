@@ -64,6 +64,7 @@ export const MOTIVOS: Record<string, { rotulo: string; tom: Tom }> = {
   documento: { rotulo: '📄 Pediu 2ª via / exame', tom: 'atencao' },
   farmacia: { rotulo: '🏥 Farmácia/laboratório', tom: 'atencao' },
   numero_errado: { rotulo: '☎️ Número errado no cadastro', tom: 'atencao' },
+  nao_suportada: { rotulo: '📵 Tentou falar (ligação?): mande um modelo', tom: 'atencao' },
   cancelou_sozinho: { rotulo: 'Cancelou pelo WhatsApp', tom: 'atencao' },
 }
 

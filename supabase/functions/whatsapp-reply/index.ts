@@ -164,6 +164,8 @@ Deno.serve(async (req) => {
       .select('created_at')
       .eq('conversation_id', visivel.id)
       .eq('direction', 'inbound')
+      // "[unsupported]" (talvez ligacao) nao abre a janela de 24h (16/10/2026).
+      .neq('message_type', 'unsupported')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()

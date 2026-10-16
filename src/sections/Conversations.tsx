@@ -233,6 +233,13 @@ const MOTIVO_ATENCAO: Record<
     classe: 'bg-[#fef3c7] text-[#92400e]',
     borda: 'border-[#f59e0b]',
   },
+  // Chegou algo que o WhatsApp nao mostra - talvez uma ligacao - e a janela
+  // de 24h nao abriu (16/10/2026). Texto livre falha; so um modelo chega.
+  nao_suportada: {
+    rotulo: '📵 Tentou falar (ligação?): mande um modelo',
+    classe: 'bg-[#fef3c7] text-[#92400e]',
+    borda: 'border-[#f59e0b]',
+  },
   urgencia: {
     rotulo: '🚨 Urgência: ligar agora',
     classe: 'bg-[#b42318] text-white',
@@ -279,6 +286,7 @@ const ORDEM_DOS_MOTIVOS: NonNullable<Conversation['attentionReason']>[] = [
   'documento',
   'farmacia',
   'numero_errado',
+  'nao_suportada',
   'remarcacao',
   'cancelamento',
   'cancelou_sozinho',

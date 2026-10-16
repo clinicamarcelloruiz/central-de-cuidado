@@ -88,4 +88,10 @@ caso('anexo sem legenda vira texto legivel, e texto longo e cortado', () => {
   assert.ok(longo.endsWith('…'))
 })
 
+caso('tentou falar (mensagem que o WhatsApp nao mostra) avisa a equipe', () => {
+  const aviso = montarAviso({ ...base, motivoAgora: 'nao_suportada', texto: 'Tentou falar (talvez uma ligação pelo WhatsApp)' })
+  assert.ok(aviso, 'nao_suportada deveria avisar')
+  assert.match(aviso.titulo, /tentou falar com a clínica/)
+})
+
 console.log(`aviso-da-equipe: ${ok} verificacoes ok`)

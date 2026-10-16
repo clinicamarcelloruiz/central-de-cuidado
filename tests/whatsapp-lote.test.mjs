@@ -1,7 +1,7 @@
 // Lote do WhatsApp de 25/09/2026: nono digito, localizacao/contato e notas.
 // Numeros e nomes inventados.
 import { variantesDoTelefone, mesmoTelefone } from './telefone-br.build.mjs'
-import { textoDaLocalizacao, textoDosContatos, semRespostaDoRobo } from './mensagem-recebida.build.mjs'
+import { textoDaLocalizacao, textoDosContatos, semRespostaDoRobo, destinoDaNaoSuportada, TEXTO_NAO_SUPORTADA } from './mensagem-recebida.build.mjs'
 import { linhaDoTempo } from './linha-do-tempo.build.mjs'
 import { avaliarSaude } from './saude-dos-envios.build.mjs'
 import { consultasDeUmDia, avisoDoBloqueio } from './bloqueio-de-dia.build.mjs'
@@ -109,6 +109,16 @@ confere('figurinha nao recebe resposta do robo', semRespostaDoRobo('sticker') ==
 for (const tipo of ['text', 'image', 'document', 'audio', 'interactive', 'button', undefined]) {
   confere(`${tipo} continua com resposta`, semRespostaDoRobo(tipo) === false)
 }
+
+// ------------------------------- "[unsupported]" (16/10/2026, (11) 91935-1515)
+// Duas vezes o menu do robo voltou "Message undeliverable": esse tipo de
+// mensagem nao abre a janela de 24h. Sem janela, nada de texto livre.
+confere('nao suportada sem janela: so a equipe', destinoDaNaoSuportada('unsupported', false) === 'so_equipe')
+confere('nao suportada com janela: pede texto', destinoDaNaoSuportada('unsupported', true) === 'pedir_texto')
+for (const tipo of ['text', 'image', 'audio', 'interactive', 'button', 'sticker', undefined]) {
+  confere(`${tipo} segue o caminho normal`, destinoDaNaoSuportada(tipo, false) === 'normal' && destinoDaNaoSuportada(tipo, true) === 'normal')
+}
+confere('texto pede para escrever, sem menu', /escrever em texto/.test(TEXTO_NAO_SUPORTADA) && !/Responda com o número/.test(TEXTO_NAO_SUPORTADA))
 
 console.log(`WhatsApp (lote 25/09): ${ok} verificações passaram.`)
 if (falhas) {

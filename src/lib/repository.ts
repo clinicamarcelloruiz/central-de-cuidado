@@ -1824,6 +1824,7 @@ export interface Conversation {
     | 'documento'
     | 'farmacia'
     | 'numero_errado'
+    | 'nao_suportada'
     | null
   /** Etapa em que o robo parou nesta conversa. Nulo quando nao ha nada aberto. */
   bookingState: string | null
@@ -2375,11 +2376,14 @@ export async function saveAutoReply(clinicId: string, prefs: AutoReplySettings) 
  * disso, apenas modelo aprovado. Devolve null quando o paciente nunca escreveu.
  */
 export async function getReplyWindow(conversationId: string): Promise<string | null> {
+  // "[unsupported]" (talvez uma ligacao) nao abre a janela de 24h: responder
+  // texto livre ali volta "Message undeliverable" (16/10/2026).
   const { data, error } = await supabase
     .from('whatsapp_messages')
     .select('created_at')
     .eq('conversation_id', conversationId)
     .eq('direction', 'inbound')
+    .neq('message_type', 'unsupported')
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()

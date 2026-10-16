@@ -22,7 +22,13 @@ import { quemAtende } from '../_shared/quem-atende.ts'
 import { montarMensagens } from '../_shared/conteudo.ts'
 import { RegistroDeEventos } from '../_shared/eventos-do-webhook.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
-import { semRespostaDoRobo, textoDaLocalizacao, textoDosContatos } from '../_shared/mensagem-recebida.ts'
+import {
+  destinoDaNaoSuportada,
+  semRespostaDoRobo,
+  TEXTO_NAO_SUPORTADA,
+  textoDaLocalizacao,
+  textoDosContatos,
+} from '../_shared/mensagem-recebida.ts'
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 import { montarAviso } from '../_shared/aviso-da-equipe.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
@@ -927,6 +933,33 @@ Deno.serve(async (req) => {
             return envio.ok
           }
 
+          // Mensagem que o WhatsApp nao mostra (16/10/2026, ver
+          // destinoDaNaoSuportada). A janela de 24h so conta mensagem que a
+          // pessoa escreveu de verdade: "[unsupported]" nao abre a janela, e
+          // responder texto livre ali volta "Message undeliverable".
+          let destinoNaoSuportada = destinoDaNaoSuportada(message.type, false)
+          if (destinoNaoSuportada !== 'normal') {
+            let janelaAberta = false
+            try {
+              const { data: escrita, error: erroDaJanela } = await admin
+                .from('whatsapp_messages')
+                .select('id')
+                .eq('conversation_id', conversation.id)
+                .eq('direction', 'inbound')
+                .neq('message_type', 'unsupported')
+                .gte('created_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString())
+                .limit(1)
+                .maybeSingle()
+              if (erroDaJanela) throw erroDaJanela
+              janelaAberta = Boolean(escrita)
+            } catch (erro) {
+              // Na duvida, janela fechada: o pior caso e a equipe mandar um
+              // modelo quando o texto livre teria passado - nada falha.
+              console.warn('Nao consegui ver a janela de 24h; tratando como fechada', erro)
+            }
+            destinoNaoSuportada = destinoDaNaoSuportada(message.type, janelaAberta)
+          }
+
           // ---- Atendimento automatico ----
           //
           // Um unico ponto decide o que responder: menu, informacoes,
@@ -947,6 +980,7 @@ Deno.serve(async (req) => {
             !pediuAjuda &&
             !complementoDeRajada &&
             !semRespostaDoRobo(message.type) &&
+            destinoNaoSuportada === 'normal' &&
             settings.whatsapp_autoreply_enabled
           ) {
             const opcoesDoRobo: Parameters<typeof tratarConversa>[0] = {
@@ -1262,6 +1296,59 @@ Deno.serve(async (req) => {
               }
             } catch (erro) {
               console.warn('Notificacao no celular: nao consegui montar o aviso', erro)
+            }
+          }
+
+          // Mensagem que o WhatsApp nao mostra: o robo nao manda o menu (ver
+          // destinoDaNaoSuportada). Com a janela aberta pede texto; fechada,
+          // nao responde - falharia - e a conversa acende para a equipe, com a
+          // etiqueta que diz para usar um modelo. Tudo em try/catch: e o
+          // ultimo passo, e falhar aqui nao pode derrubar o resto.
+          if (destinoNaoSuportada !== 'normal' && !foraDaLista) {
+            try {
+              let respondeu = false
+              if (destinoNaoSuportada === 'pedir_texto' && settings.whatsapp_autoreply_enabled && !equipeFalouRecentemente) {
+                respondeu = await responder(TEXTO_NAO_SUPORTADA)
+              }
+              if (!respondeu) {
+                const motivo = destinoNaoSuportada === 'so_equipe' ? 'nao_suportada' : 'atendente'
+                const { error: erroDaEtiqueta } = await admin
+                  .from('whatsapp_conversations')
+                  .update({ needs_attention: true, attention_reason: motivo })
+                  .eq('id', conversation.id)
+                // Motivo novo, banco antigo: 'atendente' sempre passa.
+                if (erroDaEtiqueta) {
+                  console.warn('Etiqueta nao_suportada recusada pelo banco; marcando como atendente', erroDaEtiqueta)
+                  await admin
+                    .from('whatsapp_conversations')
+                    .update({ needs_attention: true, attention_reason: 'atendente' })
+                    .eq('id', conversation.id)
+                }
+                const aviso = montarAviso({
+                  conversationId: conversation.id,
+                  atencaoAntes: Boolean(conversaAnterior?.needs_attention),
+                  motivoAntes: (conversaAnterior?.attention_reason as string | null) ?? null,
+                  motivoAgora: motivo,
+                  texto: 'Tentou falar (talvez uma ligação pelo WhatsApp)',
+                  pacientes,
+                  nomeDoPerfil: nomeDoPerfil || String(conversaAnterior?.profile_name ?? ''),
+                  telefone: waId,
+                })
+                if (aviso) {
+                  const envio = avisarEquipe(admin, clinicId, aviso)
+                  if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(envio)
+                  else await envio
+                }
+              }
+              const { error: erroDoEvento } = await admin.from('whatsapp_bot_events').insert({
+                clinic_id: clinicId,
+                conversation_id: conversation.id,
+                evento: 'nao_suportada',
+                detalhe: respondeu ? 'pediu_texto' : 'passou_a_equipe',
+              })
+              if (erroDoEvento) console.warn('Nao consegui registrar o evento nao_suportada', erroDoEvento)
+            } catch (erro) {
+              console.warn('Mensagem nao suportada: nao consegui avisar a equipe', erro)
             }
           }
 
