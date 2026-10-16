@@ -1033,6 +1033,19 @@ Deno.serve(async (req) => {
               resultado = desfecho.resultado
               daIA = desfecho.origem === 'ia'
               eventosDaIA = desfecho.eventos
+              // O resumo que a IA deixa ao chamar a equipe vai como nota interna
+              // (16/10/2026): ate aqui ele ia no texto da familia. Falhar aqui
+              // custa a nota, nunca a resposta - mas grita no log.
+              if (desfecho.nota) {
+                try {
+                  const { error: erroDaNota } = await admin
+                    .from('conversation_notes')
+                    .insert({ clinic_id: clinicId, conversation_id: conversation.id, texto: desfecho.nota })
+                  if (erroDaNota) console.warn('Nao consegui gravar a nota da IA para a equipe', erroDaNota)
+                } catch (erro) {
+                  console.warn('Nao consegui gravar a nota da IA para a equipe', erro)
+                }
+              }
             } else {
               resultado = await tratarConversa(opcoesDoRobo)
             }

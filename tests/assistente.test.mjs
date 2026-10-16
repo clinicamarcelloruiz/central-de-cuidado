@@ -4,6 +4,7 @@
 // que o modo sombra nao mexe em nada, que CPF nao sai para fora.
 import {
   atenderComAssistente,
+  falaComAEquipe,
   orientouConduta,
   semRepetir,
   ficaComORobo,
@@ -327,6 +328,30 @@ confere(
     .includes('qual unidade você prefere'),
 )
 confere('so frase repetida: devolve o texto inteiro', semRepetir('Quando decidir, é só me dizer a unidade que eu sigo.', 'Quando decidir, é só me dizer a unidade que eu sigo.') === 'Quando decidir, é só me dizer a unidade que eu sigo.')
+
+// 16. Recado para a equipe saindo para a familia (16/10/2026, mae do Leon,
+// 08:50): "A familia do Leon (...) pergunta se e possivel pagar presencialmente
+// no dia da consulta. Nao temos essa informacao aqui. Por favor, confirmem e
+// respondam por aqui." saiu do consultorio para ela.
+{
+  const recado = 'A família do Leon (consulta sexta, 16/10, às 10:00, em Santos) pergunta se é possível pagar presencialmente no dia da consulta. Não temos essa informação aqui. Por favor, confirmem e respondam por aqui.'
+  const c = claudeFalso([usa('chamar_equipe', { motivo: 'sem_informacao', texto: recado })])
+  const f = ferramentasFalsas()
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'posso pagar no dia da consulta?' }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('recado da equipe nao vai para a familia', !d.resultado.resposta.includes('A família do Leon') && d.resultado.resposta === 'Vou confirmar isso com a equipe e te respondemos por aqui.', d.resultado.resposta)
+  confere('recado vira nota interna', (d.nota ?? '').includes('A família do Leon') && (d.nota ?? '').startsWith('🤖'), d.nota)
+  confere('recado: a equipe e chamada', f.feito.some(([q]) => q === 'equipe'))
+}
+{
+  const c = claudeFalso([usa('chamar_equipe', { motivo: 'excecao', para_familia: 'Vou ver com a equipe e te respondo por aqui.', resumo_para_equipe: 'Mãe pede desconto para dois irmãos.' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'tem desconto pra irmãos?' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('dois campos: familia le o para_familia', d.resultado.resposta === 'Vou ver com a equipe e te respondo por aqui.', d.resultado.resposta)
+  confere('dois campos: resumo vira nota', d.nota === '🤖 Resumo da IA para a equipe: Mãe pede desconto para dois irmãos.', d.nota)
+  const ferramenta = c.chamadas[0].tools.find((t) => t.name === 'chamar_equipe')
+  confere('ferramenta pede os dois campos', ferramenta.input_schema.required.includes('para_familia') && ferramenta.input_schema.required.includes('resumo_para_equipe'))
+}
+confere('fala com a equipe: detecta', falaComAEquipe('A família do Leon pergunta se pode pagar.') && falaComAEquipe('Por favor, confirmem.') && falaComAEquipe('A mãe pergunta se tem vaga.'))
+confere('fala com a familia: nao detecta', !falaComAEquipe('Vou confirmar com a equipe e te respondemos por aqui.') && !falaComAEquipe('Atendemos toda a família, de recém-nascidos até 19 anos.'))
 
 // 11. Mascara.
 confere('mascara telefone', semDadosPessoais('me liga no (13) 99706-6339') === 'me liga no [telefone]')

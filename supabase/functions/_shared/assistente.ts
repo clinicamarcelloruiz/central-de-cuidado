@@ -116,7 +116,10 @@ export type Desfecho = {
   resultado: Resultado | null
   origem: 'robo' | 'ia'
   eventos: { evento: string; detalhe?: string }[]
-  /** Modo sombra: o que o Claude teria respondido, para virar nota interna. */
+  /**
+   * Nota interna da conversa, que so a equipe ve. No modo sombra, o que o
+   * Claude teria respondido; ligado, o resumo que ele deixa ao chamar a equipe.
+   */
   nota?: string
 }
 
@@ -147,14 +150,23 @@ function ferramentasDoClaude(emEtapa: boolean) {
       name: 'chamar_equipe',
       description:
         'Passa a conversa para a equipe humana. Obrigatório nos quatro assuntos da equipe e na urgência. ' +
-        'O texto é o que a família vai ler agora.',
+        'São duas mensagens: uma para a família (ela lê agora) e um resumo para a equipe (só a equipe vê).',
       input_schema: {
         type: 'object',
         properties: {
           motivo: { type: 'string', enum: ['medico', 'documento', 'excecao', 'financeiro', 'pessoa', 'urgencia', 'sem_informacao'] },
-          texto: { type: 'string', description: 'Mensagem curta para a família: a equipe vai responder por aqui.' },
+          para_familia: {
+            type: 'string',
+            description:
+              'O que a família lê agora, falando COM ela ("você"). Ex.: "Vou confirmar isso com a equipe e te respondemos por aqui." ' +
+              'Nunca fale da família em terceira pessoa nem peça nada à equipe aqui.',
+          },
+          resumo_para_equipe: {
+            type: 'string',
+            description: 'Nota interna, que a família NÃO vê: o que ela quer e o que a equipe precisa responder, em uma ou duas frases.',
+          },
         },
-        required: ['motivo', 'texto'],
+        required: ['motivo', 'para_familia', 'resumo_para_equipe'],
       },
     },
   ]
@@ -212,7 +224,7 @@ function instrucoes(s: Situacao, emEtapa: boolean): string {
     '- ver_horarios: para dizer quando tem vaga numa unidade, e para responder em que dias e horários o médico atende ("atende sábado?", "tem à noite?"): consulte a agenda das unidades em vez de chamar a equipe. Não prometa horário: quem reserva é o fluxo de agendamento.',
     '- chamar_equipe: só nas quatro situações abaixo, ou quando faltar a informação.',
     '',
-    'É da equipe (use chamar_equipe e diga, em uma frase, que a equipe responde por aqui):',
+    'É da equipe (use chamar_equipe: em para_familia, fale com a família, em uma frase, que a equipe responde por aqui; em resumo_para_equipe, escreva para a equipe o que precisa ser respondido):',
     '1. Conduta médica sobre esta criança: o que fazer com um sintoma, remédio, dose, o que significa um resultado de exame, se é grave, se ela precisa de tal exame ou tratamento.',
     '2. Documento assinado pelo médico: receita nova, pedido de exame novo sem consulta, atestado, relatório, declaração. (2ª via de algo já emitido: abrir_fluxo segunda_via.)',
     '3. Exceção às regras: encaixe fora da agenda, desconto, retorno fora do prazo, mudar valor.',
@@ -230,7 +242,7 @@ function instrucoes(s: Situacao, emEtapa: boolean): string {
     `Família: "minha filha tem 17 anos e vive com dor de barriga, ele atende?"`,
     `Você (se <clinica> diz que atende até 19 anos): "Atende sim! ${s.quemAtende.replace(/^./, (l) => l.toUpperCase())} acompanha até os 19 anos, e dor de barriga que volta é uma das coisas mais investigadas no consultório. Quer que eu veja um horário?"`,
     `Família: "meu filho ta com febre desde ontem, posso dar dipirona?"`,
-    `Você: chamar_equipe com motivo medico, texto: "Sobre remédio, quem orienta é ${s.quemAtende}: já passei para a equipe, que responde por aqui. Se ele piorar, procure o pronto-socorro."`,
+    `Você: chamar_equipe com motivo medico, para_familia: "Sobre remédio, quem orienta é ${s.quemAtende}: já passei para a equipe, que responde por aqui. Se ele piorar, procure o pronto-socorro.", resumo_para_equipe: "Febre desde ontem; a mãe pergunta se pode dar dipirona."`,
     '',
     'Urgência: se a criança parece mal agora, oriente procurar o pronto-socorro mais próximo ou ligar 192, e use chamar_equipe com motivo urgencia.',
     'Se perguntarem, você é o assistente virtual do consultório, e a equipe acompanha as conversas.',
@@ -365,6 +377,32 @@ export function semRepetir(texto: string, anterior: string | null | undefined): 
 }
 
 /**
+ * O texto "para a familia" foi escrito para a equipe? (16/10/2026)
+ *
+ * No primeiro dia ligado, a mae do Leon perguntou se podia pagar no dia e
+ * recebeu, do proprio consultorio: "A familia do Leon (consulta sexta...)
+ * pergunta se e possivel pagar presencialmente... Por favor, confirmem e
+ * respondam por aqui." Era o recado para a equipe, e saiu para ela. Com dois
+ * campos o modelo erra menos; esta trava pega o que ainda escapar: o texto vira
+ * nota interna e a familia recebe a frase padrao.
+ */
+// "Toda a familia" e "atendemos a familia inteira" falam COM a mae: o que
+// denuncia o recado e a familia como sujeito de um pedido, ou "familia do Leon".
+const PARA_A_EQUIPE = [
+  /\b(?:a|essa|esta)\s+fam[ií]lia\s+(?:pergunt|quer|pede|pediu|gostaria|precisa|solicit|est[aá]\s+pergunt)/i,
+  /[Ff]am[ií]lia\s+d[aeo]\s+[A-ZÀ-Ý]/,
+  /\b(?:confirmem|respondam|verifiquem|retornem|avisem|liguem|chequem)\b/i,
+  /\bpor favor,?\s+(?:confirm|respond|verifi)/i,
+  /\b(?:o|a)\s+(?:respons[aá]vel|m[aã]e|pai|paciente)\s+(?:pergunt|quer|pediu|pede|gostaria|precisa)/i,
+]
+
+export function falaComAEquipe(texto: string): boolean {
+  return PARA_A_EQUIPE.some((r) => r.test(texto))
+}
+
+const AVISO_PADRAO = 'Vou confirmar isso com a equipe e te respondemos por aqui.'
+
+/**
  * O Claude deu conduta numa mensagem com sintoma? (16/10/2026)
  *
  * A instrucao proibe, mas e a unica coisa que nao pode escapar: remedio, dose
@@ -412,7 +450,7 @@ async function conversarComClaude(
   modelo: string,
   emEtapa: boolean,
   prazoMs: number,
-): Promise<{ resultado: Resultado; acao: string }> {
+): Promise<{ resultado: Resultado; acao: string; nota?: string }> {
   const fim = Date.now() + prazoMs
   const mensagens: Record<string, unknown>[] = [{ role: 'user', content: contexto(s) }]
   for (let volta = 0; volta < ATE; volta++) {
@@ -444,13 +482,18 @@ async function conversarComClaude(
     }
     const ultimaNossa = [...s.historico].reverse().find((m) => m.de === 'consultorio')?.texto
     const texto = semRepetir(limparTexto(bruto, urgente), ultimaNossa)
-    const avisoDaEquipe = usos.find((u) => u.name === 'chamar_equipe')?.input?.texto
+    const pedidoAEquipe = usos.find((u) => u.name === 'chamar_equipe')?.input
+    const avisoDaEquipe = pedidoAEquipe?.para_familia ?? pedidoAEquipe?.texto
     if (sintoma && (orientouConduta(bruto) || orientouConduta(String(avisoDaEquipe ?? '')))) {
       const fechado = !dentroDoExpediente(s.agora)
       const aviso =
         `Sobre o que fazer agora, quem orienta é ${s.quemAtende}: já passei para a equipe, que responde por aqui.` +
         (fechado ? ' Se a criança estiver mal, procure o pronto-socorro mais próximo ou ligue 192.' : '')
-      return { resultado: await ferramentas.equipe('atendente', aviso), acao: 'equipe:medico (trava de conduta)' }
+      return {
+        resultado: await ferramentas.equipe('atendente', aviso),
+        acao: 'equipe:medico (trava de conduta)',
+        nota: '🤖 A IA ia orientar remédio ou dose numa mensagem com sintoma; a trava segurou e passou para a equipe.',
+      }
     }
     if (usos.length === 0) {
       if (!texto) throw new Error('resposta vazia')
@@ -482,8 +525,20 @@ async function conversarComClaude(
       }
       if (final.name === 'chamar_equipe') {
         const motivo = String(final.input?.motivo ?? 'pessoa')
-        const aviso = limparTexto(String(final.input?.texto ?? ''), urgente) || texto || 'Já avisei a nossa equipe: alguém responde por aqui.'
-        return { resultado: await ferramentas.equipe(MOTIVOS[motivo] ?? 'atendente', aviso.slice(0, 800)), acao: `equipe:${motivo}` }
+        // `texto` era o nome do campo ate 16/10/2026; continua valendo.
+        const escrito = String(final.input?.para_familia ?? final.input?.texto ?? '')
+        let resumo = String(final.input?.resumo_para_equipe ?? '').trim()
+        let aviso = semRepetir(limparTexto(escrito, urgente), ultimaNossa) || texto || AVISO_PADRAO
+        if (falaComAEquipe(aviso)) {
+          console.warn('Atendente com IA escreveu para a equipe no texto da familia; vai como nota interna', aviso.slice(0, 200))
+          resumo = [resumo, aviso].filter(Boolean).join('\n\n')
+          aviso = AVISO_PADRAO
+        }
+        return {
+          resultado: await ferramentas.equipe(MOTIVOS[motivo] ?? 'atendente', aviso.slice(0, 800)),
+          acao: `equipe:${motivo}`,
+          nota: resumo ? `🤖 Resumo da IA para a equipe: ${resumo}`.slice(0, 1500) : undefined,
+        }
       }
       throw new Error(`ferramenta desconhecida: ${final.name}`)
     }
@@ -575,8 +630,8 @@ export async function atenderComAssistente(opcoes: {
     const doRoboNaEtapa = await roboDireto()
     if (!naoEntendeu(doRoboNaEtapa)) return { resultado: doRoboNaEtapa, origem: 'robo', eventos: [] }
     try {
-      const { resultado, acao } = await conversarComClaude(situacao, ferramentas, chamar, modelo, true, prazo)
-      return { resultado, origem: 'ia', eventos: [{ evento: 'ia_respondeu', detalhe: acao }] }
+      const { resultado, acao, nota } = await conversarComClaude(situacao, ferramentas, chamar, modelo, true, prazo)
+      return { resultado, origem: 'ia', eventos: [{ evento: 'ia_respondeu', detalhe: acao }], nota }
     } catch (erro) {
       console.warn('Atendente com IA falhou na etapa; vale o "nao entendi" do robo', erro)
       return { resultado: doRoboNaEtapa, origem: 'robo', eventos: [{ evento: 'ia_falhou', detalhe: String(erro).slice(0, 120) }] }
@@ -584,8 +639,8 @@ export async function atenderComAssistente(opcoes: {
   }
 
   try {
-    const { resultado, acao } = await conversarComClaude(situacao, ferramentas, chamar, modelo, false, prazo)
-    return { resultado, origem: 'ia', eventos: [{ evento: 'ia_respondeu', detalhe: acao }] }
+    const { resultado, acao, nota } = await conversarComClaude(situacao, ferramentas, chamar, modelo, false, prazo)
+    return { resultado, origem: 'ia', eventos: [{ evento: 'ia_respondeu', detalhe: acao }], nota }
   } catch (erro) {
     console.warn('Atendente com IA falhou; o robo responde', erro)
     return { resultado: await roboDireto(), origem: 'robo', eventos: [{ evento: 'ia_falhou', detalhe: String(erro).slice(0, 120) }] }
