@@ -190,6 +190,26 @@ for (const [nome, extra] of [
   confere('sombra: robo de verdade nao foi acionado pelo Claude', !f.feito.some(([q]) => q === 'robo' || q === 'equipe'))
 }
 
+// 12. Primeiro teste real (15/10/2026): "o doutor pode fazer exame para meu
+// filho?" ia para o robo, que respondia "nao posso orientar sobre exames".
+{
+  const c = claudeFalso([texto('O Dr. Marcello avalia na consulta e pede os exames necessários.')])
+  const rd = roboDireto()
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'o doutor pode fazer exame para meu filho ?' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: rd.fn })
+  confere('pergunta sobre exame vai para o Claude', d.origem === 'ia' && rd.chamado.vezes === 0)
+}
+{
+  // Na etapa, o robo devolveu a frase clinica (nao comeca por "Nao entendi"),
+  // mas registrou nao_entendi: o Claude assume.
+  const c = claudeFalso([texto('O Dr. Marcello pede os exames na consulta. Em qual unidade prefere?')])
+  const rd = roboDireto({ resposta: 'Essa é uma avaliação para a consulta... Responda com o número da unidade da lista acima.' })
+  const d = await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ etapa: 'aguardando_unidade', texto: 'o doutor pode fazer exame para meu filho ?' }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: rd.fn, roboNaoEntendeuAgora: () => true,
+  })
+  confere('etapa: frase clinica do robo com nao_entendi registrado vai para o Claude', d.origem === 'ia' && c.chamadas.length === 1)
+}
+
 // 11. Mascara.
 confere('mascara telefone', semDadosPessoais('me liga no (13) 99706-6339') === 'me liga no [telefone]')
 

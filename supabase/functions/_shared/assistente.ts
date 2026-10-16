@@ -232,12 +232,26 @@ export function roboNaoEntendeu(r: Resultado | null): boolean {
   return Boolean(r && /^Não entendi/.test(r.resposta))
 }
 
+/**
+ * Relato de sintoma, e nao pergunta sobre exame ou receita (15/10/2026).
+ *
+ * No primeiro teste com a IA ligada, "o doutor pode fazer exame para meu
+ * filho?" foi parar no robo: "exame" esta na lista clinica, e a familia ouviu
+ * "nao posso orientar sobre exames" e, de noite, o aviso do pronto-socorro. Para
+ * a IA, exame, receita, resultado e tratamento sao assunto de conversa - e ela
+ * chama a equipe quando for conduta medica. Sintoma (febre, dor, vomito,
+ * remedio, dose) continua indo para o robo, que tem a resposta conferida.
+ */
+export function relatoDeSintoma(texto: string): boolean {
+  return assuntoClinico(texto.replace(/\b(exames?|resultados?|receitas?|tratamentos?)\b/gi, ' '))
+}
+
 /** O que fica com o robo mesmo com a IA ligada (ver o topo do arquivo). */
 export function ficaComORobo(s: Situacao): string | null {
   if (s.equipeConversando) return 'equipe_conversando'
   if (s.anexo) return 'anexo'
   if (pediuUrgencia(s.texto)) return 'urgencia'
-  if (assuntoClinico(s.texto)) return 'assunto_clinico'
+  if (relatoDeSintoma(s.texto)) return 'assunto_clinico'
   if (respostaAutomaticaDaFamilia(s.texto)) return 'resposta_automatica'
   return null
 }
@@ -342,8 +356,15 @@ export async function atenderComAssistente(opcoes: {
   modelo?: string
   /** O robo como hoje, com a mensagem real. */
   roboDireto: () => Promise<Resultado | null>
+  /**
+   * O robo registrou "nao entendi" nesta mensagem? A resposta dele nem sempre
+   * comeca assim: o naoEntendi tambem devolve a frase clinica ou uma resposta
+   * pronta, sempre com "responda com o numero" no fim. Ver roboRegistrou.
+   */
+  roboNaoEntendeuAgora?: () => boolean
   prazoMs?: number
 }): Promise<Desfecho> {
+  const naoEntendeu = (r: Resultado | null) => roboNaoEntendeu(r) || Boolean(opcoes.roboNaoEntendeuAgora?.())
   const { modo, situacao, ferramentas, chamar, roboDireto } = opcoes
   const modelo = opcoes.modelo || MODELO_PADRAO
   const prazo = opcoes.prazoMs ?? 12_000
@@ -361,7 +382,7 @@ export async function atenderComAssistente(opcoes: {
     const resultado = await roboDireto()
     if (doRobo) return { resultado, origem: 'robo', eventos: [] }
     // Em etapa, so quando o robo nao entendeu - e quando o Claude entraria de verdade.
-    if (emEtapa && !roboNaoEntendeu(resultado)) return { resultado, origem: 'robo', eventos: [] }
+    if (emEtapa && !naoEntendeu(resultado)) return { resultado, origem: 'robo', eventos: [] }
     try {
       const mentira = ferramentasDeMentira(ferramentas)
       const { resultado: dele } = await conversarComClaude(situacao, mentira, chamar, modelo, emEtapa, prazo)
@@ -383,7 +404,7 @@ export async function atenderComAssistente(opcoes: {
 
   if (emEtapa) {
     const doRoboNaEtapa = await roboDireto()
-    if (!roboNaoEntendeu(doRoboNaEtapa)) return { resultado: doRoboNaEtapa, origem: 'robo', eventos: [] }
+    if (!naoEntendeu(doRoboNaEtapa)) return { resultado: doRoboNaEtapa, origem: 'robo', eventos: [] }
     try {
       const { resultado, acao } = await conversarComClaude(situacao, ferramentas, chamar, modelo, true, prazo)
       return { resultado, origem: 'ia', eventos: [{ evento: 'ia_respondeu', detalhe: acao }] }

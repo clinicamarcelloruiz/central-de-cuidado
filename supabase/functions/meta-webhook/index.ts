@@ -6,6 +6,7 @@ import {
   type Estado,
   horariosEmTexto,
   type Resultado,
+  roboRegistrou,
   type Toque,
   tratarConversa,
 } from '../_shared/atendimento.ts'
@@ -1027,6 +1028,7 @@ Deno.serve(async (req) => {
                 ferramentas: ferramentasDaIA,
                 chamar: chaveIA ? claudePelaApi(chaveIA) : null,
                 roboDireto: () => tratarConversa(opcoesDoRobo),
+                roboNaoEntendeuAgora: () => roboRegistrou(conversation.id, 'nao_entendi'),
               })
               resultado = desfecho.resultado
               daIA = desfecho.origem === 'ia'

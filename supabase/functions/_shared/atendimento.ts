@@ -211,6 +211,16 @@ function registrar(evento: string, detalhe?: string) {
   else eventosEmCurso.set(conversaEmFoco, [{ evento, detalhe }])
 }
 
+/**
+ * O robo registrou este evento na mensagem em andamento? So olha, nao colhe.
+ * O atendente com IA usa para saber se o robo "nao entendeu" mesmo quando a
+ * resposta dele nao comeca por "Nao entendi" - a frase clinica e a resposta
+ * pronta tambem saem do naoEntendi (15/10/2026).
+ */
+export function roboRegistrou(conversationId: string, evento: string): boolean {
+  return (eventosEmCurso.get(conversationId) ?? []).some((e) => e.evento === evento)
+}
+
 /** Tira da memoria o que o robo registrou nesta conversa. */
 export function colherEventos(conversationId: string): EventoDoRobo[] {
   const lista = eventosEmCurso.get(conversationId) ?? []
