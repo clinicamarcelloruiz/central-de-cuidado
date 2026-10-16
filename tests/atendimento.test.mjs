@@ -2037,6 +2037,32 @@ await caso('Nome escrito depois de sair do cadastro é anotado e o cadastro segu
   ['Helena Souza Lima', ['Anotei o nome', 'data de nascimento']],
 ], { consultas: CONSULTA_SEM_FICHA, fichas: FICHA_VAZIA, estadoInicial: NO_MENU })
 
+// 15/10/2026: a familia do Vicente tocou "Escolher outra data" com o cadastro
+// pela metade, e o robo anotou isso como o nome da crianca.
+await caso('15/10: "Escolher outra data" não vira nome da criança', [
+  ['Escolher outra data', 'ficou pela metade'],
+], {
+  consultas: CONSULTA_SEM_FICHA, fichas: FICHA_VAZIA, estadoInicial: NO_MENU,
+  verificar: ({ dadosDasConsultas, ultimoToque, titulo }) => {
+    const gravado = Object.assign({}, ...dadosDasConsultas)
+    if (!gravado.intake_patient_name && !ultimoToque.resposta.includes('Anotei o nome')) passou++
+    else falhas.push(`${titulo} | gravou "${gravado.intake_patient_name}" como nome`)
+  },
+})
+await caso('15/10: botão no meio da pergunta do nome não é gravado', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['1', 'nome completo do paciente'],
+  ['Voltar ao início', ''],
+], {
+  verificar: ({ dadosDasConsultas, titulo }) => {
+    const gravado = Object.assign({}, ...dadosDasConsultas)
+    if (!gravado.intake_patient_name) passou++
+    else falhas.push(`${titulo} | gravou "${gravado.intake_patient_name}" como nome`)
+  },
+})
+
 await caso('Texto que não é nome oferece completar o cadastro', [
   ['tudo bem', ['ficou pela metade', 'Quer completar agora']],
 ], { consultas: CONSULTA_SEM_FICHA, fichas: FICHA_VAZIA, estadoInicial: NO_MENU })

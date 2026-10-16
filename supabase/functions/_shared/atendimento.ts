@@ -23,7 +23,7 @@ import { dataDeNascimentoIso } from './datas.ts'
 import type { adminClient } from './whatsapp.ts'
 import { cadastrarDaFicha, type ConsultaParaCadastro } from './cadastro.ts'
 import { quemAtende } from './quem-atende.ts'
-import { preencherCampos, temCampo, type Lugar } from './campos-do-texto.ts'
+import { formatarValor, preencherCampos, temCampo, type Lugar } from './campos-do-texto.ts'
 import {
   acharResposta,
   assuntoClinico,
@@ -484,7 +484,7 @@ function pediuAtendente(texto: string) {
 }
 
 /** "Urgente", "é urgência", ou a linha URGENCIA tocada na lista. */
-function pediuUrgencia(texto: string) {
+export function pediuUrgencia(texto: string) {
   const t = normalizar(texto)
   // "Nao e urgencia" (06/10/2026): a Marjorie tocou "E urgencia" por engano,
   // escreveu "Nao e urgencia. Gostaria de informacoes sobre o valor..." e
@@ -1091,6 +1091,88 @@ async function lugaresComValor(admin: Admin, clinicId: string): Promise<Lugar[]>
       ? { id: u.id, nome: u.name, endereco: '', valorCentavos: tele, telemedicina: true }
       : { id: u.id, nome: u.name, endereco: u.address ?? '', valorCentavos: valores.get(u.id) ?? null },
   )
+}
+
+/**
+ * O que o atendente com IA sabe da clinica (15/10/2026, ver assistente.ts).
+ *
+ * Sai do mesmo lugar de onde o robo tira as respostas: os cartoes das unidades
+ * (endereco, valor, texto) e as respostas prontas. Nada escrito so para a IA -
+ * a equipe muda um texto na tela e os dois passam a dizer a mesma coisa.
+ */
+export async function conhecimentoDaClinica(admin: Admin, clinicId: string): Promise<string> {
+  const [lugares, unidades, tele, respostas] = await Promise.all([
+    lugaresComValor(admin, clinicId),
+    opcoesDeAtendimento(admin, clinicId),
+    telemedicinaDaClinica(admin, clinicId),
+    carregarRespostas(admin, clinicId),
+  ])
+  const partes: string[] = []
+  for (const lugar of lugares) {
+    const unidade = unidades.find((u) => u.id === lugar.id) as { info_text?: string | null } | undefined
+    const texto = lugar.telemedicina ? tele.informacoes : (unidade?.info_text ?? '')
+    partes.push(
+      `## ${lugar.nome}\n` +
+        (lugar.endereco ? `Endereço: ${lugar.endereco}\n` : 'Atendimento por vídeo.\n') +
+        `Valor da consulta: ${lugar.valorCentavos ? formatarValor(lugar.valorCentavos) : 'não cadastrado (não informe valor)'}\n` +
+        preencherCampos(texto, lugar, lugares).texto,
+    )
+  }
+  for (const r of respostas) partes.push(`## ${r.assunto}\n${preencherCampos(r.resposta, null, lugares).texto}`)
+  return partes.join('\n\n')
+}
+
+/**
+ * Horarios livres de uma unidade, em texto, para o atendente com IA consultar
+ * antes de responder "pra quando tem?" (15/10/2026). So leitura: quem reserva e
+ * o fluxo de agendamento, como sempre.
+ */
+export async function horariosEmTexto(admin: Admin, clinicId: string, nomeDaUnidade: string): Promise<string> {
+  const lugares = await opcoesDeAtendimento(admin, clinicId)
+  const pedido = normalizar(nomeDaUnidade)
+  const alvo =
+    unidadeCitada(lugares, nomeDaUnidade) ??
+    lugares.find((u) => normalizar(u.name).includes(pedido) || pedido.includes(normalizar(u.name))) ??
+    null
+  if (!alvo) return `Unidade não encontrada. As unidades são: ${lugares.map((u) => u.name).join(', ')}.`
+  const { horarios, falhou } = await horariosLivres(admin, clinicId, alvo.id)
+  if (falhou) return 'Não consegui ler a agenda agora.'
+  if (horarios.length === 0) return `Sem horários livres em ${alvo.name} na agenda aberta.`
+  const fuso = await fusoDaClinica(admin, clinicId)
+  const porDia = new Map<string, string[]>()
+  for (const h of horarios) {
+    const dia = chaveDoDia(h.inicio, fuso)
+    if (!porDia.has(dia)) porDia.set(dia, [])
+    porDia.get(dia)!.push(formatarHora(h.inicio, fuso))
+  }
+  const linhas = [...porDia.entries()].slice(0, 6).map(([, horas], i) => {
+    const primeiro = horarios.find((h) => formatarHora(h.inicio, fuso) === horas[0] && [...porDia.keys()][i] === chaveDoDia(h.inicio, fuso))
+    const rotulo = primeiro
+      ? new Date(primeiro.inicio).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', timeZone: fuso })
+      : ''
+    return `${rotulo}: ${horas.join(', ')}`
+  })
+  return `${alvo.name}:\n${linhas.join('\n')}`
+}
+
+/**
+ * Passa a conversa para a equipe com o texto que o atendente com IA escreveu
+ * (15/10/2026). O mesmo estado de chamarEquipe: fila, contador zerado.
+ */
+export async function entregarParaEquipe(
+  admin: Admin,
+  conversationId: string,
+  motivo: MotivoAtencao,
+  texto: string,
+): Promise<Resultado> {
+  focar(conversationId)
+  await salvarEstado(admin, conversationId, {
+    booking_state: 'atendente',
+    booking_options: null,
+    booking_unit_id: null,
+    auto_replies_while_waiting: 0,
+  })
+  return { resposta: texto, atencao: motivo }
 }
 
 /**
@@ -2904,6 +2986,8 @@ function soDigitos(texto: string) {
  * escreveu com maiusculas do jeito dele fica como escreveu.
  */
 function nomeDaFicha(texto: string): string | null {
+  // Toque num botao velho no meio da ficha nao e nome (ver pareceBotao).
+  if (pareceBotao(texto)) return null
   let t = texto.trim()
   t = t.replace(/^(o\s+)?(nome\s+(completo\s+)?(dela|dele|do paciente|da paciente|e|é)?\s*(e|é|:)?|ela se chama|ele se chama|se chama|meu nome (e|é)|eu sou (a|o)|sou (a|o))\s+/i, '')
   t = t.split(/[,;(]|\s-\s|\s+\d/)[0]
@@ -3150,6 +3234,27 @@ async function fichaPendente(
 }
 
 /**
+ * Texto de botao ou de comando, que nenhuma crianca tem no nome (15/10/2026).
+ *
+ * A familia do Vicente tocou "Escolher outra data" na mensagem de confirmacao
+ * com o cadastro pela metade. Tres palavras, so letras: passou por nome. O robo
+ * gravou "Escolher outra data" como o nome da crianca, marcou a consulta com
+ * ele e mandou "Ola, Escolher! Precisamos cancelar sua consulta". A secretaria
+ * desfez na mao.
+ */
+const PALAVRAS_DE_BOTAO = new Set([
+  'escolher', 'outra', 'data', 'datas', 'horario', 'horarios', 'marcar', 'remarcar', 'desmarcar', 'cancelar',
+  'confirmar', 'confirmo', 'voltar', 'inicio', 'menu', 'opcoes', 'equipe', 'falar', 'consulta', 'agendar',
+  'duvidas', 'cadastro', 'completar', 'unidade', 'atendimento', 'quero', 'nao',
+])
+function pareceBotao(texto: string): boolean {
+  return normalizar(texto)
+    .replace(/[^a-z\s]/g, ' ')
+    .split(/\s+/)
+    .some((p) => PALAVRAS_DE_BOTAO.has(p))
+}
+
+/**
  * O texto parece um nome de gente: so letras, duas palavras ou mais, sem
  * pergunta. "Joao Pedro Silva" passa; "qual o endereco?", "ok obrigado" e
  * "12/03/2019" nao.
@@ -3158,6 +3263,7 @@ function pareceNome(texto: string) {
   const t = texto.trim()
   if (t.length < 5 || t.length > 80 || /[?0-9@]/.test(t)) return false
   if (!/^[\p{L}' .-]+$/u.test(t)) return false
+  if (pareceBotao(t)) return false
   const palavras = t.split(/\s+/).filter((p) => p.length >= 2)
   if (palavras.length < 2) return false
   const comuns = new Set(['ok', 'obrigado', 'obrigada', 'bom', 'boa', 'dia', 'tarde', 'noite', 'oi', 'ola', 'tudo', 'bem', 'sim', 'nao', 'quero', 'queria', 'gostaria', 'por', 'favor'])

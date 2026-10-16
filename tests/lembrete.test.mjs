@@ -508,6 +508,10 @@ for (const [frase, esperado] of [
   conferir(`Descadastro: "${frase}"`, interpretarResposta(frase, false).optedOut === esperado)
 }
 
+// O botao "Escolher outra data" da confirmacao e pedido de remarcar (15/10/2026).
+conferir('"Escolher outra data" remarca', interpretarResposta('Escolher outra data', true).remarca === true)
+conferir('"não quero outra data" não remarca', interpretarResposta('não quero outra data, está ótimo', true).remarca === false)
+
 // Dois pedidos de sair (15/10/2026): o do acompanhamento para so o
 // acompanhamento; "tirem meu numero" para tudo, lembrete inclusive.
 for (const [frase, tudo] of [

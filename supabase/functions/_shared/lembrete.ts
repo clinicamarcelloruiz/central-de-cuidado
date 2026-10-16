@@ -214,9 +214,12 @@ export function interpretarResposta(
     !duvida &&
     ((dentroDaJanela && r === '1') ||
       ((dentroDaJanela || comLembreteRecente) && semNegacao('confirmar', 'confirmo', 'confirmado')))
+  // "Escolher outra data" e o texto do botao da confirmacao (15/10/2026): nao
+  // era reconhecido, e o toque caia no cadastro pela metade como nome.
   const remarca =
     dentroDaJanela &&
-    (r === '2' || semNegacao('remarcar', 'reagendar', 'trocar a data', 'outro horario'))
+    (r === '2' ||
+      semNegacao('remarcar', 'reagendar', 'trocar a data', 'outro horario', 'outra data', 'mudar a data', 'trocar o dia', 'mudar o dia'))
   const cancela =
     dentroDaJanela && !duvida && (r === '3' || semNegacao('cancelar', 'cancelo', 'desmarcar'))
 

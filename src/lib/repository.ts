@@ -1868,6 +1868,8 @@ export interface ConversationMessage {
   anexoMime: string | null
   /** Caminho no acervo, para gerar um link novo na hora de abrir. */
   anexoPath: string | null
+  /** Escrita pelo atendente com IA (15/10/2026). */
+  porIA?: boolean
 }
 
 /**
@@ -2119,6 +2121,20 @@ export async function listConversationMessages(conversationId: string): Promise<
   if (error) fail(error)
   const linhas = data ?? []
   const anexos = await anexosDasMensagens(conversationId)
+  // Coluna nova (atendente com IA, 15/10/2026), lida a parte: sem ela, so a
+  // etiqueta "IA" some.
+  const daIA = new Set<string>()
+  try {
+    const { data: marcadas, error: erroDaMarca } = await semTipo
+      .from('whatsapp_messages')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('gerada_por_ia', true)
+    if (erroDaMarca) throw erroDaMarca
+    for (const m of (marcadas ?? []) as { id: string }[]) daIA.add(m.id)
+  } catch (erro) {
+    console.warn('Sem whatsapp_messages.gerada_por_ia; a etiqueta da IA fica de fora', erro)
+  }
 
   return linhas.map((row) => ({
     id: row.id,
@@ -2131,7 +2147,28 @@ export async function listConversationMessages(conversationId: string): Promise<
     anexoUrl: anexos.get(row.id)?.url ?? null,
     anexoMime: anexos.get(row.id)?.mime ?? null,
     anexoPath: anexos.get(row.id)?.path ?? null,
+    porIA: daIA.has(row.id),
   }))
+}
+
+export type ModoDoAtendenteIA = 'desligado' | 'sombra' | 'ligado'
+
+/** O modo do atendente com IA desta clinica. Coluna nova: sem ela, desligado. */
+export async function getAtendenteIA(clinicId: string): Promise<ModoDoAtendenteIA | null> {
+  try {
+    const { data, error } = await semTipo.from('clinic_settings').select('assistente_ia').eq('clinic_id', clinicId).maybeSingle()
+    if (error) throw error
+    const valor = (data as { assistente_ia?: string } | null)?.assistente_ia
+    return valor === 'sombra' || valor === 'ligado' ? valor : 'desligado'
+  } catch (erro) {
+    console.warn('Sem clinic_settings.assistente_ia', erro)
+    return null
+  }
+}
+
+export async function saveAtendenteIA(clinicId: string, modo: ModoDoAtendenteIA) {
+  const { error } = await semTipo.from('clinic_settings').update({ assistente_ia: modo }).eq('clinic_id', clinicId)
+  if (error) fail(error)
 }
 
 /**

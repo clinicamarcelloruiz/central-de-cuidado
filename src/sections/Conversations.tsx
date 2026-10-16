@@ -2340,6 +2340,7 @@ export default function Conversations({
                                 </p>
                               )}
                               <span className="mt-0.5 flex items-center justify-end gap-1 text-[11px] leading-none text-[#667781]">
+                                {message.porIA && <span title="Escrita pelo atendente com IA" className="font-bold text-[#2f7fc1]">🤖 IA ·</span>}
                                 {formatWhen(message.createdAt)}
                                 {outbound && <Confirmacao status={message.status} />}
                               </span>
@@ -2997,6 +2998,7 @@ export default function Conversations({
                           </p>
                         )}
                         <span className="absolute bottom-[5px] right-[8px] flex items-center gap-[3px] text-[11px] leading-none text-[#667781]">
+                          {message.porIA && <span title="Escrita pelo atendente com IA" className="font-bold text-[#2f7fc1]">🤖</span>}
                           {horaLocal(message.createdAt)}
                           {outbound && <Confirmacao status={message.status} />}
                         </span>
