@@ -154,7 +154,7 @@ confere('frase do link e a testada no simulador', FRASE_DO_LINK === 'Olá! Vim p
 }
 
 // ---------------------------------------------------------------- direct sem negrito
-// Primeiro teste de verdade (16/10/2026): o valor chegou como "*R$ 450,00*".
+// Primeiro teste de verdade (16/10/2026): a tela de Respostas mostrava "*R$ 450,00*".
 {
   const v = semFormatacaoDoWhatsApp(responderDirect('quanto custa a consulta?', null, CTX).texto)
   confere('valor sai sem asterisco', !v.includes('*') && /R\$ 450,00/.test(v), v)

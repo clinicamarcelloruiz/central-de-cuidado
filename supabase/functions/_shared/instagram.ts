@@ -96,12 +96,13 @@ export function semInstrucoesDoRobo(texto: string): string {
 }
 
 /**
- * O direct do Instagram nao tem negrito nem italico: no primeiro teste de
- * verdade (16/10/2026) o valor chegou como "*R$ 450,00*", com os asteriscos a
- * mostra. Respostas prontas, IA e os textos deste arquivo escrevem no formato do
- * WhatsApp; vira texto puro antes de gravar e enviar (o eco compara o texto
- * gravado com o que a Meta devolve, entao os dois tem de ser o mesmo).
- * Sublinhado so sai quando e marca de italico: @maria_teste e links ficam.
+ * Respostas prontas, IA e os textos deste arquivo escrevem no formato do
+ * WhatsApp (*negrito*). No primeiro teste de verdade (16/10/2026) o Instagram no
+ * computador mostrou o negrito, mas a tela de Respostas da Central mostrava
+ * "*R$ 450,00*" com os asteriscos, e o app do celular nao foi conferido. Texto
+ * puro sai igual em todo lugar; vira texto puro antes de gravar e enviar (o eco
+ * compara o texto gravado com o que a Meta devolve, entao os dois tem de ser o
+ * mesmo). Sublinhado so sai quando e marca de italico: @maria_teste e links ficam.
  */
 export function semFormatacaoDoWhatsApp(texto: string): string {
   return String(texto ?? '')

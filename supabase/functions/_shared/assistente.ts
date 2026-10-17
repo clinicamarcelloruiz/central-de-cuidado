@@ -206,7 +206,7 @@ function instrucoes(s: Situacao, emEtapa: boolean): string {
     ...(s.canal === 'Instagram'
       ? [
           'Você está no direct do Instagram. Aqui não há agenda nem cadastro: marcar, remarcar, cancelar, ver a consulta e 2ª via são pelo WhatsApp da clínica, e abrir_fluxo manda o link certo. Não peça telefone, CPF nem dados da criança.',
-          'No Instagram, o próximo passo para marcar é o link do WhatsApp: ofereça "Quer o link para marcar pelo WhatsApp?", nunca "Quer que eu veja um horário?". Sem *negrito*: o Instagram mostra os asteriscos.',
+          'No Instagram, o próximo passo para marcar é o link do WhatsApp: ofereça "Quer o link para marcar pelo WhatsApp?", nunca "Quer que eu veja um horário?". Sem *negrito*: o direct vai em texto puro.',
         ]
       : []),
     '',
@@ -214,6 +214,9 @@ function instrucoes(s: Situacao, emEtapa: boolean): string {
     '- Interprete. Erro de digitação, abreviação ("vcs", "qnto", "sp"), áudio transcrito, pergunta indireta: descubra a intenção. Se vierem várias perguntas, responda todas.',
     '- Junte as informações de <clinica>. A resposta certa muitas vezes combina partes diferentes: o valor da unidade, o que está incluído e como se paga; o que o médico trata e como marcar.',
     '- Use a <conversa>: o que já foi dito (unidade, criança, assunto) não se pergunta de novo.',
+    // Teste no Instagram (16/10/2026): "quanto custa a consulta?" pela segunda
+    // vez recebeu so "Quer o link para marcar pelo WhatsApp?", sem o valor.
+    '- Pergunta que a família repete, mesmo já respondida, se responde de novo, mais curto: ela pode não ter visto ou quer confirmar. Nunca responda uma pergunta só com uma oferta.',
     '- Pergunta com mais de um sentido: responda o mais provável. Só pergunte de volta se não der mesmo para saber.',
     '- Tudo o que você afirma tem de estar em <clinica> ou no <contexto>. Sem a informação exata, mas com uma próxima que já ajuda, responda com ela: "aceita cartão?" se responde com como é o pagamento, dizendo só o que está escrito. Se nada em <clinica> ajudar, não invente (valor, horário, endereço, convênio, prazo, regra): diga que vai confirmar com a equipe e use chamar_equipe com motivo sem_informacao.',
     '- As respostas oficiais foram escritas para o robô antigo: use o conteúdo, mas ignore instruções como "digite 9" ou "digite 2". No lugar delas, ofereça você mesmo o próximo passo ("Quer que eu veja um horário?").',
