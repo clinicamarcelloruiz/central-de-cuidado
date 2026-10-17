@@ -27,6 +27,9 @@ import {
   soCumprimento,
 } from './atendimento.ts'
 import { acharResposta, assuntoClinico, type RespostaPronta } from './respostas.ts'
+// O login fica em arquivo sem dependencias (a tela importa); daqui sai junto
+// para os testes acharem tudo do Instagram num lugar so.
+export { codigoDaVolta, enderecoDoLogin, permissoesQueFaltam, voltaPermitida } from './instagram-login.ts'
 
 /** A frase do link: o robo do WhatsApp responde a ela abrindo o agendamento (testado no simulador em 16/10/2026). */
 export const FRASE_DO_LINK = 'Olá! Vim pelo Instagram e quero agendar uma consulta.'
@@ -352,6 +355,70 @@ export function comentarioAindaRespondivel(criadoEm: string | null | undefined, 
   if (!criadoEm) return false
   const t = Date.parse(criadoEm)
   return Number.isFinite(t) && agora.getTime() - t < 7 * DIA_MS
+}
+
+// ---------------------------------------------------------------- buscar comentarios
+
+export type ComentarioDaApi = {
+  id?: unknown
+  text?: unknown
+  timestamp?: unknown
+  username?: unknown
+  from?: { id?: unknown; username?: unknown } | null
+}
+
+export type ComentarioParaGravar = {
+  comment_id: string
+  media_id: string
+  autor_id: string | null
+  autor_username: string | null
+  texto: string
+  precisa_equipe: boolean
+  created_at: string
+}
+
+/** "2026-10-16T22:20:31+0000": o Instagram manda o fuso sem os dois-pontos. */
+function dataDoInstagram(valor: unknown): string | null {
+  const t = Date.parse(String(valor ?? '').replace(/([+-]\d{2})(\d{2})$/, '$1:$2'))
+  return Number.isFinite(t) ? new Date(t).toISOString() : null
+}
+
+/**
+ * "Buscar comentarios" na tela (16/10/2026). A Meta so manda aviso de
+ * comentario para app aprovado na analise; ate la, e depois disso para o que o
+ * aviso perdeu, a equipe busca os comentarios dos posts recentes. Entram so os
+ * dos ultimos 7 dias (depois disso o Instagram nao deixa responder no direct),
+ * e nunca os da propria conta (as respostas da clinica). O robo nao responde
+ * sozinho o que veio pela busca: pedido de contato e pergunta ficam marcados
+ * para a equipe, que responde pela tela.
+ */
+export function comentariosParaImportar(
+  mediaId: string,
+  lista: ComentarioDaApi[],
+  conta: { igUserId: string; username: string | null },
+  agora: Date = new Date(),
+): ComentarioParaGravar[] {
+  const linhas: ComentarioParaGravar[] = []
+  const nossaConta = (conta.username ?? '').replace(/^@/, '').toLowerCase()
+  for (const c of lista ?? []) {
+    const id = String(c?.id ?? '')
+    const criadoEm = dataDoInstagram(c?.timestamp)
+    if (!id || !criadoEm || !comentarioAindaRespondivel(criadoEm, agora)) continue
+    const autorId = c?.from?.id ? String(c.from.id) : null
+    const autor = String(c?.from?.username ?? c?.username ?? '').replace(/^@/, '') || null
+    if (autorId === conta.igUserId || (autor && nossaConta && autor.toLowerCase() === nossaConta)) continue
+    const texto = String(c?.text ?? '')
+    linhas.push({
+      comment_id: id,
+      media_id: mediaId,
+      autor_id: autorId,
+      autor_username: autor,
+      texto,
+      precisa_equipe: comentarioPedeContato(texto) || comentarioEPergunta(texto),
+      created_at: criadoEm,
+    })
+  }
+  return linhas
 }
 
 /** Token de longa duracao: 60 dias. Renova quando faltam menos de 15. */

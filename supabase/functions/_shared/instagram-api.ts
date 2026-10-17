@@ -80,6 +80,59 @@ export async function assinarAvisos(conta: ContaInstagram): Promise<Envio> {
   return ok ? { ok: true, mid: null } : falha(json)
 }
 
+/** Os posts mais recentes da conta (para buscar comentarios). */
+export async function postsRecentes(conta: ContaInstagram, limite = 10): Promise<{ ok: true; ids: string[] } | { ok: false; erro: string }> {
+  const { ok, json } = await chamar(`/${conta.ig_user_id}/media?fields=id,timestamp&limit=${limite}`, conta.access_token, undefined, 'GET')
+  if (!ok) return { ok: false, erro: String(json?.error?.message ?? 'O Instagram não devolveu os posts.') }
+  return { ok: true, ids: ((json?.data ?? []) as { id?: unknown }[]).map((m) => String(m?.id ?? '')).filter(Boolean) }
+}
+
+/** Comentarios de um post, com quem escreveu e quando. */
+export async function comentariosDoPost(conta: ContaInstagram, mediaId: string): Promise<{ ok: true; lista: Record<string, any>[] } | { ok: false; erro: string }> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const { ok, json } = await chamar(`/${mediaId}/comments?fields=id,text,timestamp,username,from&limit=50`, conta.access_token, undefined, 'GET')
+  if (!ok) return { ok: false, erro: String(json?.error?.message ?? 'O Instagram não devolveu os comentários.') }
+  return { ok: true, lista: Array.isArray(json?.data) ? json.data : [] }
+}
+
+/**
+ * Login oficial: troca o codigo da volta por um token de 1 hora e esse por um
+ * de 60 dias. Precisa do segredo do app do Instagram (INSTAGRAM_APP_SECRET), o
+ * mesmo que confere a assinatura do webhook.
+ */
+export async function trocarCodigoPorToken(
+  code: string,
+  redirectUri: string,
+  appId: string,
+  segredo: string,
+): Promise<{ ok: true; token: string; expiraEm: string; permissoes: unknown } | { ok: false; erro: string }> {
+  try {
+    const r1 = await fetch('https://api.instagram.com/oauth/access_token', {
+      method: 'POST',
+      body: new URLSearchParams({ client_id: appId, client_secret: segredo, grant_type: 'authorization_code', redirect_uri: redirectUri, code }),
+    })
+    const j1 = await r1.json().catch(() => ({}))
+    // Versoes antigas devolviam { data: [ {...} ] }; as novas, o objeto direto.
+    const curto = j1?.access_token ?? j1?.data?.[0]?.access_token
+    if (!r1.ok || !curto) {
+      return { ok: false, erro: String(j1?.error_message ?? j1?.error?.message ?? 'O Instagram não aceitou o login.') }
+    }
+    const r2 = await fetch(
+      `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${encodeURIComponent(segredo)}&access_token=${encodeURIComponent(curto)}`,
+    )
+    const j2 = await r2.json().catch(() => ({}))
+    if (!r2.ok || !j2?.access_token) return { ok: false, erro: String(j2?.error?.message ?? 'O Instagram não deu o acesso de 60 dias.') }
+    const segundos = Number(j2.expires_in) || 60 * 24 * 3600
+    return {
+      ok: true,
+      token: String(j2.access_token),
+      expiraEm: new Date(Date.now() + segundos * 1000).toISOString(),
+      permissoes: j1?.permissions ?? j1?.data?.[0]?.permissions ?? null,
+    }
+  } catch (erro) {
+    return { ok: false, erro: `Sem conexão com o Instagram: ${String(erro).slice(0, 120)}` }
+  }
+}
+
 /** Token de longa duracao renovado por mais 60 dias. */
 export async function renovarToken(token: string): Promise<{ ok: true; token: string; expiraEm: string } | { ok: false; erro: string }> {
   try {

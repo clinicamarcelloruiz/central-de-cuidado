@@ -1,20 +1,24 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, AtSign, Check } from 'lucide-react'
 import { useDialogos } from '@/components/dialogos-contexto'
+import { parametrosDoEndereco } from '@/lib/endereco'
 import {
+  concluirLoginDoInstagram,
   conectarInstagram,
   desconectarInstagram,
+  entrarComInstagram,
   estadoDoInstagram,
   salvarRoboInstagram,
   type ContaInstagram,
 } from '@/lib/instagram'
 
 /**
- * Conexao do Instagram da clinica (16/10/2026). O token vem do painel da Meta
- * (app Central de Cuidado > Instagram > configuracao da API com login do
- * Instagram > Gerar token). A tela manda para a funcao instagram-equipe, que
- * confere com o Instagram, grava e liga os avisos de mensagem e comentario. O
- * token nunca volta para a tela.
+ * Conexao do Instagram da clinica (16/10/2026). O caminho normal e o login
+ * oficial ("Entrar com o Instagram"): a pessoa autoriza no proprio Instagram e
+ * volta para ca, e a funcao instagram-equipe troca o codigo pelo acesso. Colar
+ * o token gerado no painel da Meta ficou como opcao avancada. Nos dois casos a
+ * funcao confere com o Instagram, grava e liga os avisos de mensagem e
+ * comentario, e o token nunca volta para a tela.
  */
 function diasAte(iso: string | null) {
   if (!iso) return null
@@ -39,6 +43,29 @@ export default function InstagramConexao({ clinicId }: { clinicId: string | null
     void carregar()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clinicId])
+
+  // Volta do login oficial: a Home abre esta aba quando o endereco traz instagram_code.
+  useEffect(() => {
+    const p = parametrosDoEndereco()
+    if (!p.get('instagram_code') && !p.get('instagram_erro')) return
+    setOcupado(true)
+    // concluirLoginDoInstagram apaga o endereco antes de esperar: a segunda
+    // montagem do modo estrito do React ja nao ve o codigo.
+    void concluirLoginDoInstagram().then(async (r) => {
+      setOcupado(false)
+      if (!r) return
+      if (!r.ok) avisar(r.erro, 'erro')
+      else avisar(r.aviso ?? `Instagram conectado${r.username ? `: @${r.username}` : ''}.`, r.aviso ? 'erro' : 'ok')
+      await carregar()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function entrar() {
+    if (!clinicId) return
+    setOcupado(true)
+    entrarComInstagram(clinicId, whatsapp)
+  }
 
   async function conectar() {
     if (!clinicId) return
@@ -179,32 +206,31 @@ export default function InstagramConexao({ clinicId }: { clinicId: string | null
               </button>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-[10px] leading-relaxed text-slate-400">Para trocar a conta ou renovar o acesso na mão, desconecte e conecte de novo.</p>
-              <button
-                type="button"
-                disabled={ocupado}
-                onClick={() => void desconectar()}
-                className="rounded-full border border-red-200 px-4 py-1.5 text-[11px] font-extrabold text-red-600 disabled:opacity-40"
-              >
-                Desconectar
-              </button>
+              <p className="text-[10px] leading-relaxed text-slate-400">Para trocar a conta ou renovar o acesso na mão, entre de novo com o Instagram.</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={ocupado}
+                  onClick={entrar}
+                  className="rounded-full border border-[#081b2c]/15 px-4 py-1.5 text-[11px] font-extrabold text-[#081b2c] disabled:opacity-40"
+                >
+                  Entrar de novo com o Instagram
+                </button>
+                <button
+                  type="button"
+                  disabled={ocupado}
+                  onClick={() => void desconectar()}
+                  className="rounded-full border border-red-200 px-4 py-1.5 text-[11px] font-extrabold text-red-600 disabled:opacity-40"
+                >
+                  Desconectar
+                </button>
+              </div>
             </div>
           </>
         ) : (
-          <div className="space-y-2 rounded-[18px] border border-[#081b2c]/10 bg-white p-3.5">
+          <div className="space-y-3 rounded-[18px] border border-[#081b2c]/10 bg-white p-3.5">
             <label className="block text-[10px] font-extrabold text-[#081b2c]">
-              Token do Instagram
-              <input
-                id="instagram-token"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="Cole aqui o token gerado no painel da Meta"
-                autoComplete="off"
-                className="mt-1 w-full rounded-[14px] border border-[#081b2c]/10 bg-[#f8f7f4] px-3 py-2 font-mono text-[11px] font-normal text-[#081b2c] outline-none focus:border-[#2f7fc1]/50"
-              />
-            </label>
-            <label className="block text-[10px] font-extrabold text-[#081b2c]">
-              WhatsApp da clínica (com 55 e DDD)
+              WhatsApp da clínica (com 55 e DDD), para o link de agendamento
               <input
                 id="instagram-whatsapp-novo"
                 value={whatsapp}
@@ -214,16 +240,42 @@ export default function InstagramConexao({ clinicId }: { clinicId: string | null
                 className="mt-1 w-full rounded-[14px] border border-[#081b2c]/10 bg-[#f8f7f4] px-3 py-2 text-[12px] font-normal text-[#081b2c] outline-none focus:border-[#2f7fc1]/50"
               />
             </label>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                disabled={ocupado || !token.trim() || whatsapp.replace(/\D/g, '').length < 12}
-                onClick={() => void conectar()}
-                className="rounded-full bg-[#081b2c] px-4 py-2 text-[11px] font-extrabold text-white disabled:opacity-40"
-              >
-                {ocupado ? 'Conectando…' : 'Conectar Instagram'}
-              </button>
-            </div>
+            <button
+              type="button"
+              disabled={ocupado || whatsapp.replace(/\D/g, '').length < 12}
+              onClick={entrar}
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-[#081b2c] px-4 py-2.5 text-[12px] font-extrabold text-white disabled:opacity-40"
+            >
+              <AtSign className="h-4 w-4" />
+              {ocupado ? 'Conectando…' : 'Entrar com o Instagram'}
+            </button>
+            <p className="text-[10px] leading-relaxed text-slate-400">
+              Abre o Instagram para você entrar na conta da clínica e autorizar a Central a responder o direct e os comentários. Depois volta
+              sozinho para cá.
+            </p>
+            <details className="text-[10px] text-slate-500">
+              <summary className="cursor-pointer font-extrabold">Avançado: colar um token do painel da Meta</summary>
+              <div className="mt-2 space-y-2">
+                <input
+                  id="instagram-token"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  placeholder="Cole aqui o token gerado no painel da Meta"
+                  autoComplete="off"
+                  className="w-full rounded-[14px] border border-[#081b2c]/10 bg-[#f8f7f4] px-3 py-2 font-mono text-[11px] font-normal text-[#081b2c] outline-none focus:border-[#2f7fc1]/50"
+                />
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    disabled={ocupado || !token.trim() || whatsapp.replace(/\D/g, '').length < 12}
+                    onClick={() => void conectar()}
+                    className="rounded-full border border-[#081b2c]/15 px-4 py-1.5 text-[11px] font-extrabold text-[#081b2c] disabled:opacity-40"
+                  >
+                    Conectar com o token
+                  </button>
+                </div>
+              </div>
+            </details>
           </div>
         )}
       </div>

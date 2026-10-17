@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
+import { apagarParametrosDoEndereco, parametrosDoEndereco } from '@/lib/endereco'
+import { enderecoDoLogin, PAGINA_DE_VOLTA } from '../../supabase/functions/_shared/instagram-login.ts'
 
 /**
  * Instagram da clinica na tela (16/10/2026). Ver supabase/functions/instagram-webhook
@@ -207,3 +209,70 @@ export const conectarInstagram = (clinicId: string, token: string, whatsapp: str
 
 export const desconectarInstagram = (clinicId: string) =>
   chamarEquipe({ acao: 'desconectar', clinicId }, 'Não foi possível desconectar o Instagram.')
+
+export const buscarComentariosInstagram = (clinicId: string) =>
+  chamarEquipe({ acao: 'buscar_comentarios', clinicId }, 'Não foi possível buscar os comentários.') as Promise<{
+    posts?: number
+    encontrados?: number
+    novos?: number
+    falhas?: number
+  }>
+
+const conectarComCodigo = (clinicId: string, code: string, redirectUri: string, whatsapp: string) =>
+  chamarEquipe({ acao: 'conectar_codigo', clinicId, code, redirectUri, whatsapp }, 'Não foi possível conectar o Instagram.') as Promise<{
+    username?: string
+    aviso?: string
+  }>
+
+/**
+ * Login oficial do Instagram (16/10/2026). O pedido fica guardado no
+ * localStorage, e nao no sessionStorage: no celular o login pode abrir no app
+ * do Instagram e voltar numa aba nova do navegador.
+ */
+const PEDIDO_DE_LOGIN = 'central:instagram-login'
+const VALIDADE_DO_PEDIDO = 15 * 60 * 1000
+
+type PedidoDeLogin = { state: string; clinicId: string; whatsapp: string; em: number }
+
+export function entrarComInstagram(clinicId: string, whatsapp: string) {
+  const state = crypto.randomUUID()
+  const pedido: PedidoDeLogin = { state, clinicId, whatsapp: whatsapp.replace(/\D/g, ''), em: Date.now() }
+  try {
+    localStorage.setItem(PEDIDO_DE_LOGIN, JSON.stringify(pedido))
+  } catch {
+    // Sem armazenamento (aba anonima restrita): a volta avisa que nao reconheceu o pedido.
+  }
+  window.location.assign(enderecoDoLogin(new URL(PAGINA_DE_VOLTA, window.location.href).toString(), state))
+}
+
+/**
+ * Le a volta do login (a pagina instagram-retorno.html repassa com nomes
+ * proprios), apaga do endereco na hora e troca o codigo pelo acesso. null quando
+ * nao e volta de login. Apagar antes de chamar o servidor evita trocar o mesmo
+ * codigo duas vezes (o codigo so vale uma).
+ */
+export async function concluirLoginDoInstagram(): Promise<null | { ok: true; username?: string; aviso?: string } | { ok: false; erro: string }> {
+  const p = parametrosDoEndereco()
+  const code = p.get('instagram_code')
+  const state = p.get('instagram_state')
+  const erro = p.get('instagram_erro')
+  if (!code && !erro) return null
+  apagarParametrosDoEndereco(['instagram_code', 'instagram_state', 'instagram_erro'])
+  let pedido: PedidoDeLogin | null = null
+  try {
+    pedido = JSON.parse(localStorage.getItem(PEDIDO_DE_LOGIN) ?? 'null') as PedidoDeLogin | null
+    localStorage.removeItem(PEDIDO_DE_LOGIN)
+  } catch {
+    pedido = null
+  }
+  if (erro) return { ok: false, erro: `O Instagram não concluiu o login: ${erro}` }
+  if (!pedido || pedido.state !== state || Date.now() - pedido.em > VALIDADE_DO_PEDIDO) {
+    return { ok: false, erro: 'Não reconheci esta volta do Instagram (o pedido expirou ou foi feito em outro aparelho). Clique em Entrar com o Instagram de novo.' }
+  }
+  try {
+    const r = await conectarComCodigo(pedido.clinicId, String(code), new URL(PAGINA_DE_VOLTA, window.location.href).toString(), pedido.whatsapp)
+    return { ok: true, username: r.username, aviso: r.aviso }
+  } catch (causa) {
+    return { ok: false, erro: causa instanceof Error ? causa.message : 'Não foi possível conectar o Instagram.' }
+  }
+}

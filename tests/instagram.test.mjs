@@ -2,9 +2,14 @@
 // Nomes, numeros e textos inventados (o repositorio e publico).
 import {
   FRASE_DO_LINK,
+  codigoDaVolta,
   comentarioAindaRespondivel,
   comentarioEPergunta,
   comentarioPedeContato,
+  comentariosParaImportar,
+  enderecoDoLogin,
+  permissoesQueFaltam,
+  voltaPermitida,
   conhecimentoParaOInstagram,
   dentroDaJanela,
   linkDoWhatsApp,
@@ -179,6 +184,53 @@ confere('frase do link e a testada no simulador', FRASE_DO_LINK === 'Olá! Vim p
   confere('token com 30 dias nao renova', !tokenPrecisaRenovar('2026-11-15T12:00:00Z', agora))
   confere('token com 10 dias renova', tokenPrecisaRenovar('2026-10-26T12:00:00Z', agora))
   confere('token sem validade renova', tokenPrecisaRenovar(null, agora))
+}
+
+// ---------------------------------------------------------------- login oficial
+{
+  const volta = 'https://clinica.exemplo.com.br/central/instagram-retorno.html'
+  const u = new URL(enderecoDoLogin(volta, 'abc-123'))
+  confere('login vai para o Instagram', u.origin === 'https://www.instagram.com' && u.pathname === '/oauth/authorize', u.href)
+  confere('login pede codigo e volta para a pagina de retorno', u.searchParams.get('response_type') === 'code' && u.searchParams.get('redirect_uri') === volta, u.href)
+  confere('login leva o state', u.searchParams.get('state') === 'abc-123')
+  confere(
+    'login pede as tres permissoes',
+    u.searchParams.get('scope') === 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments',
+    u.searchParams.get('scope'),
+  )
+  confere('codigo perde o "#_" do fim', codigoDaVolta('AQBx9#_') === 'AQBx9' && codigoDaVolta('AQBx9') === 'AQBx9')
+  confere('volta da propria pagina e aceita', voltaPermitida(volta))
+  confere('volta no localhost e aceita', voltaPermitida('http://localhost:3000/instagram-retorno.html'))
+  confere('volta em http fora do localhost e recusada', !voltaPermitida('http://clinica.exemplo.com.br/central/instagram-retorno.html'))
+  confere('volta para outra pagina e recusada', !voltaPermitida('https://clinica.exemplo.com.br/central/'))
+  confere('volta com parametro e recusada', !voltaPermitida(`${volta}?x=1`))
+  confere('permissao desmarcada aparece', permissoesQueFaltam('instagram_business_basic,instagram_business_manage_messages').join() === 'instagram_business_manage_comments')
+  confere('todas concedidas: nada falta', permissoesQueFaltam(['instagram_business_basic', 'instagram_business_manage_messages', 'instagram_business_manage_comments']).length === 0)
+  confere('resposta sem a lista: nao inventa falta', permissoesQueFaltam(null).length === 0)
+}
+
+// ---------------------------------------------------------------- buscar comentarios
+{
+  const agora = new Date('2026-10-16T22:30:00Z')
+  const conta = { igUserId: '900', username: 'clinica.teste' }
+  const lista = [
+    { id: 'c1', text: 'quero agendar', timestamp: '2026-10-16T22:20:31+0000', from: { id: '111', username: 'mae.teste' } },
+    { id: 'c2', text: 'Excelente post 👏', timestamp: '2026-10-15T10:00:00+0000', from: { id: '112', username: 'pai.teste' } },
+    { id: 'c3', text: 'Que bom que ajudou!', timestamp: '2026-10-16T22:25:00+0000', from: { id: '900', username: 'clinica.teste' } },
+    { id: 'c4', text: 'Obrigada!', timestamp: '2026-10-16T22:26:00+0000', username: 'Clinica.Teste' },
+    { id: 'c5', text: 'quero agendar', timestamp: '2026-10-01T10:00:00+0000', from: { id: '113', username: 'antiga.teste' } },
+    { id: 'c6', text: 'Dr, pode dar leite de soja?', timestamp: '2026-10-16T08:00:00+0000', from: { id: '114', username: 'avo.teste' } },
+    { text: 'sem id', timestamp: '2026-10-16T22:00:00+0000' },
+  ]
+  const r = comentariosParaImportar('m1', lista, conta, agora)
+  const ids = r.map((l) => l.comment_id).join(',')
+  confere('busca traz so os de 7 dias, sem os da propria conta', ids === 'c1,c2,c6', ids)
+  const c1 = r.find((l) => l.comment_id === 'c1')
+  confere('data com fuso "+0000" vira ISO', c1?.created_at === '2026-10-16T22:20:31.000Z', c1?.created_at)
+  confere('autor e post gravados', c1?.autor_username === 'mae.teste' && c1?.autor_id === '111' && c1?.media_id === 'm1', JSON.stringify(c1))
+  confere('pedido de contato vai para a equipe', c1?.precisa_equipe === true)
+  confere('elogio nao vai para a equipe', r.find((l) => l.comment_id === 'c2')?.precisa_equipe === false)
+  confere('pergunta vai para a equipe', r.find((l) => l.comment_id === 'c6')?.precisa_equipe === true)
 }
 
 // ---------------------------------------------------------------- conhecimento da IA

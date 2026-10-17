@@ -5,19 +5,31 @@
  *   comentario_direct   resposta privada a um comentario (uma por comentario, ate 7 dias)
  *   comentario_publico  resposta embaixo do comentario
  *   conectar            dono da clinica cola o token do Instagram (tela de Configuracoes)
+ *   conectar_codigo     dono da clinica entrou pelo login oficial; troca o codigo pelo token
  *   desconectar         dono da clinica desliga a conta
+ *   buscar_comentarios  traz os comentarios dos ultimos 7 dias dos posts recentes
  *
  * A RLS e a autorizacao: so passa conversa e comentario de clinica onde o usuario
  * e membro. O envio usa o token da conta, que so o servidor le.
  */
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
-import { comentarioAindaRespondivel, dentroDaJanela, respostaPrivadaAoComentario } from '../_shared/instagram.ts'
+import {
+  comentarioAindaRespondivel,
+  comentariosParaImportar,
+  dentroDaJanela,
+  respostaPrivadaAoComentario,
+  type ComentarioParaGravar,
+} from '../_shared/instagram.ts'
+import { codigoDaVolta, INSTAGRAM_APP_ID, permissoesQueFaltam, voltaPermitida } from '../_shared/instagram-login.ts'
 import {
   assinarAvisos,
+  comentariosDoPost,
   enviarDirect,
+  postsRecentes,
   quemEDono,
   responderComentarioEmPublico,
   responderComentarioNoDirect,
+  trocarCodigoPorToken,
 } from '../_shared/instagram-api.ts'
 import { quemAtende } from '../_shared/quem-atende.ts'
 
@@ -29,6 +41,8 @@ type Pedido = {
   texto?: string
   token?: string
   whatsapp?: string
+  code?: string
+  redirectUri?: string
 }
 
 const LIMITE = 1000
@@ -46,6 +60,51 @@ async function gritar(admin: ReturnType<typeof adminClient>, clinicId: string, e
   await admin.from('instagram_contas').update({ ultimo_erro: erro.slice(0, 500), ultimo_erro_em: new Date().toISOString() }).eq('clinic_id', clinicId)
 }
 
+/**
+ * Grava a conta e liga os avisos, venha o token colado ou do login oficial.
+ * `aviso` volta para a tela quando algo ficou pela metade (conectou, mas os
+ * avisos nao ligaram, ou faltou autorizar uma permissao): nunca em silencio.
+ */
+async function gravarConta(
+  admin: ReturnType<typeof adminClient>,
+  clinicId: string,
+  token: string,
+  whatsapp: string,
+  expiraEm: string,
+  faltam: string[] = [],
+) {
+  const dono = await quemEDono(token)
+  if (!dono.ok) return json({ error: `O Instagram não aceitou o acesso: ${dono.erro}`, code: 'TOKEN_RECUSADO' }, 400)
+  const agora = new Date().toISOString()
+  const { error } = await admin.from('instagram_contas').upsert(
+    {
+      clinic_id: clinicId,
+      ig_user_id: dono.userId,
+      username: dono.username,
+      access_token: token,
+      whatsapp,
+      // O webhook renova antes de vencer (60 dias).
+      token_expira_em: expiraEm,
+      token_renovado_em: agora,
+      ultimo_erro: null,
+      ultimo_erro_em: null,
+      updated_at: agora,
+    },
+    { onConflict: 'clinic_id' },
+  )
+  if (error) return json({ error: 'Não consegui gravar a conta.', details: error.message }, 500)
+  const avisos: string[] = []
+  if (faltam.length) avisos.push(`faltou autorizar ${faltam.join(', ')} no Instagram; entre de novo e deixe tudo marcado`)
+  const assinatura = await assinarAvisos({ ig_user_id: dono.userId, access_token: token })
+  if (!assinatura.ok) avisos.push(`os avisos de mensagem não foram ligados: ${assinatura.erro}`)
+  if (avisos.length) {
+    const texto = `Conectado, mas ${avisos.join('; ')}.`
+    await gritar(admin, clinicId, texto)
+    return json({ ok: true, username: dono.username, aviso: texto })
+  }
+  return json({ ok: true, username: dono.username })
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'Método não permitido.' }, 405)
@@ -59,7 +118,7 @@ Deno.serve(async (req) => {
     const texto = (pedido.texto ?? '').trim()
 
     // ------------------------------------------------------------ conectar / desconectar
-    if (pedido.acao === 'conectar' || pedido.acao === 'desconectar') {
+    if (pedido.acao === 'conectar' || pedido.acao === 'conectar_codigo' || pedido.acao === 'desconectar') {
       const clinicId = String(pedido.clinicId ?? '')
       const { data: usuario } = await escopo.auth.getUser()
       if (!clinicId || !usuario?.user?.id) return json({ error: 'Clínica não informada.' }, 400)
@@ -80,38 +139,72 @@ Deno.serve(async (req) => {
         return json({ ok: true })
       }
 
-      const token = String(pedido.token ?? '').trim()
       const whatsapp = String(pedido.whatsapp ?? '').replace(/\D/g, '')
-      if (!token) return json({ error: 'Cole o token do Instagram.' }, 400)
       if (whatsapp.length < 12 || !whatsapp.startsWith('55')) {
         return json({ error: 'Informe o WhatsApp da clínica com 55 e DDD, por exemplo 5513999990000.' }, 400)
       }
-      const dono2 = await quemEDono(token)
-      if (!dono2.ok) return json({ error: `O Instagram não aceitou o token: ${dono2.erro}`, code: 'TOKEN_RECUSADO' }, 400)
-      const agora = new Date()
-      const { error } = await admin.from('instagram_contas').upsert(
-        {
-          clinic_id: clinicId,
-          ig_user_id: dono2.userId,
-          username: dono2.username,
-          access_token: token,
-          whatsapp,
-          // Token gerado no painel da Meta vale 60 dias; o webhook renova antes de vencer.
-          token_expira_em: new Date(agora.getTime() + 60 * 24 * 3600 * 1000).toISOString(),
-          token_renovado_em: agora.toISOString(),
-          ultimo_erro: null,
-          ultimo_erro_em: null,
-          updated_at: agora.toISOString(),
-        },
-        { onConflict: 'clinic_id' },
-      )
-      if (error) return json({ error: 'Não consegui gravar a conta.', details: error.message }, 500)
-      const assinatura = await assinarAvisos({ ig_user_id: dono2.userId, access_token: token })
-      if (!assinatura.ok) {
-        await gritar(admin, clinicId, `Conta conectada, mas os avisos de mensagem não foram ligados: ${assinatura.erro}`)
-        return json({ ok: true, username: dono2.username, aviso: `Conectado, mas os avisos de mensagem não foram ligados: ${assinatura.erro}` })
+
+      if (pedido.acao === 'conectar_codigo') {
+        const code = codigoDaVolta(pedido.code)
+        const redirectUri = String(pedido.redirectUri ?? '')
+        if (!code) return json({ error: 'O Instagram não devolveu o código do login. Tente entrar de novo.' }, 400)
+        if (!voltaPermitida(redirectUri)) return json({ error: 'Endereço de volta do login não reconhecido.' }, 400)
+        const segredo = Deno.env.get('INSTAGRAM_APP_SECRET')?.trim()
+        if (!segredo) {
+          console.error('instagram-equipe: login oficial sem INSTAGRAM_APP_SECRET')
+          return json({ error: 'Falta o segredo INSTAGRAM_APP_SECRET no servidor: avise o suporte.', code: 'SEM_SEGREDO' }, 500)
+        }
+        const appId = Deno.env.get('INSTAGRAM_APP_ID')?.trim() || INSTAGRAM_APP_ID
+        const troca = await trocarCodigoPorToken(code, redirectUri, appId, segredo)
+        if (!troca.ok) return json({ error: `O Instagram não concluiu o login: ${troca.erro}`, code: 'LOGIN_RECUSADO' }, 400)
+        return await gravarConta(admin, clinicId, troca.token, whatsapp, troca.expiraEm, permissoesQueFaltam(troca.permissoes))
       }
-      return json({ ok: true, username: dono2.username })
+
+      const token = String(pedido.token ?? '').trim()
+      if (!token) return json({ error: 'Cole o token do Instagram.' }, 400)
+      // Token gerado no painel da Meta vale 60 dias.
+      return await gravarConta(admin, clinicId, token, whatsapp, new Date(Date.now() + 60 * 24 * 3600 * 1000).toISOString())
+    }
+
+    // ------------------------------------------------------------ buscar comentarios
+    if (pedido.acao === 'buscar_comentarios') {
+      const clinicId = String(pedido.clinicId ?? '')
+      if (!clinicId) return json({ error: 'Clínica não informada.' }, 400)
+      // A RLS deixa ver a linha da conta (sem o token) so para quem e da clinica.
+      const { data: visivel } = await escopo.from('instagram_contas').select('clinic_id').eq('clinic_id', clinicId).maybeSingle()
+      if (!visivel) return json({ error: 'O Instagram desta clínica não está conectado.', code: 'NOT_VISIBLE' }, 403)
+      const conta = await contaDaClinica(admin, clinicId)
+      if (!conta) return json({ error: 'O Instagram desta clínica não está conectado.' }, 409)
+
+      const posts = await postsRecentes(conta, 10)
+      if (!posts.ok) {
+        await gritar(admin, clinicId, `Buscar comentários: ${posts.erro}`)
+        return json({ error: `O Instagram recusou: ${posts.erro}`, code: 'RECUSADO' }, 502)
+      }
+      const linhas: (ComentarioParaGravar & { clinic_id: string })[] = []
+      const falhas: string[] = []
+      for (const mediaId of posts.ids) {
+        const r = await comentariosDoPost(conta, mediaId)
+        if (!r.ok) {
+          falhas.push(r.erro)
+          continue
+        }
+        for (const l of comentariosParaImportar(mediaId, r.lista, { igUserId: conta.ig_user_id, username: conta.username })) {
+          linhas.push({ ...l, clinic_id: clinicId })
+        }
+      }
+      let novos = 0
+      if (linhas.length) {
+        // Comentario que o webhook ja gravou (ou uma busca anterior) fica como esta.
+        const { data, error } = await admin
+          .from('instagram_comentarios')
+          .upsert(linhas, { onConflict: 'comment_id', ignoreDuplicates: true })
+          .select('comment_id')
+        if (error) return json({ error: 'Não consegui gravar os comentários.', details: error.message }, 500)
+        novos = data?.length ?? 0
+      }
+      if (falhas.length) await gritar(admin, clinicId, `Buscar comentários: ${falhas.length} post(s) sem resposta do Instagram (${falhas[0]})`)
+      return json({ ok: true, posts: posts.ids.length, encontrados: linhas.length, novos, falhas: falhas.length })
     }
 
     // ------------------------------------------------------------ responder no direct

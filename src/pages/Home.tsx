@@ -189,6 +189,9 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>(() => {
     const endereco = parametrosDoEndereco()
     if (endereco.get('conversa')) return 'conversas'
+    // Volta do login do Instagram (16/10/2026): quem conclui e o cartao do
+    // Instagram, que mora em Preferencias.
+    if (endereco.get('instagram_code') || endereco.get('instagram_erro')) return 'config'
     // Sem atalho no endereco, a Visao geral (15/10/2026, pedido do Edu): e a
     // primeira do menu, e o resumo do dia vem antes da lista de acompanhamentos.
     return endereco.get('state') || endereco.get('paciente') ? 'pacientes' : 'dashboard'

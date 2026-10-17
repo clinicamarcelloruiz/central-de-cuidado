@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Bot, Check, MessageCircle, Send } from 'lucide-react'
 import { useDialogos } from '@/components/dialogos-contexto'
 import {
+  buscarComentariosInstagram,
   comentarioEmPublico,
   comentarioNoDirect,
   listarComentariosInstagram,
@@ -54,6 +55,7 @@ export default function InstagramInbox({ clinicId }: { clinicId: string }) {
   const [enviando, setEnviando] = useState(false)
   const [respostaPublica, setRespostaPublica] = useState<Record<string, string>>({})
   const [erroDeLeitura, setErroDeLeitura] = useState<string | null>(null)
+  const [buscando, setBuscando] = useState(false)
 
   const carregar = useCallback(async () => {
     try {
@@ -118,6 +120,25 @@ export default function InstagramInbox({ clinicId }: { clinicId: string }) {
       await carregar()
     } catch (causa) {
       avisar(causa instanceof Error ? causa.message : 'Não foi possível concluir.', 'erro')
+    }
+  }
+
+  async function buscarComentarios() {
+    setBuscando(true)
+    try {
+      const r = await buscarComentariosInstagram(clinicId)
+      const novos = r.novos ?? 0
+      avisar(
+        novos
+          ? `${novos} comentário${novos > 1 ? 's' : ''} novo${novos > 1 ? 's' : ''} dos últimos 7 dias.`
+          : `Nenhum comentário novo nos ${r.posts ?? 0} posts mais recentes (últimos 7 dias).`,
+        r.falhas ? 'erro' : 'ok',
+      )
+      await carregar()
+    } catch (causa) {
+      avisar(causa instanceof Error ? causa.message : 'Não foi possível buscar os comentários.', 'erro')
+    } finally {
+      setBuscando(false)
     }
   }
 
@@ -271,9 +292,21 @@ export default function InstagramInbox({ clinicId }: { clinicId: string }) {
         </div>
       ) : (
         <ul className="divide-y divide-[#081b2c]/[0.05]">
+          <li className="flex flex-wrap items-center justify-between gap-2 bg-[#f8f7f4] px-4 py-3">
+            <span className="text-[10px] leading-relaxed text-slate-500">Traz os comentários dos últimos 7 dias nos 10 posts mais recentes.</span>
+            <button
+              type="button"
+              disabled={buscando}
+              onClick={() => void buscarComentarios()}
+              className="rounded-full bg-[#081b2c] px-3 py-1.5 text-[10px] font-extrabold text-white disabled:opacity-50"
+            >
+              {buscando ? 'Buscando…' : 'Buscar comentários'}
+            </button>
+          </li>
           {comentarios.length === 0 && (
             <li className="p-5 text-[11px] leading-relaxed text-slate-400">
               Nenhum comentário ainda. Comentários que pedem contato recebem mensagem no direct sozinhos; perguntas aparecem aqui para a equipe.
+              Para ver os comentários recentes agora, toque em Buscar comentários.
             </li>
           )}
           {comentarios.map((c) => {
