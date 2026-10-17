@@ -53,7 +53,8 @@ const MIDIA: Record<string, string> = {
   '[sticker]': 'Figurinha',
 }
 
-function quem(entrada: EntradaDoAviso): string {
+/** O nome que a equipe reconhece. O alerta no WhatsApp do medico usa o mesmo. */
+export function quemEscreveu(entrada: Pick<EntradaDoAviso, 'pacientes' | 'nomeDoPerfil' | 'telefone'>): string {
   // Um paciente so no telefone: o nome dele e o que a equipe procura na lista.
   // Com irmaos, o nome do perfil (em geral a mae) e mais honesto do que
   // escolher um dos filhos.
@@ -73,7 +74,7 @@ export function montarAviso(entrada: EntradaDoAviso): Aviso | null {
   const motivo = entrada.motivoAgora
   if (!motivo || !(MOTIVOS_QUE_AVISAM as readonly string[]).includes(motivo)) return null
 
-  const nome = quem(entrada)
+  const nome = quemEscreveu(entrada)
   const corpo = resumo(entrada.texto) || 'Nova mensagem'
   const urgente = motivo === 'urgencia'
   const base = { etiqueta: `conversa-${entrada.conversationId}`, conversa: entrada.conversationId, urgente }

@@ -23,6 +23,7 @@ import {
   pediuMudarConsulta,
   pediuSegundaVia,
   pediuUrgencia,
+  sinalDeAlarme,
   soAgradecimento,
   soCumprimento,
 } from './atendimento.ts'
@@ -184,7 +185,21 @@ function equipe(ctx: ContextoDoDirect, texto?: string): RespostaDoDirect {
 export function responderDirect(texto: string, payload: string | null | undefined, ctx: ContextoDoDirect): RespostaDoDirect {
   const t = String(texto ?? '').trim()
 
-  if (pediuUrgencia(t)) {
+  // Sinal de alarme sem a palavra "urgente" vale aqui tambem (17/10/2026), nos
+  // dois niveis do WhatsApp: risco de vida manda ao pronto-socorro; urgencia
+  // comum avisa o medico e oferece o horario mais proximo pelo link.
+  const sinal = sinalDeAlarme(t)
+  if (sinal?.risco !== 'vida' && (pediuUrgencia(t) || sinal)) {
+    return {
+      texto:
+        '🚨 Entendo a preocupação. Já avisei o médico e a nossa equipe, que vão avaliar o que você contou e responder por aqui.\n\n' +
+        `Se quiser já garantir o horário mais próximo, é pelo nosso WhatsApp, inclusive hoje, se houver vaga:\n${linkDoWhatsApp(ctx.whatsapp)}\n\n` +
+        'Se for uma emergência com risco de vida, procure o *pronto-socorro mais próximo* ou ligue *192*.',
+      atencao: 'urgencia',
+      acao: 'urgencia',
+    }
+  }
+  if (sinal) {
     return {
       texto:
         '🚨 Se a criança está mal agora, procure o *pronto-socorro mais próximo* ou ligue *192*.\n\n' +

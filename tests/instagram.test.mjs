@@ -66,6 +66,14 @@ confere('frase do link e a testada no simulador', FRASE_DO_LINK === 'Olá! Vim p
   confere('urgencia manda pronto-socorro e 192', /pronto-socorro/.test(r.texto) && /192/.test(r.texto), r.texto)
   const r2 = responderDirect('socorro, é urgente', 'agendar', CTX)
   confere('urgencia ganha do botao', r2.atencao === 'urgencia', JSON.stringify(r2))
+  // Sinal de alarme sem a palavra (17/10/2026): no direct tambem.
+  const r3 = responderDirect('meu filho engoliu uma bateria', null, CTX)
+  confere('sinal de alarme no direct vira urgencia', r3.atencao === 'urgencia' && /192/.test(r3.texto), JSON.stringify(r3))
+  confere('coco molinho no direct nao e urgencia', responderDirect('o cocô dele está molinho', null, CTX).atencao !== 'urgencia')
+  confere('risco de vida no direct: pronto-socorro primeiro', /^🚨[^\n]*pronto-socorro/.test(r3.texto), r3.texto)
+  const r4 = responderDirect('ele não para de vomitar', null, CTX)
+  confere('urgente no direct: medico avisado e link para marcar', r4.atencao === 'urgencia' && r4.texto.includes('Já avisei o médico') && r4.texto.includes('wa.me/'), r4.texto)
+  confere('urgente no direct: pronto-socorro so no fim', !/pronto-socorro/.test(r4.texto.split('\n')[0]) && /risco de vida/.test(r4.texto), r4.texto)
 }
 
 // ---------------------------------------------------------------- agendar = link do WhatsApp

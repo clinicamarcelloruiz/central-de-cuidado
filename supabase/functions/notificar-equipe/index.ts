@@ -1,11 +1,14 @@
 import { adminClient, corsHeaders, json, userClient } from '../_shared/whatsapp.ts'
 import { chavesDaClinica, entregar } from '../_shared/push-da-equipe.ts'
+import { descreverEnvio, enviarAlertaDeUrgencia } from '../_shared/alerta-de-urgencia.ts'
 
 /**
  * Notificacoes no celular: o lado que o navegador chama (28/09/2026).
  *
  *   { acao: 'chave' }            -> chave publica VAPID, para o celular se inscrever
  *   { acao: 'teste', clinicId }  -> manda "teste" para os aparelhos DA PESSOA
+ *   { acao: 'alerta_teste', clinicId } -> o alerta de urgencia, no WhatsApp
+ *                                   dos numeros salvos (17/10/2026)
  *
  * O aviso de verdade (mensagem da familia) nao passa por aqui: sai do proprio
  * meta-webhook, por _shared/push-da-equipe.ts, sem uma segunda requisicao que
@@ -16,7 +19,7 @@ import { chavesDaClinica, entregar } from '../_shared/push-da-equipe.ts'
  * A pessoa aperta, ve (ou nao ve) chegar, e sabe na hora.
  */
 
-type Pedido = { acao?: 'chave' | 'teste'; clinicId?: string }
+type Pedido = { acao?: 'chave' | 'teste' | 'alerta_teste'; clinicId?: string }
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -60,6 +63,30 @@ Deno.serve(async (req) => {
         chaves,
       )
       return json(r)
+    }
+
+    // Alerta de urgencia de teste (17/10/2026): a mesma mensagem que o medico
+    // recebe, para os numeros salvos na tela. E o jeito de saber, antes da
+    // primeira urgencia de verdade, se o modelo foi aprovado e se os numeros
+    // estao certos - o alerta que nao chega nao avisa que nao chegou.
+    if (corpo.acao === 'alerta_teste') {
+      if (!corpo.clinicId) return json({ error: 'Clínica não informada.' }, 400)
+      // Pela sessao da pessoa: a RLS so devolve a clinica em que ela esta ativa.
+      const { data: daClinica, error: erroDaClinica } = await userClient(autorizacao)
+        .from('clinic_settings')
+        .select('clinic_id')
+        .eq('clinic_id', corpo.clinicId)
+        .maybeSingle()
+      if (erroDaClinica || !daClinica) return json({ error: 'Sem acesso a esta clínica.' }, 403)
+      const envios = await enviarAlertaDeUrgencia(admin, {
+        clinicId: corpo.clinicId,
+        canal: 'WhatsApp',
+        quem: 'Teste da Central',
+        texto: 'Este é um teste do alerta de urgência. Nenhuma família foi afetada.',
+        agora: new Date(),
+      })
+      if (!envios.length) return json({ error: 'Nenhum número salvo para o alerta.' }, 404)
+      return json({ envios, ...descreverEnvio(envios) })
     }
 
     return json({ error: 'Ação desconhecida.' }, 400)

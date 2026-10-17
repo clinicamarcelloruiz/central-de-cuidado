@@ -100,6 +100,17 @@ const MODELOS: Record<string, {
       'Olá, {{1}}. Aqui é o consultório do Dr. Marcello Ruiz.\n\n{{2}}\n\n' +
       'Se precisar, é só responder por aqui.',
   },
+  // Alerta de urgencia no WhatsApp pessoal do medico e do Edu (17/10/2026).
+  // Nao vai para familia nenhuma: e o aviso de que uma familia relatou
+  // urgencia. Categoria Utilidade. Ver alerta-de-urgencia.ts.
+  // Neutro de proposito: na urgencia sem risco de vida o robo oferece o
+  // horario mais proximo; so no risco de vida manda ao pronto-socorro.
+  alerta_urgencia: {
+    corpo:
+      '🚨 Possível urgência na Central de Cuidado.\n\n' +
+      '{{1}} escreveu pelo {{2}} às {{3}}:\n"{{4}}"\n\n' +
+      'O robô já orientou a família. Veja a conversa na Central de Cuidado para avaliar e responder.',
+  },
 }
 
 /**

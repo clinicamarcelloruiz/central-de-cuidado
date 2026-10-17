@@ -503,6 +503,93 @@ export function pediuUrgencia(texto: string) {
   return /urgen/.test(t)
 }
 
+/**
+ * Sinal de alarme escrito sem a palavra "urgente" (17/10/2026).
+ *
+ * Ate aqui o robo so reconhecia urgencia pela palavra ou pelo botao: "ele esta
+ * vomitando sangue" ou "engoliu uma pilha" recebiam a frase clinica e o menu.
+ * Pedido do Edu junto com o alerta no WhatsApp do medico: o que esta nesta
+ * lista vira urgencia de regra fixa, que vale mesmo se a IA falhar ou demorar.
+ * A IA (assistente.ts) cobre o que chega descrito de outro jeito.
+ *
+ * Lista curta e especifica de proposito. "Sangue nas fezes" sozinho fica de
+ * fora: rajas de sangue no bebe com APLV sao motivo de consulta, nao de
+ * pronto-socorro, e "exame de sangue" ou "sangue oculto" sao pedidos de
+ * exame. Errar para o lado da urgencia acorda o medico de madrugada; errar
+ * para o outro lado deixa uma crianca sem orientacao. Revisar com o Dr.
+ * Marcello antes de mexer.
+ *
+ * Dois niveis (17/10/2026, o Edu leu a primeira versao): o Dr. Marcello e
+ * gastropediatra clinico, nao cirurgiao, e a urgencia do consultorio e quase
+ * sempre "preciso que ele veja logo", nao pronto-socorro. Entao:
+ *   - vida: o que nao espera consulta (pilha queima o esofago em horas,
+ *     convulsao, falta de ar). Pronto-socorro ou 192 na primeira frase.
+ *   - urgente: o medico avisado no WhatsApp para avaliar, e a familia com o
+ *     botao de marcar o horario mais proximo. Pronto-socorro so no rodape,
+ *     "se for uma emergencia com risco de vida".
+ *
+ * Devolve o sinal e o nivel (vai na nota e no alerta), ou null.
+ */
+export type SinalDeAlarme = { nome: string; risco: 'vida' | 'urgente' }
+
+const SINAIS_DE_ALARME: { nome: string; risco: SinalDeAlarme['risco']; padrao: RegExp; negavel: boolean }[] = [
+  { nome: 'vômito com sangue', risco: 'vida', padrao: /\b(vomit\w*|golf\w*)\b[^.!?\n]{0,30}\bsangue\b|\bsangue (no|nos|na) (vomit\w*|golf\w*)\b|\bborra de cafe\b/, negavel: true },
+  // Vomito verde no bebe pode ser obstrucao do intestino: e cirurgia, nao consulta.
+  { nome: 'vômito verde', risco: 'vida', padrao: /\b(vomit\w*|golf\w*)\b[^.!?\n]{0,25}\b(verde|esverdead\w*|bile|bilios\w*)\b/, negavel: true },
+  {
+    nome: 'engoliu objeto',
+    risco: 'vida',
+    padrao: /\b(engoliu|engoli|ingeriu|engolido)\b[^.!?\n]{0,25}\b(pilha|pilhas|bateria|baterias|baterinha|ima|imas|moeda|moedas|alfinete|agulha|prego|parafuso)\b/,
+    negavel: true,
+  },
+  {
+    nome: 'engoliu produto tóxico',
+    risco: 'vida',
+    padrao: /\b(engoliu|ingeriu|bebeu)\b[^.!?\n]{0,30}\b(soda caustica|agua sanitaria|cloro|desinfetante|produto de limpeza|veneno|querosene|gasolina|alvejante)\b/,
+    negavel: true,
+  },
+  { nome: 'muito sangue', risco: 'vida', padrao: /\b(muito sangue|sangrando muito|so sangue|hemorragia|sangue sem parar)\b/, negavel: true },
+  { nome: 'não acorda', risco: 'vida', padrao: /\b(nao acorda|dificil de acordar|desacordad\w*|desmai\w*)\b/, negavel: true },
+  {
+    nome: 'falta de ar',
+    risco: 'vida',
+    padrao: /\b(falta de ar|nao consegue respirar|respirando (mal|com dificuldade)|dificuldade (para|pra|de) respirar|labios? rox\w*|boca rox\w*|ficou rox\w*|ficando rox\w*)\b/,
+    negavel: true,
+  },
+  { nome: 'convulsão', risco: 'vida', padrao: /\bconvuls\w*/, negavel: true },
+  // "sem fazer xixi" ja e negativa: nao passa pelo filtro de negacao.
+  { nome: 'sem fazer xixi', risco: 'urgente', padrao: /\b(nao|sem)\b[^.!?\n]{0,15}\b(faz|fez|fazendo|fazer)\b[^.!?\n]{0,8}\bxixi\b|\bdesidratad\w*/, negavel: false },
+  { nome: 'não para de vomitar', risco: 'urgente', padrao: /\bnao (para|parou|consegue parar) de vomitar\b|\bvomit\w* (tudo|sem parar)\b/, negavel: false },
+  { nome: 'muito molinha', risco: 'urgente', padrao: /\b(muito|bem|ta|esta|ficou|fica) (molinh[oa]|prostrad[oa]|largad[oa])\b/, negavel: true },
+  // "Barriga dura e chorando" e a colica de todo bebe: consulta logo, nao pronto-socorro.
+  { nome: 'barriga dura com dor', risco: 'urgente', padrao: /\bbarriga\b[^.!?\n]{0,15}\b(dura|rigida)\b/, negavel: true },
+]
+
+// "Molinho" no WhatsApp de gastropediatria e quase sempre o coco.
+const FALA_DE_FEZES = /\b(coco|fezes|evacu\w*|intestino|dente)\b/
+// Pedido de exame nao e sangramento: "vomitou depois do exame de sangue".
+const EXAME_DE_SANGUE = /\b(exames? de sangue|sangue oculto|coleta de sangue|tir(ar|ou|aram) sangue)\b/g
+
+export function sinalDeAlarme(texto: string): SinalDeAlarme | null {
+  const t = normalizar(String(texto ?? '')).replace(EXAME_DE_SANGUE, ' ')
+  if (!t) return null
+  // Risco de vida ganha de urgente, em qualquer frase da mensagem.
+  let urgente: SinalDeAlarme | null = null
+  for (const frase of t.split(/[.!?\n]+/)) {
+    for (const s of SINAIS_DE_ALARME) {
+      const achado = s.padrao.exec(frase)
+      if (!achado) continue
+      if (s.nome === 'muito molinha' && FALA_DE_FEZES.test(frase)) continue
+      // "nao esta vomitando sangue", "nunca engoliu nada": ate duas palavras
+      // entre a negacao e o sinal.
+      if (s.negavel && /\b(nao|sem|nunca|nem)\b(\s+\S+){0,2}\s*$/.test(frase.slice(0, achado.index))) continue
+      if (s.risco === 'vida') return { nome: s.nome, risco: s.risco }
+      urgente ??= { nome: s.nome, risco: s.risco }
+    }
+  }
+  return urgente
+}
+
 function desistiu(texto: string) {
   const t = normalizar(texto)
   return t === 'cancelar' || t === 'sair' || t === 'parar' || t === 'desistir'
@@ -1481,6 +1568,13 @@ async function jaMandada(admin: Admin, conversationId: string, resposta: string)
     .trim()
     .slice(0, 80)
   if (trecho.length < 20) return false
+  return mandadoHaPouco(admin, conversationId, trecho)
+}
+
+// O trecho que toda resposta de urgencia do robo tem, com ou sem a palavra.
+const TRECHO_DA_URGENCIA = 'pronto-socorro mais próximo ou ligue 192'
+
+async function mandadoHaPouco(admin: Admin, conversationId: string, trecho: string): Promise<boolean> {
   try {
     const { data, error } = await admin
       .from('whatsapp_messages')
@@ -2620,17 +2714,25 @@ export async function oferecerHorarios(
  * uma crianca passando mal e precisa ouvir que alguem vai ligar agora - e a
  * conversa precisa saltar na lista da recepcao com uma bandeira propria.
  */
-async function transferirUrgencia(admin: Admin, conversationId: string, agora: Date): Promise<Resultado> {
+async function transferirUrgencia(
+  admin: Admin,
+  conversationId: string,
+  agora: Date,
+  clinicId: string,
+  sinal: SinalDeAlarme | null = null,
+): Promise<Resultado> {
   await salvarEstado(admin, conversationId, {
     booking_state: 'atendente',
     booking_options: null,
     booking_unit_id: null,
     booking_modality: null,
   })
+  if (sinal?.risco === 'vida') return { resposta: respostaDeRiscoDeVida(agora), atencao: 'urgencia' }
+  if (sinal) return respostaDeUrgencia(clinicId)
   if (!dentroDoExpediente(agora)) {
-    return { resposta: urgenciaForaDoExpediente(agora), atencao: 'urgencia' }
+    return comOfertaDeHorario({ resposta: urgenciaForaDoExpediente(agora), atencao: 'urgencia' })
   }
-  return {
+  return comOfertaDeHorario({
     resposta:
       '🚨 Entendi que é urgência. Estou transferindo você para um atendente do ' +
       'consultório, e a nossa equipe vai entrar em contato com urgência por aqui.\n\n' +
@@ -2638,7 +2740,39 @@ async function transferirUrgencia(admin: Admin, conversationId: string, agora: D
       'assumir o atendimento lê tudo antes de responder.\n\n' +
       'Se for uma emergência com risco de vida, procure o pronto-socorro mais próximo ou ligue 192.',
     atencao: 'urgencia',
+  })
+}
+
+/**
+ * Urgencia sem risco de vida (17/10/2026): o Edu leu a primeira versao, que
+ * mandava todo sinal ao pronto-socorro, e lembrou que o Dr. Marcello e
+ * clinico - a urgencia do consultorio e "preciso que ele veja logo". O medico
+ * recebe o alerta no WhatsApp dele para avaliar; a familia ganha o botao de
+ * marcar o horario mais proximo, inclusive no dia, se houver vaga. O
+ * pronto-socorro fica no rodape, para o caso de risco de vida.
+ */
+const OFERTA_DE_HORARIO =
+  'Se quiser já garantir o horário mais próximo, toque em *Marcar uma consulta*: mostro os dias livres, inclusive hoje, se houver vaga.'
+
+function comOfertaDeHorario(r: NonNullable<Resultado>): NonNullable<Resultado> {
+  const partes = r.resposta.split('\n\n')
+  // A oferta entra antes do rodape do pronto-socorro, que fecha a mensagem.
+  const rodape = partes.length > 1 && /pronto-socorro/.test(partes.at(-1) ?? '') && !/^🚨/.test(partes.at(-1) ?? '') ? partes.pop() : null
+  return {
+    ...r,
+    resposta: [...partes, OFERTA_DE_HORARIO, ...(rodape ? [rodape] : [])].join('\n\n'),
+    botoes: [{ id: 'MARCAR_AGORA', titulo: 'Marcar uma consulta' }],
   }
+}
+
+function respostaDeUrgencia(clinicId: string): Resultado {
+  return comOfertaDeHorario({
+    resposta:
+      `🚨 Entendo a preocupação. Já avisei ${quemAtende(clinicId).o}, que vai avaliar o que você contou ` +
+      'e responder por aqui assim que possível.\n\n' +
+      'Se for uma emergência com risco de vida, procure o pronto-socorro mais próximo ou ligue 192.',
+    atencao: 'urgencia',
+  })
 }
 
 /**
@@ -2651,6 +2785,27 @@ async function transferirUrgencia(admin: Admin, conversationId: string, agora: D
  * equipe volta) e poe o pronto-socorro em primeiro plano, em vez de rodape.
  * A conversa continua marcada como urgencia, para saltar na lista de manha.
  */
+/**
+ * Sinal de alarme com risco de vida (17/10/2026). Ver sinalDeAlarme.
+ *
+ * Quem escreve "urgente" ja decidiu que e urgente; quem escreve "ele engoliu
+ * uma pilha" pode estar so perguntando se o medico atende isso. Por isso o
+ * pronto-socorro vem na primeira frase, em negrito, a qualquer hora, e nao
+ * como rodape. Sem botao de marcar: aqui consulta nenhuma serve.
+ */
+const TRECHO_DO_RISCO_DE_VIDA = 'Pelo que você contou, a criança precisa ser avaliada agora'
+
+function respostaDeRiscoDeVida(agora: Date): string {
+  return (
+    `🚨 ${TRECHO_DO_RISCO_DE_VIDA}. ` +
+    '*Procure o pronto-socorro mais próximo ou ligue 192.*\n\n' +
+    (dentroDoExpediente(agora)
+      ? 'Já avisei a nossa equipe, que acompanha por aqui.'
+      : 'Já deixei avisado para a nossa equipe. ' + avisoDeHorario(agora)) +
+    '\n\nSe puder, escreva como a criança está agora: quem assumir o atendimento lê tudo antes de responder.'
+  )
+}
+
 function urgenciaForaDoExpediente(agora: Date): string {
   return (
     '🚨 Entendi que é urgência, e já deixei avisado para a nossa equipe.\n\n' +
@@ -4222,15 +4377,30 @@ async function tratarConversaPorDentro(opcoes: {
       )
     }
 
+    // Sinal de alarme na fila tambem fala (17/10/2026): a mae que ja esperava
+    // a equipe e escreve "ela vomitou sangue agora" nao pode ouvir silencio.
+    // Se o pronto-socorro acabou de sair (ela escreveu "urgente" e agora conta
+    // o que esta acontecendo), repetir o aviso so atrapalha: fica calado, e a
+    // conversa segue marcada como urgencia.
+    // Risco de vida depois de uma urgencia comum NAO e repeticao: "nao para de
+    // vomitar" e, meia hora depois, "agora ele nao acorda" precisa ouvir o
+    // pronto-socorro na primeira frase. So o proprio aviso de risco cala o outro.
+    const sinalNaFila = sinalDeAlarme(texto)
+    const jaDito = sinalNaFila?.risco === 'vida' ? TRECHO_DO_RISCO_DE_VIDA : TRECHO_DA_URGENCIA
+    if (sinalNaFila && !(await mandadoHaPouco(admin, conversationId, jaDito))) {
+      registrar('sinal_de_alarme', `${sinalNaFila.risco}: ${sinalNaFila.nome}`)
+      if (sinalNaFila.risco === 'vida') return { resposta: respostaDeRiscoDeVida(agora), atencao: 'urgencia' }
+      return respostaDeUrgencia(clinicId)
+    }
     if (pediuUrgencia(texto)) {
       // Na fila tambem: fora do horario, "o mais rapido possivel" seria segunda.
-      if (!dentroDoExpediente(agora)) return { resposta: urgenciaForaDoExpediente(agora), atencao: 'urgencia' }
-      return {
+      if (!dentroDoExpediente(agora)) return comOfertaDeHorario({ resposta: urgenciaForaDoExpediente(agora), atencao: 'urgencia' })
+      return comOfertaDeHorario({
         resposta:
           '🚨 Avisei a nossa equipe de que é urgente. Alguém entra em contato o mais rápido possível.\n\n' +
           'Se for uma emergência com risco de vida, procure o pronto-socorro mais próximo ou ligue 192.',
         atencao: 'urgencia',
-      }
+      })
     }
 
     // Pergunta de sempre, respondida na espera - ate tres vezes.
@@ -4372,7 +4542,15 @@ async function tratarConversaPorDentro(opcoes: {
   // esta vomitando sangue" - a transferencia vale, e o pedido perder-se ali e
   // o menor dos problemas.
   if (pediuUrgencia(texto) && (!noPedidoDeDocumento || assuntoClinico(texto))) {
-    return await transferirUrgencia(admin, conversationId, agora)
+    return await transferirUrgencia(admin, conversationId, agora, clinicId)
+  }
+  // Sinal de alarme sem a palavra (17/10/2026): vale de qualquer etapa,
+  // inclusive do pedido de documento - "ela vomitou sangue" la dentro nao e
+  // pressa por receita.
+  const sinal = sinalDeAlarme(texto)
+  if (sinal) {
+    registrar('sinal_de_alarme', `${sinal.risco}: ${sinal.nome}`)
+    return await transferirUrgencia(admin, conversationId, agora, clinicId, sinal)
   }
 
   // "Cancelar" muda de sentido dentro de "minha consulta": ali nao e desistir

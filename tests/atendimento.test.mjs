@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica } from './atendimento.build.mjs'
+import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica, sinalDeAlarme } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 import { montarMensagens } from './conteudo.build.mjs'
 
@@ -4209,6 +4209,125 @@ await caso('Campos: texto sem campo continua exatamente igual', [
   confere('IA sem a coluna nova: unidades seguem', k2.includes('Livance · Santos') && k2.includes('Convênio: Trasmontano') && !k2.includes('Trata refluxo'), k2)
   confere('IA sem a coluna nova: descricao segue', k2.includes('Consultório de gastroenterologia pediátrica.'))
 }
+
+// ---------------------------------------------------------------------------
+// Sinal de alarme sem a palavra "urgente" (17/10/2026)
+// ---------------------------------------------------------------------------
+// Ate aqui "ela esta vomitando sangue" recebia a frase clinica e o menu: so a
+// palavra ou o botao viravam urgencia. Agora o sinal vira urgencia de regra
+// fixa, com o pronto-socorro na primeira frase, e dispara o alerta no WhatsApp
+// do medico.
+{
+  const confereSinal = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  for (const frase of [
+    'ela está vomitando sangue desde cedo',
+    'tem sangue no vômito',
+    'ele vomitou verde duas vezes',
+    'meu filho engoliu uma bateria de relógio',
+    'acho que ele engoliu um ímã',
+    'ela bebeu água sanitária',
+    'não faz xixi desde ontem',
+    'está desidratado',
+    'não para de vomitar',
+    'ele ficou roxo',
+    'está com falta de ar',
+    'teve uma convulsão',
+    'ele está muito molinho',
+    'barriga dura e chorando de dor',
+  ]) confereSinal(`sinal de alarme: "${frase}"`, sinalDeAlarme(frase) !== null)
+  // Dois niveis (17/10/2026): o Dr. Marcello e clinico, nao cirurgiao.
+  for (const frase of ['meu filho engoliu uma bateria de relógio', 'teve uma convulsão', 'ele não acorda', 'ela está vomitando sangue', 'está com falta de ar'])
+    confereSinal(`risco de vida: "${frase}"`, sinalDeAlarme(frase)?.risco === 'vida', JSON.stringify(sinalDeAlarme(frase)))
+  for (const frase of ['não para de vomitar', 'ele está muito molinho', 'barriga dura e chorando de dor', 'não faz xixi desde ontem'])
+    confereSinal(`urgente sem risco de vida: "${frase}"`, sinalDeAlarme(frase)?.risco === 'urgente', JSON.stringify(sinalDeAlarme(frase)))
+  confereSinal('risco de vida ganha de urgente na mesma mensagem', sinalDeAlarme('Não para de vomitar. Agora ele não acorda')?.risco === 'vida')
+  for (const frase of [
+    'o doutor pede exame de sangue?',
+    'precisa fazer pesquisa de sangue oculto nas fezes?',
+    'o cocô dela está molinho',
+    'cocô bem molinho e verde',
+    'ele não está vomitando sangue',
+    'vomitou depois do exame de sangue',
+    'tem rajas de sangue nas fezes',
+    'nunca engoliu nada',
+    'quanto custa a consulta?',
+  ]) confereSinal(`nao e sinal de alarme: "${frase}"`, sinalDeAlarme(frase) === null, String(sinalDeAlarme(frase)))
+}
+
+// Risco de vida: pronto-socorro na primeira frase, sem botao de marcar.
+const exigeRiscoDeVida = ({ ultimoToque, titulo }) => {
+  if (ultimoToque.atencao !== 'urgencia') falhas.push(`${titulo} | atenção ${ultimoToque.atencao}`)
+  else passou++
+  if (!/^🚨[^\n]*pronto-socorro/.test(ultimoToque.resposta ?? '')) falhas.push(`${titulo} | pronto-socorro fora da primeira frase`)
+  else passou++
+  if (ultimoToque.botoes?.some((b) => b.id === 'MARCAR_AGORA')) falhas.push(`${titulo} | ofereceu consulta no risco de vida`)
+  else passou++
+}
+// Urgente sem risco de vida: medico avisado, botao de marcar, pronto-socorro so no rodape.
+const exigeUrgenciaComum = ({ ultimoToque, titulo }) => {
+  const r = ultimoToque.resposta ?? ''
+  if (ultimoToque.atencao !== 'urgencia') falhas.push(`${titulo} | atenção ${ultimoToque.atencao}`)
+  else passou++
+  if (/pronto-socorro/.test(r.split('\n')[0])) falhas.push(`${titulo} | pronto-socorro na primeira frase de urgência comum`)
+  else passou++
+  if (!ultimoToque.botoes?.some((b) => b.id === 'MARCAR_AGORA')) falhas.push(`${titulo} | sem botão de marcar`)
+  else passou++
+  if (!/risco de vida, procure o pronto-socorro mais próximo ou ligue 192\.$/.test(r)) falhas.push(`${titulo} | rodapé do pronto-socorro`)
+  else passou++
+}
+
+await caso('Sinal de alarme sem a palavra: vômito com sangue é risco de vida', [
+  ['ela está vomitando sangue desde cedo', ['pronto-socorro', '192']],
+], { verificar: exigeRiscoDeVida })
+
+await caso('Sinal de alarme: engoliu pilha, a qualquer hora', [
+  ['meu filho engoliu uma pilha', ['pronto-socorro', '192', 'Já deixei avisado']],
+], { agora: SEXTA_23H, verificar: exigeRiscoDeVida })
+
+await caso('Sinal de alarme na fila da equipe também fala', [
+  ['ela vomitou sangue agora', ['pronto-socorro', '192']],
+], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false, verificar: exigeRiscoDeVida })
+
+await caso('Sinal de alarme dentro do pedido de documento vale', [
+  ['Oi', 'Como podemos ajudar'],
+  ['5', 'O que você precisa'],
+  ['1', 'Qual medicamento'],
+  ['espera, ela engoliu uma moeda', ['pronto-socorro', '192']],
+], { pacientes: [ANA], verificar: exigeRiscoDeVida })
+
+// Urgente sem risco de vida (17/10/2026, o Edu): consulta logo, nao pronto-socorro.
+await caso('Urgente sem risco de vida: avisa o médico e oferece horário', [
+  ['ele não para de vomitar desde ontem', ['Já avisei o Dr. Marcello', 'Marcar uma consulta', 'inclusive hoje']],
+], { verificar: exigeUrgenciaComum })
+
+await caso('Barriga dura e choro é consulta logo, não pronto-socorro', [
+  ['a barriga dele está dura e ele chora muito', 'Já avisei o Dr. Marcello'],
+], { agora: SEXTA_23H, verificar: exigeUrgenciaComum })
+
+await caso('Depois da urgência, o botão de marcar abre o agendamento', [
+  ['ele não para de vomitar', 'Marcar uma consulta'],
+  ['Marcar uma consulta', 'Em qual unidade'],
+])
+
+await caso('"É urgente" também oferece o horário mais próximo', [
+  ['é urgente, meu filho está passando mal', ['transferindo você para um atendente', 'Marcar uma consulta']],
+], { verificar: exigeUrgenciaComum })
+
+// "Nao para de vomitar" e meia hora depois "agora ele nao acorda": o segundo
+// aviso NAO e repeticao do primeiro. Risco de vida tem de falar.
+await caso('Risco de vida depois de urgência comum não fica calado', [
+  ['ele não para de vomitar', 'Já avisei o Dr. Marcello'],
+  ['agora ele não acorda', 'precisa ser avaliada agora'],
+], { verificar: exigeRiscoDeVida })
+
+await caso('Cocô molinho não é urgência', [
+  ['o cocô dela está molinho, é normal?', 'avaliação para a consulta'],
+], {
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.atencao === 'urgencia' || /pronto-socorro mais próximo ou ligue 192\.\*/.test(ultimoToque.resposta ?? '')) falhas.push(`${titulo} | tratou como urgência`)
+    else passou++
+  },
+})
 
 console.log('\n============================================')
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)

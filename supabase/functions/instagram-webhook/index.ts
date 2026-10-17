@@ -41,11 +41,12 @@ import {
   type ContaInstagram,
 } from '../_shared/instagram-api.ts'
 import { carregarRespostas } from '../_shared/respostas.ts'
-import { conhecimentoDaClinica, horariosEmTexto, lugaresParaOInstagram, type Resultado } from '../_shared/atendimento.ts'
+import { conhecimentoDaClinica, horariosEmTexto, lugaresParaOInstagram, pediuUrgencia, sinalDeAlarme, type Resultado } from '../_shared/atendimento.ts'
 import { atenderComAssistente, claudePelaApi, lerModo, type ModoDoAssistente, type Situacao } from '../_shared/assistente.ts'
 import { quemAtende } from '../_shared/quem-atende.ts'
 import { EXPEDIENTE } from '../_shared/expediente.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
+import { deveAlertar, enviarAlertaDeUrgencia } from '../_shared/alerta-de-urgencia.ts'
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined
 
@@ -320,17 +321,17 @@ async function tratarMensagem(admin: Admin, conta: Conta, ev: Record<string, any
 
   const { data: existente } = await admin
     .from('instagram_conversas')
-    .select('id,username,nao_lidas,precisa_equipe')
+    .select('id,username,nao_lidas,precisa_equipe,motivo')
     .eq('clinic_id', conta.clinic_id)
     .eq('igsid', igsid)
     .maybeSingle()
-  let conversa = existente as { id: string; username: string | null; nao_lidas: number; precisa_equipe: boolean } | null
+  let conversa = existente as { id: string; username: string | null; nao_lidas: number; precisa_equipe: boolean; motivo: string | null } | null
   const primeiraVez = !conversa
   if (!conversa) {
     const { data, error } = await admin
       .from('instagram_conversas')
       .insert({ clinic_id: conta.clinic_id, igsid, username: await perfilDe(conta, igsid), ultima_mensagem_em: agora, ultima_da_pessoa_em: agora })
-      .select('id,username,nao_lidas,precisa_equipe')
+      .select('id,username,nao_lidas,precisa_equipe,motivo')
       .single()
     if (error) throw error
     conversa = data
@@ -370,7 +371,9 @@ async function tratarMensagem(admin: Admin, conta: Conta, ev: Record<string, any
     .eq('automatica', false)
     .gte('created_at', duasHoras)
     .limit(1)
-  if (daEquipe?.length) {
+  // A excecao e urgencia (17/10/2026), como no WhatsApp: a mae que avisa que a
+  // crianca esta mal precisa ouvir o pronto-socorro mesmo com gente na conversa.
+  if (daEquipe?.length && !pediuUrgencia(texto) && !sinalDeAlarme(texto)) {
     registro.concluir()
     return
   }
@@ -395,6 +398,19 @@ async function tratarMensagem(admin: Admin, conta: Conta, ev: Record<string, any
     if (resposta.atencao) {
       await admin.from('instagram_conversas').update({ precisa_equipe: true, motivo: resposta.atencao }).eq('id', conversaId)
       if (!conversa!.precisa_equipe) await avisar(admin, conta, resposta.atencao, conversa!.username ?? '', texto || 'Mensagem no direct')
+      // Alerta no WhatsApp pessoal do medico (17/10/2026). Ver _shared/alerta-de-urgencia.ts.
+      if (deveAlertar({ atencaoAntes: conversa!.precisa_equipe, motivoAntes: conversa!.motivo ?? null, motivoAgora: resposta.atencao })) {
+        emSegundoPlano(
+          enviarAlertaDeUrgencia(admin, {
+            clinicId: conta.clinic_id,
+            canal: 'Instagram',
+            quem: conversa!.username ? `@${conversa!.username}` : 'Alguém no direct',
+            texto: texto || 'Mensagem no direct',
+            agora: new Date(),
+            conversaInstagram: conversaId,
+          }),
+        )
+      }
     }
   }
   registro.concluir()

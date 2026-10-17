@@ -45,6 +45,8 @@ function claudeFalso(respostas) {
   return { chamar, chamadas }
 }
 const texto = (t) => ({ content: [{ type: 'text', text: t }] })
+// As instrucoes vao em blocos desde 17/10/2026 (cache): o texto e a soma deles.
+const textoDoSistema = (chamada) => (Array.isArray(chamada?.system) ? chamada.system.map((b) => b.text).join('\n') : String(chamada?.system ?? ''))
 const usa = (name, input, antes = '') => ({
   content: [...(antes ? [{ type: 'text', text: antes }] : []), { type: 'tool_use', id: `t-${name}`, name, input }],
 })
@@ -100,7 +102,7 @@ confere('modo desconhecido vale desligado', lerModo('qualquer') === 'desligado' 
   confere('ligado: robo nao roda', rd.chamado.vezes === 0)
   const enviado = JSON.stringify(c.chamadas[0])
   confere('CPF e e-mail nao saem para fora', !enviado.includes('529.982.247-25') && !enviado.includes('mae@exemplo.com') && enviado.includes('[cpf]'))
-  confere('conhecimento da clinica vai nas instrucoes', String(c.chamadas[0].system).includes('Av. Ana Costa'))
+  confere('conhecimento da clinica vai nas instrucoes', textoDoSistema(c.chamadas[0]).includes('Av. Ana Costa'))
 }
 
 // 4. O que fica com o robo mesmo ligado.
@@ -139,7 +141,7 @@ for (const [nome, extra] of [
 {
   const c = claudeFalso([usa('chamar_equipe', { motivo: 'urgencia', texto: 'Procure o pronto-socorro ou ligue 192. Já avisei a equipe.' })])
   const f = ferramentasFalsas()
-  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'ele desmaiou agora' }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'ele está pálido e gelado agora' }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
   confere('chamar_equipe urgencia: motivo urgencia', d.resultado.atencao === 'urgencia' && f.feito.some(([q, m]) => q === 'equipe' && m === 'urgencia'))
   const c2 = claudeFalso([usa('chamar_equipe', { motivo: 'excecao', texto: 'Vou ver com a equipe.' })])
   const d2 = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'tem desconto pra irmãos?' }), ferramentas: ferramentasFalsas(), chamar: c2.chamar, roboDireto: roboDireto().fn })
@@ -256,7 +258,7 @@ confere('urgencia: pronto-socorro fica', limparTexto('Procure o pronto-socorro a
 {
   const c = claudeFalso([texto('ok')])
   await atenderComAssistente({ modo: 'ligado', situacao: situacao(), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
-  const sistema = String(c.chamadas[0].system)
+  const sistema = textoDoSistema(c.chamadas[0])
   confere('instrucao: nao repetir a pergunta', sistema.includes('Nunca repita nem resuma a pergunta'))
   confere('instrucao: sem menu numerado', sistema.includes('Nunca escreva menu numerado'))
   confere('instrucao: sintoma nao e pedido de conduta', sistema.includes('Falar de sintoma não é pedir conduta'))
@@ -318,7 +320,7 @@ confere('conduta: nao pega frase de servico', !orientouConduta('Você pode usar 
     roboDireto: roboDireto({ resposta: 'Não entendi. Responda com o número da unidade.' }).fn,
   })
   confere('despedida: sem repetir o lembrete', d.resultado.resposta === 'Boa noite!', d.resultado.resposta)
-  confere('instrucao: despedida curta', String(c.chamadas[0]?.system ?? '').includes('Se ela se despediu ou disse que vai pensar, só se despeça.'))
+  confere('instrucao: despedida curta', textoDoSistema(c.chamadas[0]).includes('Se ela se despediu ou disse que vai pensar, só se despeça.'))
 }
 // O lembrete que traduz a lista do robo em palavras NAO e repeticao (foi o
 // "parcela amigao?" do mesmo teste, e estava certo).
@@ -352,6 +354,49 @@ confere('so frase repetida: devolve o texto inteiro', semRepetir('Quando decidir
 }
 confere('fala com a equipe: detecta', falaComAEquipe('A família do Leon pergunta se pode pagar.') && falaComAEquipe('Por favor, confirmem.') && falaComAEquipe('A mãe pergunta se tem vaga.'))
 confere('fala com a familia: nao detecta', !falaComAEquipe('Vou confirmar com a equipe e te respondemos por aqui.') && !falaComAEquipe('Atendemos toda a família, de recém-nascidos até 19 anos.'))
+
+// 17. Sonnet, cache, sinais de alarme e o jeito de levar para a consulta
+// (17/10/2026, pedido do Edu junto com o alerta no WhatsApp do medico).
+{
+  const c = claudeFalso([texto('ok')])
+  await atenderComAssistente({ modo: 'ligado', situacao: situacao(), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('modelo padrao: Sonnet', c.chamadas[0].model === 'claude-sonnet-5-5', c.chamadas[0].model)
+  const [fixo] = c.chamadas[0].system
+  confere('cache: texto fixo marcado', fixo?.cache_control?.type === 'ephemeral' && fixo.text.includes('<clinica>'))
+  const sistema = textoDoSistema(c.chamadas[0])
+  confere('instrucao: acolher sem pressionar', sistema.includes('Nunca assuste, nunca prometa resultado e nunca pressione'))
+  confere('instrucao: oferecer horarios concretos', sistema.includes('próximos dois ou três horários'))
+  confere('instrucao: sinais de alarme na urgencia', sistema.includes('engoliu pilha') && sistema.includes('febre em bebê com menos de 3 meses'))
+}
+{
+  // O prefixo em cache tem de ser igual com e sem etapa: um caractere diferente
+  // perde o cache inteiro. O passo em aberto vai num bloco a parte.
+  const sem = claudeFalso([texto('ok')])
+  await atenderComAssistente({ modo: 'ligado', situacao: situacao(), ferramentas: ferramentasFalsas(), chamar: sem.chamar, roboDireto: roboDireto().fn })
+  const com = claudeFalso([texto('ok')])
+  await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ etapa: 'aguardando_unidade', texto: 'tanto faz', ultimaDoConsultorio: 'Em qual unidade?' }),
+    ferramentas: ferramentasFalsas(), chamar: com.chamar, roboDireto: roboDireto({ resposta: 'Não entendi. Responda com o número.' }).fn,
+  })
+  confere('cache: mesmo prefixo com e sem etapa', sem.chamadas[0].system[0].text === com.chamadas[0].system[0].text)
+  confere('cache: etapa em bloco sem cache', com.chamadas[0].system.length === 2 && !com.chamadas[0].system[1].cache_control && com.chamadas[0].system[1].text.includes('aguardando_unidade'))
+}
+for (const frase of ['ele engoliu uma pilha', 'ela está vomitando sangue', 'meu filho está muito molinho e não faz xixi desde ontem']) {
+  const c = claudeFalso([texto('nao devia')])
+  const rd = roboDireto()
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: frase }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: rd.fn })
+  confere(`sinal de alarme fica com o robo: ${frase}`, d.origem === 'robo' && c.chamadas.length === 0 && ficaComORobo(situacao({ texto: frase })) === 'urgencia')
+}
+confere('coco molinho nao e alarme', ficaComORobo(situacao({ texto: 'o cocô dela está molinho, é normal?' })) === null)
+{
+  // A IA chamou urgencia e esqueceu o pronto-socorro: a frase entra assim mesmo.
+  const c = claudeFalso([usa('chamar_equipe', { motivo: 'urgencia', para_familia: 'Já avisei a equipe, que responde por aqui.', resumo_para_equipe: 'Criança pálida e gelada.' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'ele está pálido e gelado agora' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('urgencia da IA sem pronto-socorro: a frase entra', /pronto-socorro/.test(d.resultado.resposta) && /192/.test(d.resultado.resposta) && d.resultado.atencao === 'urgencia', d.resultado.resposta)
+  confere('urgencia da IA: o texto dela continua', d.resultado.resposta.includes('Já avisei a equipe'), d.resultado.resposta)
+  // Rodape, nao manchete: na urgencia comum quem resolve e a consulta.
+  confere('urgencia da IA: pronto-socorro no fim, com risco de vida', d.resultado.resposta.startsWith('Já avisei') && d.resultado.resposta.endsWith('risco de vida, procure o pronto-socorro mais próximo ou ligue 192.'), d.resultado.resposta)
+}
 
 // 11. Mascara.
 confere('mascara telefone', semDadosPessoais('me liga no (13) 99706-6339') === 'me liga no [telefone]')

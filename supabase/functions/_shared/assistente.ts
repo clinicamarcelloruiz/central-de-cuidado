@@ -21,7 +21,9 @@
  * Fica sempre com o robo, mesmo ligado: anexo (o Claude nao ve a imagem),
  * urgencia e resposta automatica de empresa. Os dois primeiros tem resposta
  * escrita e conferida; o ultimo, solto com uma IA, vira duas maquinas
- * conversando. Sintoma ficava com o robo ate 16/10/2026, mas "minha filha tem
+ * conversando. Urgencia e a palavra ou um sinal de alarme (sinalDeAlarme, em
+ * atendimento.ts, desde 17/10/2026); a que vem descrita de outro jeito o
+ * Claude reconhece e chama a equipe com motivo urgencia. Sintoma ficava com o robo ate 16/10/2026, mas "minha filha tem
  * refluxo, ele trata?" recebia "nao posso orientar" e um menu; agora o Claude
  * responde a parte do servico e passa a conduta para a equipe (ver
  * orientouConduta, a trava para o caso de ele escorregar).
@@ -35,12 +37,17 @@
  * por causa da IA.
  */
 import type { ConsultaMarcada, MotivoAtencao, Resultado } from './atendimento.ts'
-import { conhecimentoDaClinica, pediuUrgencia, respostaAutomaticaDaFamilia } from './atendimento.ts'
+import { conhecimentoDaClinica, pediuUrgencia, respostaAutomaticaDaFamilia, sinalDeAlarme } from './atendimento.ts'
 import { assuntoClinico } from './respostas.ts'
 import { dentroDoExpediente } from './expediente.ts'
 
 export type ModoDoAssistente = 'desligado' | 'sombra' | 'ligado'
-export const MODELO_PADRAO = 'claude-haiku-5-5'
+// Sonnet desde 17/10/2026, pedido do Edu: o Haiku foi o teste. Conversa com mae
+// preocupada pede nuance (acolher, levar para a consulta sem empurrar, notar
+// urgencia descrita sem a palavra) e o Sonnet segue melhor as regras longas.
+// Custa umas 3 vezes mais por mensagem; o cache do texto fixo (ver
+// sistemaDoClaude) devolve boa parte. Se passar do prazo, o robo responde.
+export const MODELO_PADRAO = 'claude-sonnet-5-5'
 
 export function lerModo(valor: unknown): ModoDoAssistente {
   return valor === 'sombra' || valor === 'ligado' ? valor : 'desligado'
@@ -199,7 +206,7 @@ function ferramentasDoClaude(emEtapa: boolean) {
   return lista
 }
 
-function instrucoes(s: Situacao, emEtapa: boolean): string {
+function instrucoes(s: Situacao): string {
   const medico = s.quemAtende.replace(/^(o|a) /, '')
   return [
     `Você é o atendente virtual do consultório de ${medico}, gastroenterologista pediátrico, no ${s.canal ?? 'WhatsApp'}. Fala com mães, pais e responsáveis.`,
@@ -248,6 +255,16 @@ function instrucoes(s: Situacao, emEtapa: boolean): string {
     'Falar de sintoma não é pedir conduta. "Minha filha tem refluxo, ele trata?" pergunta sobre o serviço: responda (se a condição está em <clinica>) e ofereça marcar. Pergunta sobre o serviço é sua: se o médico pede exames, se atende tal idade ou tal problema, como é a consulta, consulta online, valor, convênio, reembolso, endereço, estacionamento. Nunca diga o que fazer com o sintoma nem cite remédio.',
     '"É refluxo?", "é normal?" de quem está procurando atendimento: diga que é exatamente o que o médico avalia na consulta e ofereça marcar, sem chamar a equipe. Chame a equipe quando pedirem o que fazer agora, quando for sobre resultado de exame ou tratamento que a criança já faz, ou quando parecer urgente.',
     '',
+    // Pedido do Edu (17/10/2026): interpretar e levar para a consulta quem
+    // conta uma preocupacao, sem empurrar. CFM 2.336/2023 proibe
+    // sensacionalismo e promessa de resultado; e mae pressionada vai embora.
+    'Quando a família conta uma preocupação com a saúde da criança e não é urgência, o seu papel é ajudá-la a chegar à consulta:',
+    '- Acolha em poucas palavras ("Entendo a preocupação"), sem dizer o que é nem se é grave.',
+    '- Diga em uma frase por que vale a avaliação: é exatamente o que o médico investiga na consulta.',
+    `- Ofereça marcar de forma concreta: ${s.canal === 'Instagram' ? 'o link para marcar pelo WhatsApp' : 'veja com ver_horarios e ofereça os próximos dois ou três horários, ou abra o agendamento'}.`,
+    '- Se ela hesitar com uma dúvida ("será que precisa?", "é caro", "não tenho convênio"), responda a dúvida com o que está em <clinica> (como é a consulta, reembolso, telemedicina) e deixe a porta aberta. Uma vez só: se ela disser que não, que vai pensar ou se despedir, respeite e só se despeça.',
+    '- Nunca assuste, nunca prometa resultado e nunca pressione ("últimas vagas", "não deixe para depois").',
+    '',
     'Exemplos do jeito de responder (os fatos valem sempre os de <clinica>):',
     `Família: "o doutor pode fazer exame para meu filho?"`,
     `Você: "Pode sim! Na consulta ${s.quemAtende} avalia e, se for preciso, já pede os exames, e eles podem ser feitos pelo convênio. Quer que eu veja um horário?"`,
@@ -258,14 +275,39 @@ function instrucoes(s: Situacao, emEtapa: boolean): string {
     `Família: "meu filho ta com febre desde ontem, posso dar dipirona?"`,
     `Você: chamar_equipe com motivo medico, para_familia: "Sobre remédio, quem orienta é ${s.quemAtende}: já passei para a equipe, que responde por aqui. Se ele piorar, procure o pronto-socorro.", resumo_para_equipe: "Febre desde ontem; a mãe pergunta se pode dar dipirona."`,
     '',
-    'Urgência: se a criança parece mal agora, oriente procurar o pronto-socorro mais próximo ou ligar 192, e use chamar_equipe com motivo urgencia.',
+    // Os sinais com palavra certa o robo ja pega antes (sinalDeAlarme); estes
+    // cobrem o que chega descrito de outro jeito. Chamar a equipe com urgencia
+    // dispara o alerta no WhatsApp pessoal do medico, a qualquer hora. Dois
+    // niveis (17/10/2026): o Dr. Marcello e clinico, nao cirurgiao - a urgencia
+    // do consultorio e quase sempre "ele precisa ver logo", nao pronto-socorro.
+    `Urgência tem dois níveis, e nos dois use chamar_equipe com motivo urgencia (isso avisa ${s.quemAtende} no WhatsApp dele, a qualquer hora):`,
+    '- Risco de vida (vômito com sangue ou verde, muito sangue, engoliu pilha, bateria, ímã, moeda ou produto de limpeza, falta de ar ou lábios roxos, convulsão, não acorda ou desmaiou): em para_familia, a primeira frase manda procurar o pronto-socorro mais próximo ou ligar 192 agora.',
+    `- Urgente sem risco de vida (piorou, não para de vomitar, não faz xixi há muitas horas, muito molinha, dor forte, febre em bebê com menos de 3 meses, ou a família diz que é urgente): acolha, diga que ${s.quemAtende} foi avisado e vai avaliar, e ofereça o horário mais próximo (${s.canal === 'Instagram' ? 'pelo link do WhatsApp' : 'veja com ver_horarios antes, inclusive hoje'}). O pronto-socorro só aparece no fim, como "se for uma emergência com risco de vida".`,
     'Se perguntarem, você é o assistente virtual do consultório, e a equipe acompanha as conversas.',
-    emEtapa
-      ? `\nA família está no passo "${s.etapa}" do sistema e o sistema não entendeu a última resposta dela. A última mensagem do consultório foi:\n«${semDadosPessoais(s.ultimaDoConsultorio ?? '').slice(0, 900)}»\nSe der para traduzir o que ela quis dizer numa opção, use responder_etapa. Se ela perguntou outra coisa, responda e lembre o passo em aberto, a não ser que ele já tenha sido lembrado na última mensagem do consultório. Se ela se despediu ou disse que vai pensar, só se despeça.`
-      : '',
     '',
     `<clinica>\n${s.conhecimento}\n</clinica>`,
   ].join('\n')
+}
+
+/** O passo do sistema em que a familia esta: muda a cada mensagem, fica fora do cache. */
+function instrucoesDaEtapa(s: Situacao): string {
+  return `A família está no passo "${s.etapa}" do sistema e o sistema não entendeu a última resposta dela. A última mensagem do consultório foi:\n«${semDadosPessoais(s.ultimaDoConsultorio ?? '').slice(0, 900)}»\nSe der para traduzir o que ela quis dizer numa opção, use responder_etapa. Se ela perguntou outra coisa, responda e lembre o passo em aberto, a não ser que ele já tenha sido lembrado na última mensagem do consultório. Se ela se despediu ou disse que vai pensar, só se despeça.`
+}
+
+/**
+ * As instrucoes em blocos, com o texto fixo marcado para cache (17/10/2026).
+ *
+ * Instrucoes e <clinica> passam de alguns milhares de tokens e vao iguais em
+ * toda mensagem da clinica: com o cache a Anthropic cobra cerca de um decimo
+ * na releitura, dentro de 5 minutos. A familia escreve em rajadas e a volta
+ * do ver_horarios rele tudo, entao o cache paga a troca do Haiku pelo Sonnet.
+ * O que muda a cada mensagem (o passo em aberto) vai depois, num bloco sem
+ * cache: qualquer caractere diferente no prefixo perderia o cache inteiro.
+ */
+export function sistemaDoClaude(s: Situacao, emEtapa: boolean): Record<string, unknown>[] {
+  const blocos: Record<string, unknown>[] = [{ type: 'text', text: instrucoes(s), cache_control: { type: 'ephemeral' } }]
+  if (emEtapa) blocos.push({ type: 'text', text: instrucoesDaEtapa(s) })
+  return blocos
 }
 
 function contexto(s: Situacao): string {
@@ -280,7 +322,7 @@ function contexto(s: Situacao): string {
     `Crianças cadastradas neste telefone: ${s.criancas.length ? s.criancas.join(', ') : 'nenhuma (contato novo)'}.`,
     `Consultas marcadas: ${s.consultas.length ? s.consultas.join('; ') : 'nenhuma'}.`,
     ...(relatoDeSintoma(s.texto)
-      ? ['Atenção: a mensagem nova fala de sintoma ou remédio. Responda o que for do serviço; o que fazer com a criança é da equipe (chamar_equipe, medico).']
+      ? ['Atenção: a mensagem nova fala de sintoma ou remédio. O que fazer com a criança é da equipe (chamar_equipe, medico); se ela conta o sintoma procurando atendimento, acolha e ofereça a consulta; se parecer urgente, motivo urgencia.']
       : []),
     '</contexto>',
     '<conversa>',
@@ -313,7 +355,7 @@ export function relatoDeSintoma(texto: string): boolean {
 export function ficaComORobo(s: Situacao): string | null {
   if (s.equipeConversando) return 'equipe_conversando'
   if (s.anexo) return 'anexo'
-  if (pediuUrgencia(s.texto)) return 'urgencia'
+  if (pediuUrgencia(s.texto) || sinalDeAlarme(s.texto)) return 'urgencia'
   if (respostaAutomaticaDaFamilia(s.texto)) return 'resposta_automatica'
   return null
 }
@@ -415,6 +457,7 @@ export function falaComAEquipe(texto: string): boolean {
 }
 
 const AVISO_PADRAO = 'Vou confirmar isso com a equipe e te respondemos por aqui.'
+const AVISO_DE_URGENCIA = 'Se for uma emergência com risco de vida, procure o pronto-socorro mais próximo ou ligue 192.'
 
 /**
  * O Claude deu conduta numa mensagem com sintoma? (16/10/2026)
@@ -471,7 +514,7 @@ async function conversarComClaude(
     const resta = fim - Date.now()
     if (resta < 1500) throw new Error('prazo esgotado')
     const resposta = await chamar(
-      { model: modelo, max_tokens: 700, system: instrucoes(s, emEtapa), tools: ferramentasDoClaude(emEtapa), messages: mensagens },
+      { model: modelo, max_tokens: 700, system: sistemaDoClaude(s, emEtapa), tools: ferramentasDoClaude(emEtapa), messages: mensagens },
       resta,
     )
     const blocos = Array.isArray(resposta?.content) ? resposta.content : []
@@ -548,6 +591,10 @@ async function conversarComClaude(
           resumo = [resumo, aviso].filter(Boolean).join('\n\n')
           aviso = AVISO_PADRAO
         }
+        // Urgencia sem pronto-socorro no texto (17/10/2026): a instrucao pede,
+        // mas e a frase que nao pode faltar. Vai no fim, condicionada ao risco
+        // de vida: na urgencia comum quem resolve e a consulta (pedido do Edu).
+        if (motivo === 'urgencia' && !PRONTO_SOCORRO.test(aviso)) aviso = `${aviso}\n\n${AVISO_DE_URGENCIA}`
         return {
           resultado: await ferramentas.equipe(MOTIVOS[motivo] ?? 'atendente', aviso.slice(0, 800)),
           acao: `equipe:${motivo}`,

@@ -12,7 +12,7 @@ import type {
 import type { PatientDraft } from '@/lib/store'
 import type { Database } from '@/types/database'
 import { buscarTodas } from '@/lib/paginar'
-import { comNonoDigito } from '../../supabase/functions/_shared/telefone-br.ts'
+import { comNonoDigito, paraEnvio } from '../../supabase/functions/_shared/telefone-br.ts'
 
 type PatientInsert = Database['public']['Tables']['patients']['Insert']
 type PatientUpdate = Database['public']['Tables']['patients']['Update']
@@ -2191,6 +2191,63 @@ export async function getConhecimentoIA(clinicId: string): Promise<string | null
     return (data as { assistente_ia_conhecimento?: string | null } | null)?.assistente_ia_conhecimento ?? ''
   } catch (erro) {
     console.warn('Sem clinic_settings.assistente_ia_conhecimento', erro)
+    return null
+  }
+}
+
+/**
+ * Os celulares que recebem o alerta de urgencia no WhatsApp (17/10/2026). Ver
+ * supabase/functions/_shared/alerta-de-urgencia.ts. Coluna nova: sem ela,
+ * nulo, e a tela avisa que a atualizacao do banco ainda nao chegou.
+ */
+export async function getAlertaUrgencia(clinicId: string): Promise<string[] | null> {
+  try {
+    const { data, error } = await semTipo
+      .from('clinic_settings')
+      .select('alerta_urgencia_telefones')
+      .eq('clinic_id', clinicId)
+      .maybeSingle()
+    if (error) throw error
+    const lista = (data as { alerta_urgencia_telefones?: unknown } | null)?.alerta_urgencia_telefones
+    return Array.isArray(lista) ? lista.map(String) : []
+  } catch (erro) {
+    console.warn('Sem clinic_settings.alerta_urgencia_telefones', erro)
+    return null
+  }
+}
+
+/** Grava 55 + DDD + celular, sem repetir; o que nao e celular sai antes. */
+export function numerosParaOAlerta(texto: string): string[] {
+  const numeros = texto
+    .split(/[\n,;]+/)
+    .map((linha) => linha.replace(/\D/g, ''))
+    .filter((digitos) => digitos.length >= 10)
+    .map((digitos) => paraEnvio(digitos))
+    .filter((numero) => numero.length === 12 || numero.length === 13)
+  return [...new Set(numeros)]
+}
+
+export async function saveAlertaUrgencia(clinicId: string, numeros: string[]) {
+  const { error } = await semTipo.from('clinic_settings').update({ alerta_urgencia_telefones: numeros }).eq('clinic_id', clinicId)
+  if (error) fail(error)
+}
+
+/** O ultimo alerta que saiu (ou falhou), para a tela mostrar sem ninguem ir ao log. */
+export async function getUltimoAlertaUrgencia(clinicId: string): Promise<{ quando: string; detalhe: string } | null> {
+  try {
+    const { data, error } = await semTipo
+      .from('whatsapp_bot_events')
+      .select('criado_em,detalhe')
+      .eq('clinic_id', clinicId)
+      .eq('evento', 'alerta_urgencia')
+      .order('criado_em', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (error) throw error
+    const linha = data as { criado_em: string; detalhe: string } | null
+    return linha ? { quando: linha.criado_em, detalhe: linha.detalhe } : null
+  } catch (erro) {
+    console.warn('Nao li o ultimo alerta de urgencia', erro)
     return null
   }
 }

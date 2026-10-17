@@ -30,7 +30,8 @@ import {
   textoDosContatos,
 } from '../_shared/mensagem-recebida.ts'
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
-import { montarAviso } from '../_shared/aviso-da-equipe.ts'
+import { montarAviso, quemEscreveu } from '../_shared/aviso-da-equipe.ts'
+import { deveAlertar, enviarAlertaDeUrgencia } from '../_shared/alerta-de-urgencia.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
 import {
   ESPERA_MAXIMA_MS,
@@ -1293,6 +1294,30 @@ Deno.serve(async (req) => {
                 const envio = avisarEquipe(admin, clinicId, aviso)
                 if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(envio)
                 else await envio
+              }
+              // Alerta no WhatsApp pessoal do medico (17/10/2026), a qualquer
+              // hora. Ver _shared/alerta-de-urgencia.ts.
+              if (
+                deveAlertar({
+                  atencaoAntes: Boolean(conversaAnterior?.needs_attention),
+                  motivoAntes: (conversaAnterior?.attention_reason as string | null) ?? null,
+                  motivoAgora,
+                })
+              ) {
+                const alerta = enviarAlertaDeUrgencia(admin, {
+                  clinicId,
+                  canal: 'WhatsApp',
+                  quem: quemEscreveu({
+                    pacientes,
+                    nomeDoPerfil: nomeDoPerfil || String(conversaAnterior?.profile_name ?? ''),
+                    telefone: waId,
+                  }),
+                  texto: body,
+                  agora: new Date(),
+                  conversaWhatsApp: conversation.id,
+                })
+                if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(alerta)
+                else await alerta
               }
             } catch (erro) {
               console.warn('Notificacao no celular: nao consegui montar o aviso', erro)

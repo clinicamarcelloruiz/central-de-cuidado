@@ -183,6 +183,14 @@ export async function desativarNotificacoes(clinicId: string): Promise<void> {
   // clinica, e ela e a mesma para todas.
 }
 
+/** O alerta de urgencia de teste, no WhatsApp dos numeros salvos (17/10/2026). */
+export async function testarAlertaUrgencia(clinicId: string): Promise<{ nota: string; falhou: boolean }> {
+  const { data, error } = await supabase.functions.invoke('notificar-equipe', { body: { acao: 'alerta_teste', clinicId } })
+  if (error) throw new Error(await erroDaFuncao(error))
+  const r = data as { nota?: string; falhou?: boolean }
+  return { nota: r?.nota ?? 'Sem resposta do servidor.', falhou: Boolean(r?.falhou) }
+}
+
 export async function testarNotificacao(clinicId: string): Promise<{ enviados: number; falhas: string[] }> {
   const { data, error } = await supabase.functions.invoke('notificar-equipe', { body: { acao: 'teste', clinicId } })
   if (error) throw new Error(await erroDaFuncao(error))

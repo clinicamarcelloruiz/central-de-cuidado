@@ -54,6 +54,14 @@ const MODELOS = {
   },
   resposta_da_clinica: {
     corpo: "Ol\xE1, {{1}}. Aqui \xE9 o consult\xF3rio do Dr. Marcello Ruiz.\n\n{{2}}\n\nSe precisar, \xE9 s\xF3 responder por aqui."
+  },
+  // Alerta de urgencia no WhatsApp pessoal do medico e do Edu (17/10/2026).
+  // Nao vai para familia nenhuma: e o aviso de que uma familia relatou
+  // urgencia. Categoria Utilidade. Ver alerta-de-urgencia.ts.
+  // Neutro de proposito: na urgencia sem risco de vida o robo oferece o
+  // horario mais proximo; so no risco de vida manda ao pronto-socorro.
+  alerta_urgencia: {
+    corpo: '\u{1F6A8} Poss\xEDvel urg\xEAncia na Central de Cuidado.\n\n{{1}} escreveu pelo {{2}} \xE0s {{3}}:\n"{{4}}"\n\nO rob\xF4 j\xE1 orientou a fam\xEDlia. Veja a conversa na Central de Cuidado para avaliar e responder.'
   }
 };
 function parametrosDoAcompanhamento(nomeDoModelo, nomeDoPaciente, data) {
