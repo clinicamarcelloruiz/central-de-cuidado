@@ -9,6 +9,7 @@ import {
   entrarComInstagram,
   estadoDoInstagram,
   salvarRoboInstagram,
+  ultimaBuscaDeComentarios,
   type ContaInstagram,
 } from '@/lib/instagram'
 
@@ -25,6 +26,35 @@ function diasAte(iso: string | null) {
   return Math.floor((Date.parse(iso) - Date.now()) / 86400000)
 }
 
+/**
+ * A busca automatica de comentarios roda a cada 10 minutos (agendador do banco).
+ * Passou de 30 sem rodar, a linha fica vermelha: agendador parado nao pode ser
+ * silencioso (lembrete da vespera, setembro de 2026).
+ */
+function minutosDesde(iso: string | null) {
+  if (!iso) return null
+  return Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 60000))
+}
+
+function LinhaDaBusca({ ultima }: { ultima: string | null }) {
+  const minutos = minutosDesde(ultima)
+  const parou = minutos !== null && minutos > 30
+  const quando = minutos === null ? 'ainda não rodou' : minutos < 1 ? 'agora há pouco' : minutos < 120 ? `há ${minutos} min` : `há ${Math.floor(minutos / 60)} h`
+  const cor = parou
+    ? 'border border-red-200 bg-red-50 text-red-700'
+    : minutos === null
+      ? 'border border-amber-200 bg-amber-50 text-amber-800'
+      : 'bg-[#f8f7f4] text-slate-500'
+  return (
+    <p className={`flex gap-2 rounded-[16px] px-4 py-2.5 text-[11px] leading-relaxed ${cor}`}>
+      {(parou || minutos === null) && <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+      <span>
+        Busca automática de comentários (a cada 10 min): última {quando}.{parou ? ' Parou de rodar: avise o suporte.' : ''}
+      </span>
+    </p>
+  )
+}
+
 export default function InstagramConexao({ clinicId }: { clinicId: string | null }) {
   const { avisar } = useDialogos()
   const [estado, setEstado] = useState<{ disponivel: boolean; conta: ContaInstagram | null } | null>(null)
@@ -32,11 +62,14 @@ export default function InstagramConexao({ clinicId }: { clinicId: string | null
   const [whatsapp, setWhatsapp] = useState('')
   const [ocupado, setOcupado] = useState(false)
 
+  const [ultimaBusca, setUltimaBusca] = useState<string | null | undefined>(undefined)
+
   async function carregar() {
     if (!clinicId) return
     const e = await estadoDoInstagram(clinicId)
     setEstado(e)
     if (e.conta) setWhatsapp(e.conta.whatsapp)
+    if (e.conta) setUltimaBusca(await ultimaBuscaDeComentarios(clinicId))
   }
 
   useEffect(() => {
@@ -185,6 +218,7 @@ export default function InstagramConexao({ clinicId }: { clinicId: string | null
                 )
               })}
             </div>
+            {ultimaBusca !== undefined && <LinhaDaBusca ultima={ultimaBusca} />}
             <div className="flex flex-wrap items-end gap-2">
               <label className="flex-1 text-[10px] font-extrabold text-[#081b2c]">
                 WhatsApp do link de agendamento

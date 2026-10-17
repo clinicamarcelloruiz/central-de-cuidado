@@ -19,6 +19,7 @@ import {
   responderDirect,
   semFormatacaoDoWhatsApp,
   semInstrucoesDoRobo,
+  separarComentariosDaBusca,
   tokenPrecisaRenovar,
 } from './instagram.build.mjs'
 
@@ -193,6 +194,7 @@ confere('frase do link e a testada no simulador', FRASE_DO_LINK === 'Olá! Vim p
   confere('login vai para o Instagram', u.origin === 'https://www.instagram.com' && u.pathname === '/oauth/authorize', u.href)
   confere('login pede codigo e volta para a pagina de retorno', u.searchParams.get('response_type') === 'code' && u.searchParams.get('redirect_uri') === volta, u.href)
   confere('login leva o state', u.searchParams.get('state') === 'abc-123')
+  confere('login pede para escolher a conta', u.searchParams.get('force_reauth') === 'true')
   confere(
     'login pede as tres permissoes',
     u.searchParams.get('scope') === 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments',
@@ -231,6 +233,17 @@ confere('frase do link e a testada no simulador', FRASE_DO_LINK === 'Olá! Vim p
   confere('pedido de contato vai para a equipe', c1?.precisa_equipe === true)
   confere('elogio nao vai para a equipe', r.find((l) => l.comment_id === 'c2')?.precisa_equipe === false)
   confere('pergunta vai para a equipe', r.find((l) => l.comment_id === 'c6')?.precisa_equipe === true)
+
+  // Busca automatica: so o comentario novo recebe resposta sozinho.
+  const s = separarComentariosDaBusca(r, new Set(), agora)
+  confere('comentario de 10 min: robo responde', s.responder.map((l) => l.comment_id).join() === 'c1', s.responder.map((l) => l.comment_id).join())
+  confere('comentario de horas atras: so vai para a lista', s.soGravar.map((l) => l.comment_id).join() === 'c2,c6', s.soGravar.map((l) => l.comment_id).join())
+  const g = separarComentariosDaBusca(r, new Set(['c1']), agora)
+  confere('comentario ja gravado nao volta', !g.responder.length && !g.soGravar.some((l) => l.comment_id === 'c1'))
+  const limite = separarComentariosDaBusca(r, new Set(), new Date('2026-10-16T22:50:31Z'))
+  confere('30 minutos certos ainda responde', limite.responder.map((l) => l.comment_id).join() === 'c1')
+  const passou = separarComentariosDaBusca(r, new Set(), new Date('2026-10-16T22:50:32Z'))
+  confere('30 minutos e 1 segundo nao responde', !passou.responder.length && passou.soGravar.some((l) => l.comment_id === 'c1'))
 }
 
 // ---------------------------------------------------------------- conhecimento da IA

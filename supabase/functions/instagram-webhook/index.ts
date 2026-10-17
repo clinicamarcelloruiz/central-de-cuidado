@@ -16,7 +16,10 @@ import { RegistroDeEventos } from '../_shared/eventos-do-webhook.ts'
 import {
   comentarioEPergunta,
   comentarioPedeContato,
+  comentariosParaImportar,
   conhecimentoParaOInstagram,
+  separarComentariosDaBusca,
+  type ComentarioParaGravar,
   respostaDoFluxo,
   respostaPrivadaAoComentario,
   respostaPublicaAoComentario,
@@ -28,8 +31,10 @@ import {
   type RespostaDoDirect,
 } from '../_shared/instagram.ts'
 import {
+  comentariosDoPost,
   enviarDirect,
   perfilDe,
+  postsRecentes,
   renovarToken,
   responderComentarioEmPublico,
   responderComentarioNoDirect,
@@ -442,8 +447,126 @@ async function tratarComentario(admin: Admin, conta: Conta, valor: Record<string
   registro.concluir()
 }
 
+// ---------------------------------------------------------------- busca automatica de comentarios
+
+const COLUNAS_DA_CONTA = 'clinic_id,ig_user_id,username,access_token,whatsapp,token_expira_em,robo_direct,robo_comentarios'
+
+/**
+ * Uma rodada da busca automatica para uma conta (ver separarComentariosDaBusca).
+ * O comentario novo passa pelo mesmo tratarComentario do aviso da Meta: o
+ * registro de eventos (ig:comment:<id>) e o mesmo, entao se um dia o aviso
+ * chegar tambem, ele e descartado como repetido.
+ */
+async function buscarComentariosDaConta(admin: Admin, conta: Conta): Promise<{ tratados: number; gravados: number; falhas: number }> {
+  const inicio = new Date()
+  const posts = await postsRecentes(conta, 10)
+  if (!posts.ok) {
+    await registrarErroDaConta(admin, conta, `Busca automática de comentários: ${posts.erro}`)
+    return { tratados: 0, gravados: 0, falhas: 1 }
+  }
+  const linhas: ComentarioParaGravar[] = []
+  const erros: string[] = []
+  for (const mediaId of posts.ids) {
+    const r = await comentariosDoPost(conta, mediaId)
+    if (!r.ok) erros.push(r.erro)
+    else linhas.push(...comentariosParaImportar(mediaId, r.lista, { igUserId: conta.ig_user_id, username: conta.username }, inicio))
+  }
+
+  const ids = linhas.map((l) => l.comment_id)
+  const jaGravados = new Set<string>()
+  if (ids.length) {
+    const { data, error } = await admin.from('instagram_comentarios').select('comment_id').in('comment_id', ids)
+    // Sem saber o que ja foi tratado, responder seria arriscar resposta dobrada: para aqui e grita.
+    if (error) throw error
+    for (const d of data ?? []) jaGravados.add(String((d as { comment_id: string }).comment_id))
+  }
+  const { responder, soGravar } = separarComentariosDaBusca(linhas, jaGravados, inicio)
+
+  if (soGravar.length) {
+    const { error } = await admin
+      .from('instagram_comentarios')
+      .upsert(soGravar.map((l) => ({ ...l, clinic_id: conta.clinic_id })), { onConflict: 'comment_id', ignoreDuplicates: true })
+    if (error) erros.push(`gravar comentários: ${error.message}`)
+  }
+
+  const registro = new RegistroDeEventos({
+    inserir: (linha) => admin.from('whatsapp_webhook_events').insert(linha),
+    apagar: (chave) => admin.from('whatsapp_webhook_events').delete().eq('event_key', chave),
+  })
+  let contexto: Promise<Omit<ContextoDoDirect, 'primeiraVez'>> | null = null
+  const ctx = () => (contexto ??= montarContexto(admin, conta))
+  let tratados = 0
+  for (const l of responder) {
+    const valor = {
+      id: l.comment_id,
+      text: l.texto,
+      // Sem o id do autor (campo "from" ausente), o @ serve: tratarComentario so precisa saber que nao e a propria conta.
+      from: { id: l.autor_id ?? `@${l.autor_username ?? 'desconhecido'}`, username: l.autor_username ?? '' },
+      media: { id: l.media_id },
+    }
+    try {
+      await tratarComentario(admin, conta, valor, registro, ctx)
+      tratados++
+    } catch (erro) {
+      // Libera a chave do comentario: a proxima rodada (10 min) tenta de novo.
+      await registro.desfazerEmCurso()
+      erros.push(`comentário ${l.comment_id}: ${String(erro).slice(0, 120)}`)
+    }
+  }
+
+  if (erros.length) await registrarErroDaConta(admin, conta, `Busca automática de comentários: ${erros.length} falha(s), ${erros[0]}`)
+  // A hora da ultima rodada e o que a tela mostra ("ultima busca ha X min"):
+  // se o agendador parar, o cartao fica vermelho em vez de a busca sumir em
+  // silencio, como o lembrete da vespera em setembro. Coluna nova: em try/catch.
+  try {
+    const { error } = await admin.from('instagram_contas').update({ comentarios_buscados_em: inicio.toISOString() }).eq('clinic_id', conta.clinic_id)
+    if (error) console.error('Instagram: nao gravei a hora da busca de comentarios (coluna nova chegou?)', error)
+  } catch (erro) {
+    console.error('Instagram: nao gravei a hora da busca de comentarios', erro)
+  }
+  return { tratados, gravados: soGravar.length, falhas: erros.length }
+}
+
+/** Chamada do agendador do banco (private.buscar_comentarios_do_instagram), a cada 10 minutos. */
+async function rodadaDeComentarios(req: Request): Promise<Response> {
+  const esperado = Deno.env.get('CRON_SECRET')?.trim()
+  if (!esperado) {
+    console.error('instagram-webhook: CRON_SECRET ausente; a busca automatica de comentarios nao roda')
+    return text('CRON_SECRET não configurado', 503)
+  }
+  if (req.headers.get('x-cron-secret')?.trim() !== esperado) {
+    console.error('instagram-webhook: busca de comentarios com segredo do agendador errado')
+    return text('Não autorizado', 401)
+  }
+  const admin = adminClient()
+  const { data: contas, error } = await admin.from('instagram_contas').select(COLUNAS_DA_CONTA)
+  if (error) {
+    console.error('instagram-webhook: busca de comentarios sem as contas', error)
+    return text('Falhou', 500)
+  }
+  const resumo = { contas: 0, tratados: 0, gravados: 0, falhas: 0 }
+  for (const conta of (contas ?? []) as Conta[]) {
+    resumo.contas++
+    try {
+      const r = await buscarComentariosDaConta(admin, conta)
+      resumo.tratados += r.tratados
+      resumo.gravados += r.gravados
+      resumo.falhas += r.falhas
+    } catch (erro) {
+      resumo.falhas++
+      console.error('instagram-webhook: busca de comentarios falhou', conta.clinic_id, erro)
+      await registrarErroDaConta(admin, conta, `Busca automática de comentários: ${String(erro).slice(0, 200)}`).catch(() => undefined)
+    }
+  }
+  if (resumo.falhas) console.warn('instagram-webhook: busca de comentarios com falhas', resumo)
+  return new Response(JSON.stringify(resumo), { headers: { 'Content-Type': 'application/json' } })
+}
+
 Deno.serve(async (req) => {
   const url = new URL(req.url)
+
+  // O agendador do banco chama com x-cron-secret; a Meta, com x-hub-signature-256.
+  if (req.method === 'POST' && req.headers.has('x-cron-secret')) return await rodadaDeComentarios(req)
 
   if (req.method === 'GET') {
     const esperado = (Deno.env.get('INSTAGRAM_VERIFY_TOKEN') || Deno.env.get('WHATSAPP_VERIFY_TOKEN'))?.trim()
@@ -477,7 +600,7 @@ Deno.serve(async (req) => {
       if (!igUserId) continue
       const { data: conta, error } = await admin
         .from('instagram_contas')
-        .select('clinic_id,ig_user_id,username,access_token,whatsapp,token_expira_em,robo_direct,robo_comentarios')
+        .select(COLUNAS_DA_CONTA)
         .eq('ig_user_id', igUserId)
         .maybeSingle()
       if (error) throw error

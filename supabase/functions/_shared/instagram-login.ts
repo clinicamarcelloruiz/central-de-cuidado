@@ -29,6 +29,9 @@ export const PAGINA_DE_VOLTA = 'instagram-retorno.html'
 
 export function enderecoDoLogin(redirectUri: string, state: string, appId: string = INSTAGRAM_APP_ID): string {
   const p = new URLSearchParams({
+    // Como no link que o painel da Meta gera: pede para entrar de novo, e quem
+    // conecta escolhe a conta certa (a clinica, nao o Instagram pessoal aberto).
+    force_reauth: 'true',
     client_id: appId,
     redirect_uri: redirectUri,
     response_type: 'code',

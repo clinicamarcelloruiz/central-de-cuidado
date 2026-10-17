@@ -421,6 +421,40 @@ export function comentariosParaImportar(
   return linhas
 }
 
+/** A busca automatica roda a cada 10 minutos; 30 de janela deixa duas rodadas de folga. */
+export const JANELA_DA_RESPOSTA_AUTOMATICA_MS = 30 * 60 * 1000
+
+/**
+ * Busca automatica de comentarios (16/10/2026, pedido do Edu): o aviso de
+ * comentario da Meta so vem para "Tech Provider", cadastro sem volta que a
+ * clinica nao quis. A cada 10 minutos o sistema busca os comentarios e:
+ *
+ *   responder  comentario novo de ate 30 minutos: o robo trata como se fosse o
+ *              aviso da Meta (link no direct, "te mandei no direct" no post)
+ *   soGravar   comentario mais antigo: entra na lista da equipe, sem resposta
+ *              sozinha. Assim ligar a busca nao manda mensagem para quem
+ *              comentou dias atras, e uma busca parada por uma hora nao vira
+ *              uma rajada de respostas atrasadas quando volta.
+ *
+ * Comentario que ja esta no banco (webhook, botao ou rodada anterior) nunca
+ * volta: quem cuidou dele antes ja cuidou.
+ */
+export function separarComentariosDaBusca(
+  linhas: ComentarioParaGravar[],
+  jaGravados: Set<string>,
+  agora: Date = new Date(),
+): { responder: ComentarioParaGravar[]; soGravar: ComentarioParaGravar[] } {
+  const responder: ComentarioParaGravar[] = []
+  const soGravar: ComentarioParaGravar[] = []
+  for (const l of linhas) {
+    if (jaGravados.has(l.comment_id)) continue
+    const idade = agora.getTime() - Date.parse(l.created_at)
+    if (idade <= JANELA_DA_RESPOSTA_AUTOMATICA_MS) responder.push(l)
+    else soGravar.push(l)
+  }
+  return { responder, soGravar }
+}
+
 /** Token de longa duracao: 60 dias. Renova quando faltam menos de 15. */
 export function tokenPrecisaRenovar(expiraEm: string | null | undefined, agora: Date = new Date()): boolean {
   if (!expiraEm) return true

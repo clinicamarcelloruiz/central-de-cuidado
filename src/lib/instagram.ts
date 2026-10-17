@@ -87,6 +87,22 @@ export async function estadoDoInstagram(clinicId: string): Promise<{ disponivel:
   }
 }
 
+/**
+ * Hora da ultima busca automatica de comentarios (coluna de 16/10/2026, em
+ * consulta separada: sem ela no banco, some so esta linha do cartao).
+ * undefined = o banco ainda nao tem a coluna; null = a busca nunca rodou.
+ */
+export async function ultimaBuscaDeComentarios(clinicId: string): Promise<string | null | undefined> {
+  try {
+    const { data, error } = await semTipo.from('instagram_contas').select('comentarios_buscados_em').eq('clinic_id', clinicId).maybeSingle()
+    if (error) throw error
+    return ((data as { comentarios_buscados_em?: string | null } | null)?.comentarios_buscados_em ?? null) as string | null
+  } catch (erro) {
+    console.warn('Instagram: sem a coluna comentarios_buscados_em (atualizacao do banco ainda nao chegou?)', erro)
+    return undefined
+  }
+}
+
 export async function listarConversasInstagram(clinicId: string): Promise<ConversaInstagram[]> {
   const { data, error } = await semTipo
     .from('instagram_conversas')
