@@ -27,6 +27,21 @@ import { chaveDoWhatsApp } from './whatsapp-teste.ts'
  */
 
 export const MODELO_DO_ALERTA = 'alerta_urgencia'
+// Com os botoes de resposta (17/10/2026, ver resposta-ao-alerta.ts). Enquanto a
+// Meta nao aprova, o envio cai sozinho no modelo sem botoes.
+export const MODELO_COM_BOTOES = 'alerta_urgencia_v2'
+
+export type Veredito = 'urgente' | 'aguardar' | 'responde'
+
+/** Os botoes do modelo, na ordem cadastrada na Meta. */
+export const BOTOES_DO_ALERTA: { veredito: Veredito; titulo: string }[] = [
+  { veredito: 'urgente', titulo: 'É urgente' },
+  { veredito: 'aguardar', titulo: 'Pode aguardar' },
+  { veredito: 'responde', titulo: 'Eu respondo' },
+]
+
+/** O que volta no webhook quando o medico toca: qual alerta e qual botao. */
+export const payloadDoVeredito = (alertaId: string, veredito: Veredito) => `URG:${alertaId}:${veredito}`
 
 // Coluna nova: o resto do clinic_settings e lido em consulta separada.
 type Admin = { from: (tabela: string) => any } // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -111,7 +126,7 @@ export function descreverEnvio(envios: EnvioDoAlerta[]): { detalhe: string; nota
   }
 }
 
-async function lerNumeros(admin: Admin, clinicId: string): Promise<string[]> {
+export async function lerNumeros(admin: Admin, clinicId: string): Promise<string[]> {
   try {
     const { data, error } = await admin.from('clinic_settings').select('alerta_urgencia_telefones').eq('clinic_id', clinicId).maybeSingle()
     if (error) throw error
@@ -120,6 +135,33 @@ async function lerNumeros(admin: Admin, clinicId: string): Promise<string[]> {
     // Banco sem a coluna (migration nao chegou): nada a enviar, mas grita.
     console.error('Alerta de urgencia: sem clinic_settings.alerta_urgencia_telefones', erro)
     return []
+  }
+}
+
+/** 132001: modelo inexistente ou ainda nao aprovado nesse idioma. */
+function modeloInexistente(corpo: { error?: { code?: number; message?: string } } | null): boolean {
+  return corpo?.error?.code === 132001 || /template name does not exist|does not exist in/i.test(String(corpo?.error?.message ?? ''))
+}
+
+async function registrarAlerta(admin: Admin, p: PedidoDeAlerta): Promise<string | null> {
+  try {
+    const { data, error } = await admin
+      .from('alertas_de_urgencia')
+      .insert({
+        clinic_id: p.clinicId,
+        canal: p.canal,
+        conversa_whatsapp: p.conversaWhatsApp ?? null,
+        conversa_instagram: p.conversaInstagram ?? null,
+        teste: !p.conversaWhatsApp && !p.conversaInstagram,
+        quem: String(p.quem ?? '').slice(0, 120),
+      })
+      .select('id')
+      .single()
+    if (error) throw error
+    return (data as { id: string }).id
+  } catch (erro) {
+    console.error('Alerta de urgencia: nao registrei o alerta; vai sem botoes de resposta', erro)
+    return null
   }
 }
 
@@ -157,15 +199,25 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
     const numeroDoRobo = (ajustes as { whatsapp_phone_number_id?: string } | null)?.whatsapp_phone_number_id
     const token = chaveDoWhatsApp(numeroDoRobo)
     const versao = (typeof Deno !== 'undefined' ? Deno.env.get('META_GRAPH_VERSION')?.trim() : '') || 'v25.0'
+    const idioma = (ajustes as { whatsapp_template_language?: string } | null)?.whatsapp_template_language || 'pt_BR'
     const parametros = parametrosDoAlerta(p)
+    const corpoDoModelo = { type: 'body', parameters: parametros.map((text) => ({ type: 'text', text })) }
+
+    // O alerta fica registrado antes de sair: e o id dele que vai nos botoes.
+    // Sem a tabela (migration nao chegou), sai sem botoes, como antes.
+    const alertaId = await registrarAlerta(admin, p)
+    // Com botoes so quando ha alerta registrado; se a Meta disser que o modelo
+    // com botoes nao existe (ainda em analise), o resto vai pelo sem botoes.
+    let comBotoes = Boolean(alertaId)
 
     const envios: EnvioDoAlerta[] = []
+    const mensagens: string[] = []
     for (const numero of numeros) {
       if (!numeroDoRobo || !token) {
         envios.push({ numero, ok: false, erro: 'WhatsApp da clínica sem número ou token no servidor' })
         continue
       }
-      try {
+      const enviar = async (botoes: boolean) => {
         const resposta = await buscar(`https://graph.facebook.com/${versao}/${numeroDoRobo}/messages`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -174,21 +226,50 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
             recipient_type: 'individual',
             to: numero,
             type: 'template',
-            template: {
-              name: MODELO_DO_ALERTA,
-              language: { code: (ajustes as { whatsapp_template_language?: string } | null)?.whatsapp_template_language || 'pt_BR' },
-              components: [{ type: 'body', parameters: parametros.map((text) => ({ type: 'text', text })) }],
-            },
+            template: botoes
+              ? {
+                  name: MODELO_COM_BOTOES,
+                  language: { code: idioma },
+                  components: [
+                    corpoDoModelo,
+                    ...BOTOES_DO_ALERTA.map((b, i) => ({
+                      type: 'button',
+                      sub_type: 'quick_reply',
+                      index: String(i),
+                      parameters: [{ type: 'payload', payload: payloadDoVeredito(alertaId!, b.veredito) }],
+                    })),
+                  ],
+                }
+              : { name: MODELO_DO_ALERTA, language: { code: idioma }, components: [corpoDoModelo] },
           }),
         })
-        const corpo = await resposta.json().catch(() => ({}))
-        if (resposta.ok) envios.push({ numero, ok: true })
-        else {
-          const codigo = corpo?.error?.code ? `(#${corpo.error.code}) ` : ''
-          envios.push({ numero, ok: false, erro: `${codigo}${corpo?.error?.message ?? `HTTP ${resposta.status}`}` })
+        return { ok: resposta.ok, status: resposta.status, corpo: await resposta.json().catch(() => ({})) }
+      }
+      try {
+        let r = await enviar(comBotoes)
+        if (!r.ok && comBotoes && modeloInexistente(r.corpo)) {
+          console.warn(`Alerta de urgencia: ${MODELO_COM_BOTOES} ainda nao aprovado; vai o modelo sem botoes`)
+          comBotoes = false
+          r = await enviar(false)
+        }
+        if (r.ok) {
+          envios.push({ numero, ok: true })
+          const id = r.corpo?.messages?.[0]?.id
+          if (id) mensagens.push(String(id))
+        } else {
+          const codigo = r.corpo?.error?.code ? `(#${r.corpo.error.code}) ` : ''
+          envios.push({ numero, ok: false, erro: `${codigo}${r.corpo?.error?.message ?? `HTTP ${r.status}`}` })
         }
       } catch (erro) {
         envios.push({ numero, ok: false, erro: String(erro).slice(0, 200) })
+      }
+    }
+    if (alertaId && mensagens.length) {
+      try {
+        const { error } = await admin.from('alertas_de_urgencia').update({ mensagens }).eq('id', alertaId)
+        if (error) console.error('Alerta de urgencia: ids das mensagens nao gravados', error)
+      } catch (erro) {
+        console.error('Alerta de urgencia: ids das mensagens nao gravados', erro)
       }
     }
 

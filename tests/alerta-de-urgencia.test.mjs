@@ -3,6 +3,7 @@
 // banco: um fetch de mentira e um admin que guarda o que foi gravado.
 import { deveAlertar, descreverEnvio, enviarAlertaDeUrgencia, MODELO_DO_ALERTA, numerosDoAlerta, parametrosDoAlerta } from './alerta-de-urgencia.build.mjs'
 import { textoDoModelo } from './modelos.build.mjs'
+import { bancoFalso } from './fixtures/banco-falso.mjs'
 
 let ok = 0
 const falhas = []
@@ -123,6 +124,46 @@ const pedido = { clinicId: 'c1', canal: 'WhatsApp', quem: 'Helena', texto: 'ela 
   await enviarAlertaDeUrgencia(admin, { ...pedido, canal: 'Instagram', conversaWhatsApp: undefined, conversaInstagram: 'ig-1' }, async () => ({ ok: true, status: 200, json: async () => ({}) }))
   confere('instagram: nota no direct', admin.gravado.some(([t, l]) => t === 'instagram_mensagens' && l.direcao === 'nota' && l.conversa_id === 'ig-1'))
   confere('instagram: sem evento do whatsapp', !admin.gravado.some(([t]) => t === 'whatsapp_bot_events'))
+}
+
+// 6. Com a tabela dos alertas (17/10/2026): registrado e com os botoes de
+// resposta, que levam o id do alerta. Ver resposta-ao-alerta.ts.
+const ajustesComNumeros = () => bancoFalso({
+  clinic_settings: [{ clinic_id: 'c1', whatsapp_phone_number_id: '123', whatsapp_template_language: 'pt_BR', alerta_urgencia_telefones: ['5513997039614', '5511988887777'] }],
+  alertas_de_urgencia: [],
+})
+{
+  const banco = ajustesComNumeros()
+  const enviados = []
+  const meta = async (url, init) => {
+    enviados.push(JSON.parse(init.body))
+    return { ok: true, status: 200, json: async () => ({ messages: [{ id: `wamid.${enviados.length}` }] }) }
+  }
+  await enviarAlertaDeUrgencia(banco, pedido, meta)
+  const registrado = banco.db.alertas_de_urgencia[0]
+  confere('v2: alerta registrado', registrado?.quem === 'Helena' && registrado.conversa_whatsapp === 'conv-1' && registrado.teste === false)
+  confere('v2: modelo com botoes', enviados[0]?.template?.name === 'alerta_urgencia_v2', enviados[0]?.template?.name)
+  const botoes = (enviados[0]?.template?.components ?? []).filter((c) => c.type === 'button')
+  confere('v2: tres botoes com o id do alerta', botoes.length === 3 && botoes[0].parameters[0].payload === `URG:${registrado.id}:urgente` && botoes[2].parameters[0].payload === `URG:${registrado.id}:responde`, JSON.stringify(botoes))
+  confere('v2: ids das mensagens guardados', JSON.stringify(registrado.mensagens) === JSON.stringify(['wamid.1', 'wamid.2']), JSON.stringify(registrado.mensagens))
+}
+{
+  // Modelo com botoes ainda em analise: cai no sem botoes, e o resto ja vai direto.
+  const banco = ajustesComNumeros()
+  const nomes = []
+  const meta = async (url, init) => {
+    const nome = JSON.parse(init.body).template.name
+    nomes.push(nome)
+    if (nome === 'alerta_urgencia_v2') return { ok: false, status: 404, json: async () => ({ error: { code: 132001, message: 'Template name does not exist in the translation' } }) }
+    return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'wamid.x' }] }) }
+  }
+  const r = await enviarAlertaDeUrgencia(banco, pedido, meta)
+  confere('v2 em analise: cai no modelo sem botoes', JSON.stringify(nomes) === JSON.stringify(['alerta_urgencia_v2', 'alerta_urgencia', 'alerta_urgencia']) && r.every((e) => e.ok), JSON.stringify(nomes))
+}
+{
+  const banco = ajustesComNumeros()
+  await enviarAlertaDeUrgencia(banco, { ...pedido, conversaWhatsApp: undefined, numeros: ['5513997039614'] }, async () => ({ ok: true, status: 200, json: async () => ({}) }))
+  confere('teste da tela: alerta marcado como teste', banco.db.alertas_de_urgencia[0]?.teste === true)
 }
 
 console.log(`alerta de urgencia: ${ok} verificacoes ok`)

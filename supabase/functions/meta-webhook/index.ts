@@ -31,7 +31,9 @@ import {
 } from '../_shared/mensagem-recebida.ts'
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 import { montarAviso, quemEscreveu } from '../_shared/aviso-da-equipe.ts'
-import { deveAlertar, enviarAlertaDeUrgencia } from '../_shared/alerta-de-urgencia.ts'
+import { deveAlertar, enviarAlertaDeUrgencia, lerNumeros as lerNumerosDoAlerta } from '../_shared/alerta-de-urgencia.ts'
+import { tratarRespostaDaEquipe, whatsAppPelaApi } from '../_shared/resposta-ao-alerta.ts'
+import { enviarDirect } from '../_shared/instagram-api.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
 import {
   ESPERA_MAXIMA_MS,
@@ -305,6 +307,8 @@ Deno.serve(async (req) => {
           console.warn('Sem clinic_settings.assistente_ia; atendente com IA desligado', erro)
         }
         const chaveIA = Deno.env.get('ANTHROPIC_API_KEY')?.trim() || null
+        // Lidos na primeira mensagem do lote, e so se precisar.
+        let numerosDoAlerta: string[] | null = null
 
         // A Meta manda em `contacts` o nome que a pessoa configurou no WhatsApp
         // dela. Nao e nome verificado, mas para um contato sem cadastro e a
@@ -343,6 +347,33 @@ Deno.serve(async (req) => {
           }
 
           const waId = digits(String(message.from ?? ''))
+
+          // O medico respondendo ao alerta de urgencia pelo WhatsApp dele
+          // (17/10/2026, ver _shared/resposta-ao-alerta.ts): o toque ou o texto
+          // dele vai para a familia, e nao para o robo, que responderia o menu
+          // como se ele fosse paciente. Falhando aqui, segue o caminho de
+          // sempre - e grita no log.
+          try {
+            numerosDoAlerta ??= await lerNumerosDoAlerta(admin, clinicId)
+            if (numerosDoAlerta.length) {
+              const tratada = await tratarRespostaDaEquipe(
+                {
+                  admin,
+                  clinicId,
+                  agora: new Date(),
+                  numeros: numerosDoAlerta,
+                  enviarWhatsApp: whatsAppPelaApi(phoneNumberId, chaveDoWhatsApp(phoneNumberId)),
+                  enviarDirect,
+                },
+                waId,
+                message,
+              )
+              if (tratada) continue
+            }
+          } catch (erro) {
+            console.error('Resposta ao alerta de urgencia falhou; segue como mensagem comum', erro)
+          }
+
           // Com e sem o nono digito (ver telefone-br.ts): numero antigo chega
           // da Meta sem o 9, e o cadastro guarda com ele.
           const grafias = variantesDoTelefone(waId)

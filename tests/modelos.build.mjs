@@ -62,6 +62,12 @@ const MODELOS = {
   // horario mais proximo; so no risco de vida manda ao pronto-socorro.
   alerta_urgencia: {
     corpo: '\u{1F6A8} Poss\xEDvel urg\xEAncia na Central de Cuidado.\n\n{{1}} escreveu pelo {{2}} \xE0s {{3}}:\n"{{4}}"\n\nO rob\xF4 j\xE1 orientou a fam\xEDlia. Veja a conversa na Central de Cuidado para avaliar e responder.'
+  },
+  // O mesmo, com os botoes de resposta (17/10/2026). O toque e o texto que o
+  // medico escrever voltam para a familia: ver resposta-ao-alerta.ts.
+  alerta_urgencia_v2: {
+    corpo: '\u{1F6A8} Poss\xEDvel urg\xEAncia na Central de Cuidado.\n\n{{1}} escreveu pelo {{2}} \xE0s {{3}}:\n"{{4}}"\n\nO rob\xF4 j\xE1 orientou a fam\xEDlia. Toque num bot\xE3o ou responda a esta mensagem com a orienta\xE7\xE3o, que eu repasso para a fam\xEDlia.',
+    botoes: ["\xC9 urgente", "Pode aguardar", "Eu respondo"]
   }
 };
 function parametrosDoAcompanhamento(nomeDoModelo, nomeDoPaciente, data) {

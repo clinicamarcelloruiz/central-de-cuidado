@@ -68,6 +68,7 @@ tests/conteudo.build.mjs
 tests/assistente.build.mjs
 tests/instagram.build.mjs
 tests/alerta-de-urgencia.build.mjs
+tests/resposta-ao-alerta.build.mjs
 tests/simulador.build/
 
 # Saida do SIMULAR CONVERSAS.bat

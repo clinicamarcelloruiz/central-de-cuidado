@@ -111,6 +111,15 @@ const MODELOS: Record<string, {
       '{{1}} escreveu pelo {{2}} às {{3}}:\n"{{4}}"\n\n' +
       'O robô já orientou a família. Veja a conversa na Central de Cuidado para avaliar e responder.',
   },
+  // O mesmo, com os botoes de resposta (17/10/2026). O toque e o texto que o
+  // medico escrever voltam para a familia: ver resposta-ao-alerta.ts.
+  alerta_urgencia_v2: {
+    corpo:
+      '🚨 Possível urgência na Central de Cuidado.\n\n' +
+      '{{1}} escreveu pelo {{2}} às {{3}}:\n"{{4}}"\n\n' +
+      'O robô já orientou a família. Toque num botão ou responda a esta mensagem com a orientação, que eu repasso para a família.',
+    botoes: ['É urgente', 'Pode aguardar', 'Eu respondo'],
+  },
 }
 
 /**

@@ -245,8 +245,12 @@ export default function AtendenteComIA({ clinicId }: { clinicId: string | null }
             </label>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
               Quando o robô ou a IA reconhecem uma urgência, a qualquer hora, estes celulares recebem no WhatsApp quem
-              escreveu, o horário e um trecho da mensagem. A família recebe antes a orientação de pronto-socorro ou 192.
-              Um número por linha, com DDD.
+              escreveu, o horário e um trecho da mensagem. Um número por linha, com DDD.
+            </p>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+              <strong>O primeiro número é o do médico.</strong> Pelo próprio WhatsApp ele toca em "É urgente", "Pode
+              aguardar" ou "Eu respondo", ou escreve a orientação, e o robô repassa para a família (o texto só sai depois
+              de ele tocar em Enviar). Os outros números respondem como equipe e não classificam a urgência.
             </p>
             <textarea
               id="alerta-urgencia"
