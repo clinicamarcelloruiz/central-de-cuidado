@@ -92,10 +92,15 @@ export type Situacao = {
 }
 
 export type Ferramentas = {
-  /** O robo, como se a familia tivesse escrito `texto`. */
-  robo: (texto: string, etapa: 'mesma' | 'menu' | 'nenhuma') => Promise<Resultado | null>
+  /**
+   * O robo, como se a familia tivesse escrito `texto`. 'atual' rele a etapa
+   * no banco: e o passo seguinte de um fluxo que a IA acabou de abrir.
+   */
+  robo: (texto: string, etapa: 'mesma' | 'menu' | 'nenhuma' | 'atual') => Promise<Resultado | null>
   horarios: (unidade: string) => Promise<string>
   equipe: (motivo: MotivoAtencao, texto: string) => Promise<Resultado>
+  /** A etapa do robo agora. Sem ela (Instagram), o agendamento nao e adiantado. */
+  etapa?: () => Promise<string | null>
 }
 
 type Bloco =
@@ -198,7 +203,17 @@ function ferramentasDoClaude(emEtapa: boolean) {
         'minha_consulta (ver, remarcar ou cancelar), segunda_via (receita ou pedido de exame já emitidos), menu.',
       input_schema: {
         type: 'object',
-        properties: { fluxo: { type: 'string', enum: Object.keys(FLUXOS) } },
+        properties: {
+          fluxo: { type: 'string', enum: Object.keys(FLUXOS) },
+          unidade: {
+            type: 'string',
+            description: 'Só no agendar: a unidade que a família já escolheu na conversa (como em <clinica>, ou "telemedicina"). O sistema abre direto nas datas dela.',
+          },
+          dia: {
+            type: 'string',
+            description: 'Só no agendar, junto com a unidade: o dia que a família já escolheu, como "sábado", "amanhã" ou "24/10". O sistema abre direto nos horários dele.',
+          },
+        },
         required: ['fluxo'],
       },
     })
@@ -242,6 +257,10 @@ function instrucoes(s: Situacao): string {
     '',
     'Ferramentas:',
     '- abrir_fluxo: marcar, remarcar, cancelar, ver a consulta, 2ª via. O sistema conduz com botões e faz o cadastro; antes, você pode responder em uma frase o que ela perguntou. Não peça CPF, e-mail nem dados da criança.',
+    // 17/10/2026, teste do Edu: depois de "Atende sim, aos sabados em Sao Paulo...
+    // Quer que eu siga com o agendamento?", o "sim" recomecava em "Em qual
+    // unidade?" - a mae escolhia tudo de novo, e e ai que se desiste.
+    '- Quando a família aceitar marcar ("sim", "pode ser", "quero", "esse horário"), abra o agendamento na hora com abrir_fluxo agendar, sem perguntar de novo o que ela já disse. Se a conversa já definiu a unidade, passe unidade; se definiu também o dia, passe dia. O sistema abre direto nas datas ou nos horários daquele dia, e ela só toca no horário.',
     '- ver_horarios: para dizer quando tem vaga numa unidade, e para responder em que dias e horários o médico atende ("atende sábado?", "tem à noite?"): consulte a agenda das unidades em vez de chamar a equipe. Não prometa horário: quem reserva é o fluxo de agendamento.',
     '- chamar_equipe: só nas quatro situações abaixo, ou quando faltar a informação.',
     '',
@@ -570,7 +589,8 @@ async function conversarComClaude(
       if (final.name === 'abrir_fluxo') {
         const fluxo = FLUXOS[String(final.input?.fluxo ?? '')]
         if (!fluxo) throw new Error(`fluxo desconhecido: ${final.input?.fluxo}`)
-        const doRobo = await ferramentas.robo(fluxo.texto, fluxo.etapa)
+        let doRobo = await ferramentas.robo(fluxo.texto, fluxo.etapa)
+        if (final.input.fluxo === 'agendar') doRobo = await adiantarAgendamento(ferramentas, doRobo, final.input)
         // O menu ja cumprimenta: o "Ola! Sou o assistente..." do Claude antes
         // dele saia como dois cumprimentos seguidos.
         if (final.input.fluxo === 'menu') return { resultado: doRobo ?? { resposta: texto || 'Certo!' }, acao: 'fluxo:menu' }
@@ -616,6 +636,42 @@ async function conversarComClaude(
     mensagens.push({ role: 'assistant', content: blocos }, { role: 'user', content: resultados })
   }
   throw new Error('voltas demais')
+}
+
+/**
+ * O agendamento ja na unidade e no dia combinados (17/10/2026).
+ *
+ * No teste do Edu a IA disse "Atende sim, aos sabados em Sao Paulo... Quer que
+ * eu siga com o agendamento?", e o "sim" abria "Em qual unidade?": a mae tinha
+ * de escolher de novo o que acabara de combinar. Aqui o fluxo e aberto como
+ * sempre e, a cada passo, o robo recebe a unidade e depois o dia como se a
+ * familia os tivesse digitado - com as regras dele (convenio, telemedicina,
+ * "nesta unidade nao tem sabado"). So avanca enquanto o robo estiver no passo
+ * esperado: ja tem consulta, mais de um filho ou pergunta de convenio param o
+ * atalho ali, e o robo pergunta como sempre. Nada e reservado: quem marca e o
+ * toque no horario, e o cadastro e o questionario do paciente novo seguem
+ * depois, do jeito de sempre.
+ */
+async function adiantarAgendamento(
+  ferramentas: Ferramentas,
+  aberto: Resultado | null,
+  pedido: { unidade?: unknown; dia?: unknown },
+): Promise<Resultado | null> {
+  if (!ferramentas.etapa) return aberto
+  let atual = aberto
+  const passos: [string, string][] = [
+    ['aguardando_unidade', String(pedido.unidade ?? '').trim()],
+    ['aguardando_dia', String(pedido.dia ?? '').trim()],
+  ]
+  for (const [esperada, texto] of passos) {
+    if (!texto) break
+    if ((await ferramentas.etapa()) !== esperada) break
+    const r = await ferramentas.robo(texto.slice(0, 60), 'atual')
+    // O robo nao entendeu: vale a pergunta anterior, que ainda esta de pe.
+    if (!r || roboNaoEntendeu(r)) break
+    atual = r
+  }
+  return atual
 }
 
 /** No modo sombra nada acontece de verdade: o robo e a equipe sao de mentira. */

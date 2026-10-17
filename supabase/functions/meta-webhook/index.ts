@@ -1056,9 +1056,38 @@ Deno.serve(async (req) => {
 
             // Atendente com IA: o que ele pode fazer, todo pelo robo e pela fila
             // da equipe que ja existem (ver _shared/assistente.ts).
+            // A etapa como esta no banco AGORA: depois de a IA abrir o
+            // agendamento, o opcoesDoRobo (lido na chegada da mensagem) ja
+            // ficou para tras. Ver adiantarAgendamento em _shared/assistente.ts.
+            const etapaNoBanco = async () => {
+              const { data, error } = await admin
+                .from('whatsapp_conversations')
+                .select('booking_state,booking_options,booking_unit_id,booking_patient_id,booking_replaces_id,booking_intake_id,booking_modality')
+                .eq('id', conversation.id)
+                .maybeSingle()
+              if (error) console.warn('IA: nao reli a etapa do agendamento', error)
+              return data as Record<string, unknown> | null
+            }
             const ferramentasDaIA: Ferramentas = {
-              robo: (texto, etapa) =>
-                tratarConversa({
+              robo: async (texto, etapa) => {
+                if (etapa === 'atual') {
+                  const agora = await etapaNoBanco()
+                  return tratarConversa({
+                    ...opcoesDoRobo,
+                    texto,
+                    estadoAtual: (agora?.booking_state ?? null) as Estado | null,
+                    opcoesAtuais: (agora?.booking_options ?? null) as typeof opcoesDoRobo.opcoesAtuais,
+                    unidadeEmAndamento: (agora?.booking_unit_id ?? null) as string | null,
+                    pacienteEmAndamento: (agora?.booking_patient_id ?? null) as string | null,
+                    consultaASubstituir: (agora?.booking_replaces_id ?? null) as string | null,
+                    consultaEmCadastro: (agora?.booking_intake_id ?? null) as string | null,
+                    modalidadeEmAndamento: (agora?.booking_modality ?? null) as 'presencial' | 'telemedicina' | null,
+                    podeIniciarMenu: true,
+                    jaViuOMenu: true,
+                    anexo: false,
+                  })
+                }
+                return tratarConversa({
                   ...opcoesDoRobo,
                   texto,
                   estadoAtual: etapa === 'mesma' ? opcoesDoRobo.estadoAtual : etapa === 'menu' ? 'menu' : null,
@@ -1066,9 +1095,11 @@ Deno.serve(async (req) => {
                   podeIniciarMenu: true,
                   jaViuOMenu: true,
                   anexo: false,
-                }),
+                })
+              },
               horarios: (unidade) => horariosEmTexto(admin, clinicId, unidade),
               equipe: (motivo, texto) => entregarParaEquipe(admin, conversation.id, motivo, texto),
+              etapa: async () => ((await etapaNoBanco())?.booking_state ?? null) as string | null,
             }
             const situacaoDaIA = () =>
               montarSituacao(admin, {

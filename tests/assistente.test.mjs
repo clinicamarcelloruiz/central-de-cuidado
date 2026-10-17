@@ -401,6 +401,79 @@ confere('coco molinho nao e alarme', ficaComORobo(situacao({ texto: 'o cocô del
   confere('urgencia da IA: pronto-socorro no fim, com risco de vida', d.resultado.resposta.startsWith('Já avisei') && d.resultado.resposta.endsWith('risco de vida, procure o pronto-socorro mais próximo ou ligue 192.'), d.resultado.resposta)
 }
 
+// 18. Agendamento ja na unidade e no dia combinados (17/10/2026, teste do Edu:
+// o "sim" depois de "Atende sim, aos sabados em Sao Paulo" recomecava em "Em
+// qual unidade?"). Robo de mentira com etapa, como o de verdade.
+function roboComEtapas({ inicio = 'aguardando_unidade', entendeUnidade = true, semEtapa = false } = {}) {
+  const chamadas = []
+  let etapa = null
+  const f = {
+    chamadas,
+    robo: async (t, modo) => {
+      chamadas.push([t, modo])
+      if (t === 'quero marcar uma consulta') {
+        etapa = inicio
+        return inicio === 'ja_tem_consulta'
+          ? { resposta: 'Você já tem uma consulta marcada. O que você prefere?' }
+          : { resposta: '📍 Em qual unidade?', lista: { rotulo: 'Unidades', linhas: [] } }
+      }
+      if (etapa === 'aguardando_unidade' && modo === 'atual') {
+        if (!entendeUnidade) return { resposta: 'Não entendi qual unidade.' }
+        etapa = 'aguardando_dia'
+        return { resposta: `📅 Datas disponíveis em ${t}`, lista: { rotulo: 'Datas', linhas: [] } }
+      }
+      if (etapa === 'aguardando_dia' && modo === 'atual') {
+        etapa = 'aguardando_horario'
+        return { resposta: `⏰ Horários de ${t}`, lista: { rotulo: 'Horários', linhas: [] } }
+      }
+      return { resposta: `ROBO(${t})` }
+    },
+    horarios: async () => '',
+    equipe: async (motivo, t) => ({ resposta: t, atencao: motivo }),
+  }
+  if (!semEtapa) f.etapa = async () => etapa
+  return f
+}
+const aceitou = () => situacao({ texto: 'sim, pode ser', historico: [{ de: 'consultorio', texto: 'Atende sim, aos sábados em São Paulo. Quer que eu siga com o agendamento?' }] })
+{
+  const f = roboComEtapas()
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', unidade: 'São Paulo', dia: 'sábado' }, 'Ótimo!')])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: aceitou(), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('agendar com unidade e dia: abre nos horarios do dia', d.resultado.resposta === 'Ótimo!\n\n⏰ Horários de sábado', d.resultado.resposta)
+  confere('agendar com unidade e dia: unidade e dia vao ao robo como digitados', JSON.stringify(f.chamadas) === JSON.stringify([['quero marcar uma consulta', 'nenhuma'], ['São Paulo', 'atual'], ['sábado', 'atual']]), JSON.stringify(f.chamadas))
+}
+{
+  const f = roboComEtapas()
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', unidade: 'São Paulo' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: aceitou(), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('agendar so com unidade: abre nas datas dela', d.resultado.resposta === '📅 Datas disponíveis em São Paulo', d.resultado.resposta)
+}
+{
+  const f = roboComEtapas({ entendeUnidade: false })
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', unidade: 'Marte', dia: 'sábado' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: aceitou(), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('unidade que o robo nao entende: fica a pergunta da unidade', d.resultado.resposta === '📍 Em qual unidade?' && f.chamadas.length === 2, d.resultado.resposta)
+}
+{
+  const f = roboComEtapas({ inicio: 'ja_tem_consulta' })
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', unidade: 'São Paulo', dia: 'sábado' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: aceitou(), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('ja tem consulta: o robo pergunta antes, sem atalho', d.resultado.resposta.startsWith('Você já tem uma consulta') && f.chamadas.length === 1, JSON.stringify(f.chamadas))
+}
+{
+  const f = roboComEtapas({ semEtapa: true })
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', unidade: 'São Paulo' })])
+  await atenderComAssistente({ modo: 'ligado', situacao: aceitou(), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('sem etapa (Instagram): so abre o fluxo', f.chamadas.length === 1)
+}
+{
+  const c = claudeFalso([texto('ok')])
+  await atenderComAssistente({ modo: 'ligado', situacao: situacao(), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  const fluxo = c.chamadas[0].tools.find((t) => t.name === 'abrir_fluxo')
+  confere('abrir_fluxo aceita unidade e dia', Boolean(fluxo?.input_schema?.properties?.unidade && fluxo.input_schema.properties.dia))
+  confere('instrucao: aceitou, abre na hora', textoDoSistema(c.chamadas[0]).includes('sem perguntar de novo o que ela já disse'))
+}
+
 // 11. Mascara.
 confere('mascara telefone', semDadosPessoais('me liga no (13) 99706-6339') === 'me liga no [telefone]')
 
