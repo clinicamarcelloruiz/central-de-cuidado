@@ -249,6 +249,9 @@ for (const [nome, extra] of [
   const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'quero tirar uma dúvida com o doutor' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
   confere('equipe por conduta medica: sem 192', d.resultado.resposta === 'A equipe responde por aqui.', d.resultado.resposta)
 }
+// 17/10/2026: "**São Paulo (Livance Ibirapuera)**" chegou com asterisco sobrando.
+confere('negrito de site vira negrito do WhatsApp', limparTexto('Atende sim, em **São Paulo (Livance Ibirapuera)**. Quer marcar?', false) === 'Atende sim, em *São Paulo (Livance Ibirapuera)*. Quer marcar?', limparTexto('Atende sim, em **São Paulo (Livance Ibirapuera)**. Quer marcar?', false))
+confere('negrito do WhatsApp fica', limparTexto('Pode usar *negrito* assim.', false) === 'Pode usar *negrito* assim.')
 confere('urgencia: pronto-socorro fica', limparTexto('Procure o pronto-socorro agora. Já avisei a equipe.', true) === 'Procure o pronto-socorro agora. Já avisei a equipe.')
 {
   const c = claudeFalso([texto('Que bom que vieram! Se ele piorar de novo, volte ao pronto-socorro. Quer que eu veja um horário?')])

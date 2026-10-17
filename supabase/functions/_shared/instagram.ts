@@ -108,6 +108,29 @@ export function semInstrucoesDoRobo(texto: string): string {
  * compara o texto gravado com o que a Meta devolve, entao os dois tem de ser o
  * mesmo). Sublinhado so sai quando e marca de italico: @maria_teste e links ficam.
  */
+/**
+ * O texto de um erro qualquer (17/10/2026). O erro do Supabase nao e um Error:
+ * e um objeto { message, details, code }, e String(erro) gravou "[object
+ * Object]" no cartao do Instagram as 08:00 - um erro que grita sem dizer nada,
+ * e o Edu perguntou se era algo. Erro que aparece tem de explicar.
+ */
+export function textoDoErro(erro: unknown): string {
+  if (erro instanceof Error) return erro.message || erro.name || 'erro sem descrição'
+  if (erro && typeof erro === 'object') {
+    const e = erro as { message?: unknown; details?: unknown; code?: unknown; error?: { message?: unknown } }
+    const partes = [e.message ?? e.error?.message, e.details, e.code ? `(${e.code})` : null]
+      .filter((p) => p !== null && p !== undefined && String(p).trim() !== '')
+      .map(String)
+    if (partes.length) return partes.join(' ')
+    try {
+      return JSON.stringify(erro)
+    } catch {
+      return 'erro sem descrição'
+    }
+  }
+  return String(erro ?? 'erro sem descrição')
+}
+
 export function semFormatacaoDoWhatsApp(texto: string): string {
   return String(texto ?? '')
     .replace(/\*([^*\n]+)\*/g, '$1')

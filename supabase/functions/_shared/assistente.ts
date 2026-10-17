@@ -484,7 +484,10 @@ export function orientouConduta(t: string): boolean {
 }
 
 export function limparTexto(t: string, manterProntoSocorro: boolean): string {
-  let r = t.replace(ECO, '')
+  // Negrito de site (17/10/2026, teste do Edu): "**São Paulo (Livance
+  // Ibirapuera)**" chegou no WhatsApp com um asterisco sobrando de cada lado.
+  // O WhatsApp so entende um. No Instagram, semFormatacaoDoWhatsApp tira todos.
+  let r = t.replace(/\*\*([^*\n]+)\*\*/g, '*$1*').replace(/__([^_\n]+)__/g, '_$1_').replace(ECO, '')
   // Pronto-socorro so quando o Claude tratou como urgencia ou a familia
   // tocou no assunto. Em duvida comum, a frase assusta a mae e nao ajuda.
   if (!manterProntoSocorro) {

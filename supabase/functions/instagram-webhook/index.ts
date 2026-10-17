@@ -25,6 +25,7 @@ import {
   respostaPublicaAoComentario,
   responderDirect,
   semFormatacaoDoWhatsApp,
+  textoDoErro,
   tokenPrecisaRenovar,
   type ContextoDoDirect,
   type MotivoInstagram,
@@ -526,7 +527,7 @@ async function buscarComentariosDaConta(admin: Admin, conta: Conta): Promise<{ t
     } catch (erro) {
       // Libera a chave do comentario: a proxima rodada (10 min) tenta de novo.
       await registro.desfazerEmCurso()
-      erros.push(`comentário ${l.comment_id}: ${String(erro).slice(0, 120)}`)
+      erros.push(`comentário ${l.comment_id}: ${textoDoErro(erro).slice(0, 120)}`)
     }
   }
 
@@ -571,7 +572,7 @@ async function rodadaDeComentarios(req: Request): Promise<Response> {
     } catch (erro) {
       resumo.falhas++
       console.error('instagram-webhook: busca de comentarios falhou', conta.clinic_id, erro)
-      await registrarErroDaConta(admin, conta, `Busca automática de comentários: ${String(erro).slice(0, 200)}`).catch(() => undefined)
+      await registrarErroDaConta(admin, conta, `Busca automática de comentários: ${textoDoErro(erro).slice(0, 200)}`).catch(() => undefined)
     }
   }
   if (resumo.falhas) console.warn('instagram-webhook: busca de comentarios com falhas', resumo)

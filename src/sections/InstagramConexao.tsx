@@ -36,6 +36,18 @@ function minutosDesde(iso: string | null) {
   return Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 60000))
 }
 
+/**
+ * Erro da busca de comentarios que a rodada seguinte ja superou (17/10/2026).
+ * Uma falha passageira as 08:00 ficou o dia inteiro em vermelho, e o Edu
+ * perguntou se era algo. A rodada grava a hora em que COMECA; a que falha grava
+ * o erro depois disso. Entao, se a ultima rodada comecou depois do erro, ela
+ * terminou sem erro. Outros erros (envio do direct, token) seguem vermelhos.
+ */
+function erroDaBuscaJaResolvido(erro: string, erroEm: string | null, ultimaBusca: string | null) {
+  if (!erro.startsWith('Busca automática de comentários') || !erroEm || !ultimaBusca) return false
+  return Date.parse(ultimaBusca) > Date.parse(erroEm)
+}
+
 function LinhaDaBusca({ ultima }: { ultima: string | null }) {
   const minutos = minutosDesde(ultima)
   const parou = minutos !== null && minutos > 30
@@ -182,15 +194,25 @@ export default function InstagramConexao({ clinicId }: { clinicId: string | null
                 {dias === null ? 'Validade do acesso desconhecida' : dias < 0 ? 'Acesso vencido: gere um token novo' : `Acesso renova sozinho · vence em ${dias} dias`}
               </span>
             </div>
-            {conta.ultimoErro && (
-              <p className="flex gap-2 rounded-[16px] border border-red-200 bg-red-50 px-4 py-3 text-[11px] leading-relaxed text-red-700">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>
-                  <strong>Último erro do Instagram</strong>
-                  {conta.ultimoErroEm ? ` (${new Date(conta.ultimoErroEm).toLocaleString('pt-BR')})` : ''}: {conta.ultimoErro}
-                </span>
-              </p>
-            )}
+            {conta.ultimoErro &&
+              (erroDaBuscaJaResolvido(conta.ultimoErro, conta.ultimoErroEm, ultimaBusca ?? null) ? (
+                <p className="flex gap-2 rounded-[16px] bg-[#f8f7f4] px-4 py-3 text-[11px] leading-relaxed text-slate-500">
+                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" strokeWidth={3} />
+                  <span>
+                    <strong>Erro já resolvido</strong>
+                    {conta.ultimoErroEm ? ` (${new Date(conta.ultimoErroEm).toLocaleString('pt-BR')})` : ''}: as buscas seguintes
+                    funcionaram. {conta.ultimoErro}
+                  </span>
+                </p>
+              ) : (
+                <p className="flex gap-2 rounded-[16px] border border-red-200 bg-red-50 px-4 py-3 text-[11px] leading-relaxed text-red-700">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    <strong>Último erro do Instagram</strong>
+                    {conta.ultimoErroEm ? ` (${new Date(conta.ultimoErroEm).toLocaleString('pt-BR')})` : ''}: {conta.ultimoErro}
+                  </span>
+                </p>
+              ))}
             <div className="grid gap-2 sm:grid-cols-2">
               {(
                 [

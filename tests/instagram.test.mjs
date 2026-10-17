@@ -20,6 +20,7 @@ import {
   semFormatacaoDoWhatsApp,
   semInstrucoesDoRobo,
   separarComentariosDaBusca,
+  textoDoErro,
   tokenPrecisaRenovar,
 } from './instagram.build.mjs'
 
@@ -58,6 +59,16 @@ const LINK = linkDoWhatsApp(CTX.whatsapp)
 // ---------------------------------------------------------------- link
 confere('link com a frase pronta', LINK === `https://wa.me/5513999990000?text=${encodeURIComponent(FRASE_DO_LINK)}`, LINK)
 confere('frase do link e a testada no simulador', FRASE_DO_LINK === 'Olá! Vim pelo Instagram e quero agendar uma consulta.')
+
+// ---------------------------------------------------------------- erro legivel (17/10/2026)
+// O erro do Supabase nao e Error: String(erro) gravou "[object Object]" no cartao.
+{
+  const doBanco = { message: 'canceling statement due to statement timeout', details: null, hint: null, code: '57014' }
+  confere('erro do banco vira texto', textoDoErro(doBanco) === 'canceling statement due to statement timeout (57014)', textoDoErro(doBanco))
+  confere('erro comum vira a mensagem', textoDoErro(new Error('rede fora')) === 'rede fora')
+  confere('erro da Meta (error.message)', textoDoErro({ error: { message: 'Token expirado' } }) === 'Token expirado')
+  confere('nunca [object Object]', !textoDoErro({ algo: 1 }).includes('[object Object]') && !textoDoErro({}).includes('[object Object]'), textoDoErro({}))
+}
 
 // ---------------------------------------------------------------- urgencia antes de tudo
 {
