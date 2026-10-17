@@ -12,6 +12,7 @@ import {
   respostaPrivadaAoComentario,
   respostaPublicaAoComentario,
   responderDirect,
+  semFormatacaoDoWhatsApp,
   semInstrucoesDoRobo,
   tokenPrecisaRenovar,
 } from './instagram.build.mjs'
@@ -150,6 +151,21 @@ confere('frase do link e a testada no simulador', FRASE_DO_LINK === 'Olá! Vim p
   confere('resposta publica e sempre a mesma para o mesmo comentario', a === respostaPublicaAoComentario('17890001112223334'))
   const varias = new Set(['1', '22', '333', '4444', '55555', '666666', '7777777'].map(respostaPublicaAoComentario))
   confere('respostas publicas variam entre comentarios', varias.size > 1, [...varias].join(' | '))
+}
+
+// ---------------------------------------------------------------- direct sem negrito
+// Primeiro teste de verdade (16/10/2026): o valor chegou como "*R$ 450,00*".
+{
+  const v = semFormatacaoDoWhatsApp(responderDirect('quanto custa a consulta?', null, CTX).texto)
+  confere('valor sai sem asterisco', !v.includes('*') && /R\$ 450,00/.test(v), v)
+  const ia = semFormatacaoDoWhatsApp('A consulta custa *R$ 450,00* em Santos e *R$ 600,00* em São Paulo.')
+  confere('negrito da IA vira texto puro', ia === 'A consulta custa R$ 450,00 em Santos e R$ 600,00 em São Paulo.', ia)
+  const urg = semFormatacaoDoWhatsApp(responderDirect('socorro, é urgente', null, CTX).texto)
+  confere('texto do proprio robo tambem sai limpo', !urg.includes('*') && /pronto-socorro/.test(urg), urg)
+  confere('italico sai', semFormatacaoDoWhatsApp('Pode vir _em jejum_.') === 'Pode vir em jejum.')
+  const p = semFormatacaoDoWhatsApp(respostaPrivadaAoComentario('maria_teste_2', CTX))
+  confere('sublinhado de usuario e link fica', p.includes('@maria_teste_2') && p.includes(LINK), p)
+  confere('asterisco solto fica', semFormatacaoDoWhatsApp('5 * 3 = 15') === '5 * 3 = 15')
 }
 
 // ---------------------------------------------------------------- prazos da Meta

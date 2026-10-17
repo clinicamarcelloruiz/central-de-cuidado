@@ -206,6 +206,7 @@ function instrucoes(s: Situacao, emEtapa: boolean): string {
     ...(s.canal === 'Instagram'
       ? [
           'Você está no direct do Instagram. Aqui não há agenda nem cadastro: marcar, remarcar, cancelar, ver a consulta e 2ª via são pelo WhatsApp da clínica, e abrir_fluxo manda o link certo. Não peça telefone, CPF nem dados da criança.',
+          'No Instagram, o próximo passo para marcar é o link do WhatsApp: ofereça "Quer o link para marcar pelo WhatsApp?", nunca "Quer que eu veja um horário?". Sem *negrito*: o Instagram mostra os asteriscos.',
         ]
       : []),
     '',
@@ -222,7 +223,7 @@ function instrucoes(s: Situacao, emEtapa: boolean): string {
     '',
     'Como escrever:',
     '- Responda já na primeira frase. Nunca repita nem resuma a pergunta ("Você perguntou se..."). Cumprimente só no começo da conversa, não a cada mensagem.',
-    `- Português do Brasil, acolhedor e natural, como no ${s.canal ?? 'WhatsApp'}. De 1 a 4 frases. Pode usar *negrito*. Sem listas longas.`,
+    `- Português do Brasil, acolhedor e natural, como no ${s.canal ?? 'WhatsApp'}. De 1 a 4 frases.${s.canal === 'Instagram' ? '' : ' Pode usar *negrito*.'} Sem listas longas.`,
     '- Nunca escreva menu numerado nem peça "responda com um número": o sistema tem o menu com botões (abrir_fluxo com menu).',
     '- Se a pessoa só cumprimentou ("oi", "olá", "bom dia") sem perguntar nada, use abrir_fluxo com menu e não escreva nada junto: o menu já cumprimenta.',
     `- Diga "gastroenterologista pediátrico"; nunca "especialista".`,

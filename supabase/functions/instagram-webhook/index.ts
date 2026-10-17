@@ -21,6 +21,7 @@ import {
   respostaPrivadaAoComentario,
   respostaPublicaAoComentario,
   responderDirect,
+  semFormatacaoDoWhatsApp,
   tokenPrecisaRenovar,
   type ContextoDoDirect,
   type MotivoInstagram,
@@ -74,6 +75,36 @@ async function assinaturaValida(req: Request, rawBody: string): Promise<boolean>
     if (safeEqual(`sha256=${await sha256HmacHex(segredo, rawBody)}`, recebida)) return true
   }
   return false
+}
+
+/**
+ * Assinatura que nao confere (16/10/2026): o primeiro teste chegou 10 vezes e as
+ * 10 voltaram 401 em silencio, porque faltava INSTAGRAM_APP_SECRET e o segredo
+ * do WhatsApp nao assina o Instagram. A Meta so via o 401; a clinica so via a
+ * aba vazia. Agora a recusa vai para o log e para o cartao do Instagram em
+ * Preferencias. O corpo nao e confiavel aqui: so serve para achar a conta pelo
+ * id, e o texto gravado e fixo. Some sozinho no primeiro aviso que confere.
+ */
+const RECUSA = 'Avisos do Instagram recusados'
+
+async function avisarAssinaturaRecusada(rawBody: string) {
+  const configurados = ['INSTAGRAM_APP_SECRET', 'META_APP_SECRET'].filter((nome) => Deno.env.get(nome)?.trim())
+  console.error('instagram-webhook: assinatura nao confere; segredos configurados:', configurados.join(', ') || 'nenhum')
+  let ids: string[] = []
+  try {
+    ids = ((JSON.parse(rawBody)?.entry ?? []) as { id?: unknown }[]).map((e) => String(e?.id ?? '')).filter(Boolean)
+  } catch {
+    return
+  }
+  if (!ids.length) return
+  const erro = configurados.includes('INSTAGRAM_APP_SECRET')
+    ? `${RECUSA}: a assinatura não confere com INSTAGRAM_APP_SECRET. Confira a chave secreta do app do Instagram no painel da Meta.`
+    : `${RECUSA}: falta o segredo INSTAGRAM_APP_SECRET no Supabase (chave secreta do app do Instagram, no painel da Meta).`
+  const { error } = await adminClient()
+    .from('instagram_contas')
+    .update({ ultimo_erro: erro, ultimo_erro_em: new Date().toISOString() })
+    .in('ig_user_id', ids.slice(0, 5))
+  if (error) console.error('instagram-webhook: nao consegui marcar a recusa na conta', error)
 }
 
 async function registrarErroDaConta(admin: Admin, conta: Conta, erro: string) {
@@ -133,15 +164,16 @@ async function avisar(admin: Admin, conta: Conta, motivo: MotivoInstagram, quem:
 }
 
 async function enviarResposta(admin: Admin, conta: Conta, conversaId: string, igsid: string, r: RespostaDoDirect) {
+  const texto = semFormatacaoDoWhatsApp(r.texto)
   // Grava ANTES de enviar: o eco da Meta pode chegar antes da resposta da API,
   // e um eco sem dono virava "mensagem da equipe" - e o robo ficava 2 h calado.
   const { data: linha, error } = await admin
     .from('instagram_mensagens')
-    .insert({ clinic_id: conta.clinic_id, conversa_id: conversaId, direcao: 'saida', texto: r.texto, automatica: true, status: 'enviando' })
+    .insert({ clinic_id: conta.clinic_id, conversa_id: conversaId, direcao: 'saida', texto, automatica: true, status: 'enviando' })
     .select('id')
     .single()
   if (error) console.error('Instagram: nao consegui gravar a resposta antes de enviar', error)
-  const envio = await enviarDirect(conta, igsid, r.texto, r.opcoes ?? [])
+  const envio = await enviarDirect(conta, igsid, texto, r.opcoes ?? [])
   const agora = new Date().toISOString()
   if (linha?.id) {
     const { error: erroDoEnvio } = await admin
@@ -424,7 +456,10 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return text('Method not allowed', 405)
 
   const rawBody = await req.text()
-  if (!(await assinaturaValida(req, rawBody))) return text('Invalid signature', 401)
+  if (!(await assinaturaValida(req, rawBody))) {
+    emSegundoPlano(avisarAssinaturaRecusada(rawBody).catch((erro) => console.error('instagram-webhook: aviso da recusa falhou', erro)))
+    return text('Invalid signature', 401)
+  }
 
   let registro: RegistroDeEventos | null = null
   try {
@@ -451,6 +486,12 @@ Deno.serve(async (req) => {
         continue
       }
       emSegundoPlano(renovarSePreciso(admin, conta as Conta).catch((erro) => console.warn('Instagram: renovacao do token falhou', erro)))
+      // Assinatura voltou a conferir: tira da tela o aviso de recusa, se houver.
+      emSegundoPlano(
+        Promise.resolve(
+          admin.from('instagram_contas').update({ ultimo_erro: null, ultimo_erro_em: null }).eq('ig_user_id', igUserId).like('ultimo_erro', `${RECUSA}%`),
+        ).catch((erro) => console.warn('Instagram: nao consegui limpar o aviso de recusa', erro)),
+      )
 
       let contexto: Promise<Omit<ContextoDoDirect, 'primeiraVez'>> | null = null
       const ctx = () => (contexto ??= montarContexto(admin, conta as Conta))

@@ -95,6 +95,21 @@ export function semInstrucoesDoRobo(texto: string): string {
     .trim()
 }
 
+/**
+ * O direct do Instagram nao tem negrito nem italico: no primeiro teste de
+ * verdade (16/10/2026) o valor chegou como "*R$ 450,00*", com os asteriscos a
+ * mostra. Respostas prontas, IA e os textos deste arquivo escrevem no formato do
+ * WhatsApp; vira texto puro antes de gravar e enviar (o eco compara o texto
+ * gravado com o que a Meta devolve, entao os dois tem de ser o mesmo).
+ * Sublinhado so sai quando e marca de italico: @maria_teste e links ficam.
+ */
+export function semFormatacaoDoWhatsApp(texto: string): string {
+  return String(texto ?? '')
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,!?:;])/gm, '$1$2')
+    .replace(/(^|[\s(])~([^~\n]+)~(?=$|[\s).,!?:;])/gm, '$1$2')
+}
+
 /** O botao tocado volta como payload; texto digitado igual ao botao conta tambem. */
 export function opcaoTocada(texto: string, payload: string | null | undefined): Opcao | null {
   const chave = String(payload ?? '').trim().toLowerCase()
