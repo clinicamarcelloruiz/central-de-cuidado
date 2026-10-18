@@ -34,6 +34,11 @@ function partesDaData(texto: string): [string, string, string] | null {
   const t = texto.trim()
   const exata = t.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/)
   if (exata) return [exata[1], exata[2], exata[3]]
+  // "02022024" e "020224", sem barra (17/10/2026, painel com IA): o cadastro
+  // nascia sem data e o robo seguia como se estivesse tudo certo. So a mensagem
+  // inteira: numero solto no meio de uma frase pode ser outra coisa.
+  const colada = t.match(/^(\d{2})(\d{2})(\d{4}|\d{2})$/)
+  if (colada) return [colada[1], colada[2], colada[3]]
 
   const numericas = [...t.matchAll(/(?:^|[^\d/.-])(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?![\d/.-])/g)]
   const normal = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
@@ -45,6 +50,23 @@ function partesDaData(texto: string): [string, string, string] | null {
   if (numericas.length + porExtenso.length !== 1) return null
   if (numericas.length === 1) return [numericas[0][1], numericas[0][2], numericas[0][3]]
   return [porExtenso[0][1], String(MESES[porExtenso[0][2]]), porExtenso[0][3]]
+}
+
+/**
+ * Dia e mes sem o ano ("31 de agosto", "31/08"), como "DD/MM" (17/10/2026).
+ *
+ * No painel com IA a mae de um bebe de 7 semanas respondeu "31 de agosto" e o
+ * cadastro saiu sem data. O ano nao se adivinha (a clinica atende ate 19
+ * anos): o robo pergunta so o ano e junta com o que ja veio.
+ */
+export function diaEMesSemAno(texto: string): string | null {
+  const t = texto.trim().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[.!]+$/, '')
+  const numerica = t.match(/^(\d{1,2})\s*[/.-]\s*(\d{1,2})$/)
+  const porExtenso = t.match(/^(?:dia\s+)?(\d{1,2})\s*(?:de\s+|\/\s*|-\s*)?([a-z]+)$/)
+  const dia = Number(numerica?.[1] ?? porExtenso?.[1])
+  const mes = numerica ? Number(numerica[2]) : porExtenso ? MESES[porExtenso[2]] : undefined
+  if (!dia || !mes || dia > 31 || mes > 12) return null
+  return `${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}`
 }
 
 export function dataDeNascimentoIso(texto: string, hoje = new Date()): string | null {

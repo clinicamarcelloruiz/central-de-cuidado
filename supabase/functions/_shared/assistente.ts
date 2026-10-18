@@ -37,7 +37,7 @@
  * por causa da IA.
  */
 import type { ConsultaMarcada, MotivoAtencao, Resultado } from './atendimento.ts'
-import { conhecimentoDaClinica, pediuUrgencia, respostaAutomaticaDaFamilia, sinalDeAlarme } from './atendimento.ts'
+import { comOfertaDeHorario, conhecimentoDaClinica, parecePergunta, pediuUrgencia, respostaAutomaticaDaFamilia, sinalDeAlarme } from './atendimento.ts'
 import { assuntoClinico } from './respostas.ts'
 import { dentroDoExpediente } from './expediente.ts'
 
@@ -85,6 +85,13 @@ export type Situacao = {
   /** Alguem da equipe falou ha pouco: quem responde e ela, nao robo nem IA. */
   equipeConversando: boolean
   /**
+   * A conversa ja esta marcada como urgencia para a equipe (17/10/2026,
+   * rodada 4 do painel): a febre do bebe de 7 semanas foi reconhecida pela IA,
+   * e nao pela lista de sinais, e a pergunta seguinte ("posso dar dipirona?")
+   * perdia o tom de urgencia. A etiqueta e o sinal mais firme que existe.
+   */
+  urgenciaAberta?: boolean
+  /**
    * Onde a conversa acontece (16/10/2026). Sem o campo, WhatsApp, como sempre.
    * No Instagram nao ha agenda nem cadastro: os fluxos viram o link do WhatsApp.
    */
@@ -98,7 +105,13 @@ export type Ferramentas = {
    */
   robo: (texto: string, etapa: 'mesma' | 'menu' | 'nenhuma' | 'atual') => Promise<Resultado | null>
   horarios: (unidade: string) => Promise<string>
-  equipe: (motivo: MotivoAtencao, texto: string) => Promise<Resultado>
+  /**
+   * manterEtapa (17/10/2026, painel com IA): a duvida no meio do cadastro ou da
+   * lista de horarios vai para a equipe sem apagar o passo em aberto. Antes, a
+   * pergunta "corto o leite?" no meio da ficha mandava a conversa para a fila e
+   * o cadastro nunca terminava; o toque no horario seguinte caia no vazio.
+   */
+  equipe: (motivo: MotivoAtencao, texto: string, opcoes?: { manterEtapa?: boolean }) => Promise<Resultado>
   /** A etapa do robo agora. Sem ela (Instagram), o agendamento nao e adiantado. */
   etapa?: () => Promise<string | null>
 }
@@ -106,6 +119,9 @@ export type Ferramentas = {
 type Bloco =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  // Com thinking between_tools, o Sonnet escreve entre uma ferramenta e outra
+  // um bloco de pensamento, que volta como veio na volta seguinte.
+  | { type: 'thinking'; thinking: string; signature?: string }
 
 export type ChamarClaude = (corpo: Record<string, unknown>, limiteMs: number) => Promise<{ content: Bloco[] }>
 
@@ -140,9 +156,15 @@ export type Desfecho = {
   nota?: string
 }
 
-const FLUXOS: Record<string, { texto: string; etapa: 'menu' | 'nenhuma' }> = {
+const FLUXOS: Record<string, { texto: string; etapa: 'menu' | 'nenhuma'; depois?: string }> = {
   agendar: { texto: 'quero marcar uma consulta', etapa: 'nenhuma' },
   minha_consulta: { texto: '4', etapa: 'menu' },
+  // "Pode cancelar a consulta da Helena" (painel com IA, 17/10/2026) abria a
+  // tela com Remarcar, Cancelar e Voltar: a mae repetia o que ja tinha pedido
+  // e ainda confirmava. Agora o pedido vai junto e sobra a confirmacao, que
+  // fica: cancelar e destrutivo e remarcar cancela a antiga no fim.
+  remarcar: { texto: '4', etapa: 'menu', depois: 'remarcar' },
+  cancelar: { texto: '4', etapa: 'menu', depois: 'cancelar' },
   segunda_via: { texto: '5', etapa: 'menu' },
   menu: { texto: 'menu', etapa: 'nenhuma' },
 }
@@ -156,10 +178,12 @@ function ferramentasDoClaude(emEtapa: boolean) {
   const lista: Record<string, unknown>[] = [
     {
       name: 'ver_horarios',
-      description: 'Consulta os dias e horários livres de uma unidade (só leitura, não reserva). Use antes de dizer quando tem vaga.',
+      description:
+        'Consulta os dias e horários livres (só leitura, não reserva). Use antes de dizer quando tem vaga. ' +
+        'Com unidade "todas", traz os próximos de cada unidade numa consulta só e diz qual é o mais próximo: use para "o mais rápido possível" e na urgência.',
       input_schema: {
         type: 'object',
-        properties: { unidade: { type: 'string', description: 'Nome da unidade, como aparece em <clinica>.' } },
+        properties: { unidade: { type: 'string', description: 'Nome da unidade, como aparece em <clinica>, ou "todas".' } },
         required: ['unidade'],
       },
     },
@@ -192,26 +216,56 @@ function ferramentasDoClaude(emEtapa: boolean) {
       name: 'responder_etapa',
       description:
         'A família está num passo do sistema e o sistema não entendeu a resposta dela. Envia ao sistema a resposta ' +
-        'equivalente, com o texto exato de uma opção (o número da lista, o dia como aparece, o horário como 14:00, PULAR...).',
-      input_schema: { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'] },
+        'equivalente, com o texto exato de uma opção (o número da lista, o dia como aparece, o horário como 14:00, PULAR...). ' +
+        'Para trocar de unidade no meio do agendamento, mande o nome da unidade (ex.: São Paulo), nunca VOLTAR.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          texto: { type: 'string' },
+          dia: { type: 'string', description: 'Opcional: o dia que a família já disse junto ("segunda", "30/10"). O sistema segue direto para os horários dele.' },
+          horario: { type: 'string', description: 'Opcional: o horário exato que a família já escolheu, como 15:10.' },
+          para_familia: {
+            type: 'string',
+            description: 'Opcional: uma frase curta para a família, falando com ela, caso o sistema não entenda a resposta traduzida. O texto solto não chega a ela.',
+          },
+        },
+        required: ['texto'],
+      },
     })
   } else {
     lista.push({
       name: 'abrir_fluxo',
       description:
         'Abre um fluxo do sistema, que conduz a família com botões: agendar (marcar consulta ou retorno), ' +
-        'minha_consulta (ver, remarcar ou cancelar), segunda_via (receita ou pedido de exame já emitidos), menu.',
+        'remarcar e cancelar (a consulta que já existe: o sistema só pede a confirmação), ' +
+        'minha_consulta (ver a consulta), segunda_via (receita ou pedido de exame já emitidos), menu.',
       input_schema: {
         type: 'object',
         properties: {
           fluxo: { type: 'string', enum: Object.keys(FLUXOS) },
+          para_familia: {
+            type: 'string',
+            description:
+              'Opcional: uma frase curta que a família lê antes da tela do sistema, falando com ela ("você"): a resposta a uma pergunta que ela fez, ou o valor e como se paga quando você passa o horário direto. ' +
+              'É o único texto que acompanha o fluxo; nunca escreva o que você vai fazer nem fale da família em terceira pessoa.',
+          },
+          paciente: {
+            type: 'string',
+            description: 'Só no agendar: o primeiro nome da criança, quando a família disse para quem é e ela está entre as cadastradas.',
+          },
           unidade: {
             type: 'string',
-            description: 'Só no agendar: a unidade que a família já escolheu na conversa (como em <clinica>, ou "telemedicina"). O sistema abre direto nas datas dela.',
+            description: 'No agendar e no remarcar: a unidade que a família já escolheu na conversa (como em <clinica>, ou "telemedicina"). O sistema abre direto nas datas dela.',
           },
           dia: {
             type: 'string',
-            description: 'Só no agendar, junto com a unidade: o dia que a família já escolheu, como "sábado", "amanhã" ou "24/10". O sistema abre direto nos horários dele.',
+            description: 'No agendar e no remarcar: o dia que a família já escolheu, como "sábado", "amanhã" ou "24/10". No agendar, passe sempre a unidade junto: sem ela o sistema pergunta a unidade e o dia se perde (se só uma unidade atende naquele dia, é ela). O sistema abre direto nos horários dele.',
+          },
+          horario: {
+            type: 'string',
+            description:
+              'No agendar e no remarcar, junto com o dia: o horário exato que a família escolheu nesta conversa, como 15:10. ' +
+              'O sistema guarda esse horário na hora, então só passe quando ela disse qual quer.',
           },
         },
         required: ['fluxo'],
@@ -248,20 +302,31 @@ function instrucoes(s: Situacao): string {
     '',
     'Como escrever:',
     '- Responda já na primeira frase. Nunca repita nem resuma a pergunta ("Você perguntou se..."). Cumprimente só no começo da conversa, não a cada mensagem.',
+    '- Todo texto que você escreve, inclusive junto de uma ferramenta, vai para a família. Fale com ela ("você"), nunca sobre ela ("a família aceitou", "a mãe quer"), e não explique o que vai fazer ("então abro o agendamento"). Junto de abrir_fluxo, o que ela lê vai em para_familia, no máximo uma frase curta, ou nada: a tela do sistema já explica.',
     `- Português do Brasil, acolhedor e natural, como no ${s.canal ?? 'WhatsApp'}. De 1 a 4 frases.${s.canal === 'Instagram' ? '' : ' Pode usar *negrito*.'} Sem listas longas.`,
     '- Nunca escreva menu numerado nem peça "responda com um número": o sistema tem o menu com botões (abrir_fluxo com menu).',
     '- Se a pessoa só cumprimentou ("oi", "olá", "bom dia") sem perguntar nada, use abrir_fluxo com menu e não escreva nada junto: o menu já cumprimenta.',
     `- Diga "gastroenterologista pediátrico"; nunca "especialista".`,
     '- Pronto-socorro e 192 só quando a criança parece mal agora, ou quando a família contou um sintoma e o consultório está fechado.',
-    '- Horário da equipe só quando você estiver passando a conversa para ela.',
+    // Painel com IA (17/10/2026): "a equipe responde hoje ate as 18h" em seis
+    // conversas, "deixo um horario separado", "reembolso ao seu plano" para quem
+    // nao falou de plano, "sim, o ultrassom o plano cobre".
+    '- Horário da equipe só quando você estiver passando a conversa para ela, e sem prometer prazo: "a equipe atende de segunda a sexta, das 8h às 18h, e responde por aqui", nunca "responde hoje" ou "em instantes". Diga que avisou alguém só se você chamou a equipe nesta resposta; se já tinha chamado antes, diga que a equipe já está com a mensagem.',
+    '- Nada de reserva provisória: o sistema não "separa" nem "segura" horário. Quem marca e quer desistir depois cancela por aqui.',
+    '- Não suponha o que a família não disse: plano de saúde ("se vocês tiverem plano, damos recibo para reembolso"), idade, quem é a criança. Exame pelo plano é "conforme a cobertura do seu plano", nunca um sim para um exame específico.',
+    '- Oferta de marcar uma vez só: se a sua última mensagem já ofereceu e a família seguiu com outra dúvida, responda só a dúvida.',
+    '- Paciente adolescente: fale "seu filho", "sua filha" ou o nome, não "a criança".',
+    '- Agenda: diga os dias e horários como estão em <clinica> ou em ver_horarios, sem "alguns" ou "às vezes" que não estejam escritos.',
     '',
     'Ferramentas:',
-    '- abrir_fluxo: marcar, remarcar, cancelar, ver a consulta, 2ª via. O sistema conduz com botões e faz o cadastro; antes, você pode responder em uma frase o que ela perguntou. Não peça CPF, e-mail nem dados da criança.',
+    '- abrir_fluxo: marcar, remarcar, cancelar, ver a consulta, 2ª via. O sistema conduz com botões e faz o cadastro; em para_familia, você pode responder em uma frase o que ela perguntou. Não peça CPF, e-mail nem dados da criança.',
     // 17/10/2026, teste do Edu: depois de "Atende sim, aos sabados em Sao Paulo...
     // Quer que eu siga com o agendamento?", o "sim" recomecava em "Em qual
     // unidade?" - a mae escolhia tudo de novo, e e ai que se desiste.
-    '- Quando a família aceitar marcar ("sim", "pode ser", "quero", "esse horário"), abra o agendamento na hora com abrir_fluxo agendar, sem perguntar de novo o que ela já disse. Se a conversa já definiu a unidade, passe unidade; se definiu também o dia, passe dia. O sistema abre direto nas datas ou nos horários daquele dia, e ela só toca no horário.',
-    '- ver_horarios: para dizer quando tem vaga numa unidade, e para responder em que dias e horários o médico atende ("atende sábado?", "tem à noite?"): consulte a agenda das unidades em vez de chamar a equipe. Não prometa horário: quem reserva é o fluxo de agendamento.',
+    '- Quando a família aceitar marcar ("sim", "pode ser", "quero", "esse horário"), abra o agendamento na hora com abrir_fluxo agendar, sem perguntar de novo o que ela já disse. Se a conversa já definiu a unidade, passe unidade; se definiu também o dia, passe dia, sempre com a unidade (se só uma unidade atende naquele dia, como o sábado, a unidade é ela); se ela já escolheu o horário exato ("pode ser às 15:10", "quero o das 9:20"), passe horario, e o sistema guarda esse horário na hora. Para quem é: com mais de uma criança cadastrada e o nome dito, passe paciente.',
+    '- Com abrir_fluxo, o que a família lê junto vai em para_familia (o texto solto não chega a ela). Quando você passar o horário direto para uma família sem consulta anterior, diga ali o valor e como se paga naquela unidade (de <clinica>): ela não passa pela tela das datas, que é onde o valor aparece.',
+    '- Remarcar ou cancelar a consulta que já existe: abrir_fluxo remarcar ou cancelar. Cancelar pede só a confirmação. Remarcar abre direto nas datas da mesma unidade: passe o dia que a família quer (e a unidade, se ela quer trocar), e o sistema abre nos horários dele. minha_consulta é para quem quer só ver.',
+    '- ver_horarios: para dizer quando tem vaga numa unidade, e para responder em que dias e horários o médico atende ("atende sábado?", "tem à noite?"): consulte a agenda das unidades em vez de chamar a equipe. Para "o mais rápido possível" e na urgência, use unidade "todas", numa consulta só. Não prometa horário: quem reserva é o fluxo de agendamento.',
     '- chamar_equipe: só nas quatro situações abaixo, ou quando faltar a informação.',
     '',
     'É da equipe (use chamar_equipe: em para_familia, fale com a família, em uma frase, que a equipe responde por aqui; em resumo_para_equipe, escreva para a equipe o que precisa ser respondido):',
@@ -301,7 +366,10 @@ function instrucoes(s: Situacao): string {
     // do consultorio e quase sempre "ele precisa ver logo", nao pronto-socorro.
     `Urgência tem dois níveis, e nos dois use chamar_equipe com motivo urgencia (isso avisa ${s.quemAtende} no WhatsApp dele, a qualquer hora):`,
     '- Risco de vida (vômito com sangue ou verde, muito sangue, engoliu pilha, bateria, ímã, moeda ou produto de limpeza, falta de ar ou lábios roxos, convulsão, não acorda ou desmaiou): em para_familia, a primeira frase manda procurar o pronto-socorro mais próximo ou ligar 192 agora.',
-    `- Urgente sem risco de vida (piorou, não para de vomitar, não faz xixi há muitas horas, muito molinha, dor forte, febre em bebê com menos de 3 meses, ou a família diz que é urgente): acolha, diga que ${s.quemAtende} foi avisado e vai avaliar, e ofereça o horário mais próximo (${s.canal === 'Instagram' ? 'pelo link do WhatsApp' : 'veja com ver_horarios antes, inclusive hoje'}). O pronto-socorro só aparece no fim, como "se for uma emergência com risco de vida".`,
+    `- Urgente sem risco de vida (piorou, não para de vomitar, não faz xixi há muitas horas, muito molinha, dor forte, febre em bebê com menos de 3 meses, ou a família diz que é urgente): acolha, diga que ${s.quemAtende} foi avisado e vai avaliar, e ofereça o horário mais próximo (${s.canal === 'Instagram' ? 'pelo link do WhatsApp' : 'veja com ver_horarios "todas" antes, inclusive hoje'}). O pronto-socorro só aparece no fim, como "se for uma emergência com risco de vida". Se a família já tem consulta marcada para hoje ou amanhã, não ofereça outra: confirme a que ela tem.`,
+    '- Se na mesma mensagem ela pergunta de remédio, diga que remédio e dose quem orienta é o médico, sem citar o nome do remédio.',
+    '- Na urgência, veja os horários antes (ver_horarios "todas") e só depois chame a equipe, já com o horário mais próximo, dia e unidade, em para_familia. Não prometa "vou ver o horário" sem trazer o horário. Se você já avisou o médico nesta conversa, diga que ele já foi avisado, não que avisou "de novo".',
+    '- "Urgente" sobre papel (relatório, atestado, receita, escola cobrando) não é urgência de saúde: é documento (chamar_equipe documento), dizendo que a equipe já sabe que ela precisa logo, sem garantir prazo.',
     'Se perguntarem, você é o assistente virtual do consultório, e a equipe acompanha as conversas.',
     '',
     `<clinica>\n${s.conhecimento}\n</clinica>`,
@@ -310,7 +378,7 @@ function instrucoes(s: Situacao): string {
 
 /** O passo do sistema em que a familia esta: muda a cada mensagem, fica fora do cache. */
 function instrucoesDaEtapa(s: Situacao): string {
-  return `A família está no passo "${s.etapa}" do sistema e o sistema não entendeu a última resposta dela. A última mensagem do consultório foi:\n«${semDadosPessoais(s.ultimaDoConsultorio ?? '').slice(0, 900)}»\nSe der para traduzir o que ela quis dizer numa opção, use responder_etapa. Se ela perguntou outra coisa, responda e lembre o passo em aberto, a não ser que ele já tenha sido lembrado na última mensagem do consultório. Se ela se despediu ou disse que vai pensar, só se despeça.`
+  return `A família está no passo "${s.etapa}" do sistema e o sistema não entendeu a última resposta dela. A última mensagem do consultório foi:\n«${semDadosPessoais(s.ultimaDoConsultorio ?? '').slice(0, 900)}»\nSe der para traduzir o que ela quis dizer numa opção, use responder_etapa. Se ela trocou de unidade, mande o nome da nova unidade em responder_etapa (com o dia e o horário, se ela disse), nunca VOLTAR. Se ela perguntou outra coisa, responda e lembre o passo em aberto, a não ser que ele já tenha sido lembrado na última mensagem do consultório; se a dúvida for da equipe, chame a equipe: o passo continua aberto e ela segue depois. Se ela se despediu ou disse que vai pensar, só se despeça.`
 }
 
 /**
@@ -402,7 +470,54 @@ const ECO = new RegExp(
 )
 const FIM_DE_FRASE = /(?<!\b(?:Dr|Dra|Sr|Sra|Prof|Profa))(?<=[.!?])\s+/
 const PRONTO_SOCORRO = /pronto[\s-]?socorro|\b192\b|\bsamu\b|\bupa\b/i
-const FAMILIA_FALOU_DE_URGENCIA = /pronto[\s-]?socorro|\b192\b|\bsamu\b|\bupa\b|emerg[eê]ncia|urg[eê]n/i
+/**
+ * O horario que a IA passou so vale se foi a familia que escolheu (rodada 3 do
+ * painel, IA03-v1): a mae tocou "Marcar uma consulta" e a IA ja mandou as 15:00,
+ * que ficaram guardadas sem ninguem escolher. Vale quando a mensagem da familia
+ * diz a hora ("pode ser as 15h", "15:10"), ou quando ela disse sim a uma
+ * mensagem nossa que oferecia aquele horario e nenhum outro. Fora disso, o
+ * sistema para na lista de horarios do dia e ela toca.
+ */
+function horasDitas(texto: string): { hora: number; minuto: number | null }[] {
+  const t = texto.toLowerCase()
+  const achadas: { hora: number; minuto: number | null }[] = []
+  for (const m of t.matchAll(/(\d{1,2})\s*(?::|h)\s*(\d{2})\b/g)) achadas.push({ hora: Number(m[1]), minuto: Number(m[2]) })
+  for (const m of t.matchAll(/(\d{1,2})\s*(?:h|hs|horas)\b(?!\s*\d)/g)) achadas.push({ hora: Number(m[1]), minuto: null })
+  for (const m of t.matchAll(/(\d{1,2})\s+e\s+(\d{2}|meia)\b/g)) achadas.push({ hora: Number(m[1]), minuto: m[2] === 'meia' ? 30 : Number(m[2]) })
+  return achadas
+}
+
+function horarioEscolhido(s: Situacao, horario: unknown): string {
+  const pedido = String(horario ?? '').trim().match(/^(\d{1,2})(?::(\d{2}))?$/)
+  if (!pedido) return ''
+  const hora = Number(pedido[1])
+  const minuto = Number(pedido[2] ?? 0)
+  const disse = (texto: string) => horasDitas(texto).some((h) => h.hora === hora && (h.minuto ?? 0) === minuto)
+  if (disse(s.texto)) return String(horario)
+  const oferecidos = horasDitas(s.ultimaDoConsultorio ?? '')
+  const sim = /^\s*(sim|pode|pode ser|quero|isso|ok|fechado|combinado|beleza|blz|perfeito)\b/i.test(s.texto)
+  if (sim && oferecidos.length === 1 && disse(s.ultimaDoConsultorio ?? '')) return String(horario)
+  return ''
+}
+
+/** A familia esta respondendo a ficha do paciente (dados_nome, dados_cpf...). */
+function fichaAberta(s: Situacao): boolean {
+  return /^dados_/.test(s.etapa ?? '')
+}
+
+/** A familia ja contou um sinal de alarme, ou pediu urgencia, nesta conversa. */
+function conversaDeUrgencia(s: Situacao): boolean {
+  if (s.urgenciaAberta) return true
+  return s.historico.some((m) => m.de === 'familia' && (Boolean(sinalDeAlarme(m.texto)) || familiaFalouDeUrgencia(m.texto)))
+}
+
+// "Nao e urgencia, so queria saber..." nao e falar de urgencia (painel com IA,
+// 17/10/2026): a palavra solta deixava o pronto-socorro no fim de uma duvida
+// comum. A negacao e a mesma do robo (pediuUrgencia).
+function familiaFalouDeUrgencia(texto: string): boolean {
+  if (PRONTO_SOCORRO.test(texto) || pediuUrgencia(texto)) return true
+  return /emerg[eê]ncia/i.test(texto) && !/\b(n[aã]o|nem|sem)\b[^.!?\n]{0,15}emerg/i.test(texto)
+}
 
 /**
  * Tira as frases que o consultorio acabou de dizer (16/10/2026).
@@ -475,6 +590,38 @@ export function falaComAEquipe(texto: string): boolean {
   return PARA_A_EQUIPE.some((r) => r.test(texto))
 }
 
+/**
+ * O plano da IA nao vai para a familia (17/10/2026, rodada 2 do painel).
+ *
+ * Sem pensar antes de responder (thinking between_tools), o Sonnet passou a
+ * escrever o raciocinio no texto que acompanha a ferramenta, e ele saia colado
+ * em cima da lista de horarios: "A familia aceitou marcar, e a conversa ja
+ * definiu unidade (Sao Paulo) e dia (sabado, 24/10)... entao abro o agendamento
+ * com unidade e dia." Em cinco de seis agendamentos. A instrucao pede para nao
+ * narrar; aqui sai a frase que fala DA familia ou do que a IA vai fazer.
+ */
+const NARRACAO = [
+  /\b(?:a|essa|esta)\s+fam[ií]lia\s+(?:disse|aceitou|quer|escolheu|pediu|pergunt\w*|n[aã]o|j[aá]|est[aá]|confirmou|respondeu|mandou|escreveu|tem)\b/i,
+  /\b(?:a|o)\s+(?:m[aã]e|pai|respons[aá]vel)\s+(?:disse|aceitou|quer|escolheu|pediu|pergunt\w*|n[aã]o|j[aá]|est[aá]|confirmou|respondeu|mandou|escreveu)\b/i,
+  /\b(?:abrir_fluxo|responder_etapa|ver_horarios|chamar_equipe|fluxo)\b/i,
+  /\ba conversa j[aá] (?:definiu|combinou|tem)\b/i,
+  /\bent[aã]o (?:abro|vou abrir|chamo|vou chamar|passo)\b/i,
+  /\b(?:abro|abrirei) o agendamento\b/i,
+  /\bvou abrir o agendamento direto\b/i,
+]
+
+export function semNarracao(texto: string): string {
+  const linhas = texto.split('\n').map((linha) =>
+    linha
+      .split(FIM_DE_FRASE)
+      .filter((frase) => !NARRACAO.some((r) => r.test(frase)))
+      .join(' '),
+  )
+  const limpo = linhas.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  if (limpo !== texto.trim()) console.warn('Atendente com IA narrou o plano no texto da familia; cortado', texto.slice(0, 200))
+  return limpo
+}
+
 const AVISO_PADRAO = 'Vou confirmar isso com a equipe e te respondemos por aqui.'
 const AVISO_DE_URGENCIA = 'Se for uma emergência com risco de vida, procure o pronto-socorro mais próximo ou ligue 192.'
 
@@ -492,14 +639,47 @@ const CONDUTA = new RegExp(
     String.raw`\bde\s+\d+\s+em\s+\d+\s*(h|horas)\b`,
     String.raw`\b(dose|posologia|dosagem)\b`,
     String.raw`\b(pode|podem|deve|devem)\s+(dar|tomar|oferecer|aplicar|suspender)\b`,
-    String.raw`\b(d[eê]|ofere[cç]a|suspenda|aplique|use|tente)\s+(a\s+ele|a\s+ela|pra\s+ele|pra\s+ela|um|uma|o|a)?\s*(rem[eé]dio|xarope|soro|antit[eé]rmico|dipirona|paracetamol|ibuprofeno|omeprazol|simeticona|lactulose|probi[oó]tico|ch[aá])`,
+    String.raw`\b(d[eê]|ofere[cç]a|suspenda|aplique|use|tente)\s+(a\s+ele|a\s+ela|pra\s+ele|pra\s+ela|um|uma|o|a)?\s*(rem[eé]dio|xarope|soro|antit[eé]rmico|dipirona|paracetamol|ibuprofeno|omeprazol|simeticona|lactulose|probi[oó]tico|ch[aá])(?![a-zà-ú])`,
     String.raw`\b(dipirona|paracetamol|ibuprofeno|omeprazol|domperidona|bromoprida|ondansetrona|simeticona|lactulose|macrogol|probi[oó]tico|buscopan|tylenol|novalgina|plasil|vonau)\b`,
   ].join('|'),
   'i',
 )
 
+/**
+ * A frase que RECUSA a conduta nao e conduta (17/10/2026, painel com IA).
+ *
+ * A trava via so o nome do remedio: "sobre o paracetamol, quem orienta e o Dr.
+ * Marcello" foi trocado pela frase padrao numa febre de bebe de 7 semanas, a
+ * conversa saiu da urgencia e o alerta ao medico nao foi. Frase com recusa sai
+ * da conferencia, a nao ser que tenha conduta firme (numero com unidade,
+ * intervalo, "pode dar") ou elogie o remedio ("costuma ajudar").
+ */
+const RECUSA = new RegExp(
+  [
+    String.raw`\bquem\s+(orienta|indica|decide|avalia|define|prescreve|receita)\b`,
+    String.raw`\bn[aã]o\s+(posso|consigo|podemos|conseguimos|d[aá]\s+(pra|para))\s+(te\s+|lhe\s+)?(orientar|indicar|recomendar|passar|dizer|informar|falar|prescrever|confirmar|liberar|sugerir)\b`,
+    String.raw`\bn[aã]o\s+(oriento|indico|recomendo|prescrevo)\b`,
+  ].join('|'),
+  'i',
+)
+const CONDUTA_FIRME = new RegExp(
+  [
+    String.raw`\b\d+([.,]\d+)?\s*(mg|ml|mcg|gotas?|comprimidos?|sach[eê]s?)\b`,
+    String.raw`\bde\s+\d+\s+em\s+\d+\s*(h|horas)\b`,
+    // "nao posso dizer se pode dar" e recusa; "pode dar" sozinho, nao.
+    String.raw`(?<!\bse\s)(?<!n[aã]o\s)\b(pode|podem|deve|devem)\s+(dar|tomar|oferecer|aplicar|suspender)\b`,
+    String.raw`\b(ajuda|ajudam|alivia|aliviam|resolve|melhora|funciona|costuma|indicad[oa]|recomendad[oa]|seguro|segura)\b`,
+  ].join('|'),
+  'i',
+)
+
 export function orientouConduta(t: string): boolean {
-  return CONDUTA.test(t)
+  const semRecusas = t
+    .split('\n')
+    .flatMap((linha) => linha.split(FIM_DE_FRASE))
+    .filter((frase) => !(RECUSA.test(frase) && !CONDUTA_FIRME.test(frase)))
+    .join(' ')
+  return CONDUTA.test(semRecusas)
 }
 
 export function limparTexto(t: string, manterProntoSocorro: boolean): string {
@@ -532,11 +712,25 @@ async function conversarComClaude(
 ): Promise<{ resultado: Resultado; acao: string; nota?: string }> {
   const fim = Date.now() + prazoMs
   const mensagens: Record<string, unknown>[] = [{ role: 'user', content: contexto(s) }]
+  let vazias = 0
   for (let volta = 0; volta < ATE; volta++) {
     const resta = fim - Date.now()
     if (resta < 1500) throw new Error('prazo esgotado')
     const resposta = await chamar(
-      { model: modelo, max_tokens: 700, system: sistemaDoClaude(s, emEtapa), tools: ferramentasDoClaude(emEtapa), messages: mensagens },
+      {
+        model: modelo,
+        // 700 cortava a resposta quando o Sonnet pensava antes (17/10/2026).
+        max_tokens: 1500,
+        // Sem pensar antes de responder (17/10/2026, painel com IA): o Sonnet
+        // devolvia so um bloco de pensamento vazio, sem texto nem ferramenta, e a
+        // mae de uma crianca vomitando ficou sem resposta duas vezes. A API recusa
+        // 'disabled' neste modelo e manda usar 'between_tools': nada antes da
+        // resposta, so notas curtas entre uma ferramenta e outra.
+        thinking: { type: 'between_tools' },
+        system: sistemaDoClaude(s, emEtapa),
+        tools: ferramentasDoClaude(emEtapa),
+        messages: mensagens,
+      },
       resta,
     )
     const blocos = Array.isArray(resposta?.content) ? resposta.content : []
@@ -544,10 +738,14 @@ async function conversarComClaude(
     const sintoma = relatoDeSintoma(s.texto)
     // Sintoma com o consultorio fechado: o pronto-socorro fica, como no robo
     // (fraseClinica). Em duvida comum, sai (ver limparTexto).
+    // A conversa ja e de urgencia (rodada 2 do painel, IA05-v1): "nao espere ate
+    // quarta. Leve-o agora a um pronto-socorro" perdeu a segunda frase porque a
+    // mensagem nova ("qual o primeiro horario?") nao falava de urgencia.
     const urgente =
       usos.some((u) => u.name === 'chamar_equipe' && u.input?.motivo === 'urgencia') ||
-      FAMILIA_FALOU_DE_URGENCIA.test(s.texto) ||
-      (sintoma && !dentroDoExpediente(s.agora))
+      familiaFalouDeUrgencia(s.texto) ||
+      (sintoma && !dentroDoExpediente(s.agora)) ||
+      conversaDeUrgencia(s)
     const bruto = blocos
       .filter((b): b is Extract<Bloco, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
@@ -559,47 +757,113 @@ async function conversarComClaude(
       const menu = await ferramentas.robo(FLUXOS.menu.texto, FLUXOS.menu.etapa)
       if (menu) return { resultado: menu, acao: 'fluxo:menu' }
     }
-    const ultimaNossa = [...s.historico].reverse().find((m) => m.de === 'consultorio')?.texto
-    const texto = semRepetir(limparTexto(bruto, urgente), ultimaNossa)
+    // Pergunta repetida se responde de novo (17/10/2026, teste do Edu): "o dr
+    // atende ao sabado?" pela segunda vez perdeu justamente "Atende sim, aos
+    // sabados em Sao Paulo" - a frase era igual a da resposta anterior, e o
+    // corte de repeticao (feito para "vou pensar" e "boa noite") a tirou. Sobrou
+    // "Os proximos sao 24/10..." sem dizer onde. Com pergunta, nada e cortado.
+    const ultimaNossa = parecePergunta(s.texto)
+      ? null
+      : [...s.historico].reverse().find((m) => m.de === 'consultorio')?.texto
+    const texto = semNarracao(semRepetir(limparTexto(bruto, urgente), ultimaNossa))
     const pedidoAEquipe = usos.find((u) => u.name === 'chamar_equipe')?.input
     const avisoDaEquipe = pedidoAEquipe?.para_familia ?? pedidoAEquipe?.texto
-    if (sintoma && (orientouConduta(bruto) || orientouConduta(String(avisoDaEquipe ?? '')))) {
-      const fechado = !dentroDoExpediente(s.agora)
-      const aviso =
-        `Sobre o que fazer agora, quem orienta é ${s.quemAtende}: já passei para a equipe, que responde por aqui.` +
-        (fechado ? ' Se a criança estiver mal, procure o pronto-socorro mais próximo ou ligue 192.' : '')
-      return {
-        resultado: await ferramentas.equipe('atendente', aviso),
-        acao: 'equipe:medico (trava de conduta)',
-        nota: '🤖 A IA ia orientar remédio ou dose numa mensagem com sintoma; a trava segurou e passou para a equipe.',
-      }
+    // A trava confere o que vai SAIR para a familia (rodada 3 do painel): o
+    // rascunho "preciso ver os horarios antes de chamar a equipe" disparava a
+    // trava numa febre de bebe de 7 semanas ("de chamar" casava com "de cha", o
+    // cha de beber, na lista acima) e a urgencia virava "atendente". Rascunho de quem so
+    // consulta horario nao sai; com abrir_fluxo, sai so o para_familia.
+    const daVez = usos.find((u) => u.name !== 'ver_horarios')
+    const vaiSair = !usos.length
+      ? texto
+      : daVez?.name === 'abrir_fluxo'
+        ? String(daVez.input?.para_familia ?? '')
+        : daVez?.name === 'chamar_equipe'
+          ? `${String(avisoDaEquipe ?? '')}\n${texto}`
+          : daVez?.name === 'responder_etapa'
+            ? texto
+            : ''
+    if (sintoma && orientouConduta(vaiSair)) {
+      return await travarConduta(s, ferramentas, bruto, usos, String(pedidoAEquipe?.resumo_para_equipe ?? ''), emEtapa)
     }
     if (usos.length === 0) {
-      if (!texto) throw new Error('resposta vazia')
+      if (!texto) {
+        // Resposta sem texto e sem ferramenta: mais uma tentativa, igual, antes
+        // de desistir. Desistir cai no robo (ver atenderComAssistente).
+        if (++vazias < 2) continue
+        throw new Error('resposta vazia')
+      }
       return { resultado: { resposta: texto }, acao: 'conversou' }
     }
 
     // Ferramentas que encerram a vez: a primeira que aparecer decide.
     const final = usos.find((u) => u.name !== 'ver_horarios')
+    // Horarios pedidos junto com a equipe (rodada 2 do painel, IA05-v1): a
+    // agenda era descartada e a mae, que ouviu "vou ver o horario mais
+    // proximo", pediu tres vezes. Com tempo sobrando, a agenda volta para a IA
+    // e a chamada da equipe fica para a volta seguinte, ja com o horario.
+    if (final?.name === 'chamar_equipe' && usos.some((u) => u.name === 'ver_horarios') && fim - Date.now() > 7000 && volta < ATE - 1) {
+      const resultados = []
+      for (const uso of usos) {
+        resultados.push(
+          uso.name === 'ver_horarios'
+            ? { type: 'tool_result', tool_use_id: uso.id, content: await ferramentas.horarios(String(uso.input?.unidade ?? '')).catch((erro) => `Falhou: ${erro}`) }
+            : { type: 'tool_result', tool_use_id: uso.id, is_error: true, content: 'Ainda não feito: com os horários acima, chame chamar_equipe de novo, com o horário mais próximo em para_familia.' },
+        )
+      }
+      mensagens.push({ role: 'assistant', content: blocos }, { role: 'user', content: resultados })
+      continue
+    }
     if (final) {
-      const juntar = (r: Resultado | null): Resultado => {
-        if (!r) return { resposta: texto || 'Certo!' }
-        return { ...r, resposta: texto ? `${texto}\n\n${r.resposta}` : r.resposta }
+      const juntar = (r: Resultado | null, antes = texto): Resultado => {
+        if (!r) return { resposta: antes || 'Certo!' }
+        return { ...r, resposta: antes ? `${antes}\n\n${r.resposta}` : r.resposta }
       }
       if (final.name === 'abrir_fluxo') {
         const fluxo = FLUXOS[String(final.input?.fluxo ?? '')]
         if (!fluxo) throw new Error(`fluxo desconhecido: ${final.input?.fluxo}`)
+        // Para a familia vai so o para_familia (rodada 2 do painel, 17/10/2026):
+        // o texto solto junto da ferramenta e o rascunho da IA, e em quatro de
+        // quatro agendamentos com horario saiu "A familia escolheu o horario,
+        // entao abro o agendamento direto...". Nem todo rascunho tem cara de
+        // rascunho ("Como ela nao vai ver a lista, digo o valor"), entao o
+        // texto solto nao vai, filtrado ou nao.
+        const paraFamilia = semNarracao(limparTexto(String(final.input?.para_familia ?? ''), urgente))
         let doRobo = await ferramentas.robo(fluxo.texto, fluxo.etapa)
-        if (final.input.fluxo === 'agendar') doRobo = await adiantarAgendamento(ferramentas, doRobo, final.input)
+        if (final.input.fluxo === 'agendar') doRobo = await seguirComOPedido(ferramentas, doRobo, { ...final.input, horario: horarioEscolhido(s, final.input?.horario) })
+        // Remarcar ou cancelar a consulta que ja existe: o pedido vai junto, e a
+        // familia so confirma. Com mais de uma consulta, a lista fica para ela
+        // escolher qual - o robo nao adivinha.
+        if (fluxo.depois && s.consultas.length === 1 && ferramentas.etapa && (await ferramentas.etapa()) === 'minha_consulta') {
+          const r = await ferramentas.robo(fluxo.depois, 'atual')
+          if (r && !roboNaoEntendeu(r)) doRobo = r
+          // Remarcar nao cancela nada antes de a nova estar marcada, entao o SIM
+          // e so um passo a mais (rodada 2 do painel: "da pra passar a consulta
+          // da Helena pra sexta?" ainda respondia SIM, unidade e dia). O pedido
+          // segue ate as datas, ou os horarios do dia. Cancelar continua
+          // esperando o SIM da familia.
+          if (final.input.fluxo === 'remarcar' && (await ferramentas.etapa()) === 'confirmar_cancelamento') {
+            const datas = await ferramentas.robo('sim', 'atual')
+            if (datas && !roboNaoEntendeu(datas)) doRobo = await seguirComOPedido(ferramentas, datas, { ...final.input, horario: horarioEscolhido(s, final.input?.horario) })
+          }
+        }
         // O menu ja cumprimenta: o "Ola! Sou o assistente..." do Claude antes
         // dele saia como dois cumprimentos seguidos.
         if (final.input.fluxo === 'menu') return { resultado: doRobo ?? { resposta: texto || 'Certo!' }, acao: 'fluxo:menu' }
-        return { resultado: juntar(doRobo), acao: `fluxo:${final.input.fluxo}` }
+        return { resultado: juntar(doRobo, paraFamilia), acao: `fluxo:${final.input.fluxo}` }
       }
       if (final.name === 'responder_etapa') {
-        const r = await ferramentas.robo(String(final.input?.texto ?? '').slice(0, 200), 'mesma')
+        let r = await ferramentas.robo(String(final.input?.texto ?? '').slice(0, 200), 'mesma')
         // Traduziu e o robo ainda nao entendeu: o Claude nao insiste, explica.
-        if (roboNaoEntendeu(r)) return { resultado: juntar(r), acao: 'etapa_sem_sucesso' }
+        // O que a familia le aqui e o para_familia, como no abrir_fluxo (rodada 3
+        // do painel: "Nao da para adivinhar qual dos seis, entao preciso
+        // perguntar" saiu em cima do "Nao entendi" do robo).
+        if (roboNaoEntendeu(r)) {
+          return { resultado: juntar(r, semNarracao(limparTexto(String(final.input?.para_familia ?? ''), urgente))), acao: 'etapa_sem_sucesso' }
+        }
+        // "Prefiro Sao Paulo, tem segunda?": a unidade troca aqui, e o dia e o
+        // horario ditos junto seguem como no agendar.
+        r = await seguirComOPedido(ferramentas, r, { dia: final.input?.dia, horario: final.input?.horario })
         // A traducao vale pelo resultado do robo; o texto do Claude so atrapalharia.
         return { resultado: r ?? { resposta: texto || 'Certo!' }, acao: 'etapa' }
       }
@@ -608,7 +872,7 @@ async function conversarComClaude(
         // `texto` era o nome do campo ate 16/10/2026; continua valendo.
         const escrito = String(final.input?.para_familia ?? final.input?.texto ?? '')
         let resumo = String(final.input?.resumo_para_equipe ?? '').trim()
-        let aviso = semRepetir(limparTexto(escrito, urgente), ultimaNossa) || texto || AVISO_PADRAO
+        let aviso = semNarracao(semRepetir(limparTexto(escrito, urgente), ultimaNossa)) || texto || AVISO_PADRAO
         if (falaComAEquipe(aviso)) {
           console.warn('Atendente com IA escreveu para a equipe no texto da familia; vai como nota interna', aviso.slice(0, 200))
           resumo = [resumo, aviso].filter(Boolean).join('\n\n')
@@ -618,10 +882,26 @@ async function conversarComClaude(
         // mas e a frase que nao pode faltar. Vai no fim, condicionada ao risco
         // de vida: na urgencia comum quem resolve e a consulta (pedido do Edu).
         if (motivo === 'urgencia' && !PRONTO_SOCORRO.test(aviso)) aviso = `${aviso}\n\n${AVISO_DE_URGENCIA}`
+        // Duvida no meio do cadastro ou da lista de horarios: a equipe fica
+        // sabendo e o passo continua aberto (ver Ferramentas.equipe). Urgencia
+        // sai do fluxo, como sempre.
+        // A ficha do paciente fica aberta mesmo na urgencia (rodada 3 do painel,
+        // IA03-v2): a consulta ja esta guardada, e a urgencia que tirava a
+        // conversa da ficha deixava a consulta das 15h sem crianca - a IA
+        // ainda disse "Lucas anotado" sem nada gravado.
+        const manterEtapa = emEtapa && (motivo !== 'urgencia' || fichaAberta(s))
+        // So quando a IA ja nao lembrou o passo (rodada 2: o lembrete saia duas
+        // vezes, o da IA e este).
+        if (manterEtapa && !/continu|pergunta acima|👆|\?\s*$/i.test(aviso)) {
+          aviso = `${aviso}\n\nPara continuar de onde paramos, é só responder a pergunta acima 👆`
+        }
+        // Sem resumo, a nota leva o que a familia leu (painel com IA: a IA disse
+        // "passei para a equipe que voce precisa hoje" e nenhuma nota foi gravada).
+        if (!resumo) resumo = `(sem resumo) ${String(s.texto).slice(0, 300)}`
         return {
-          resultado: await ferramentas.equipe(MOTIVOS[motivo] ?? 'atendente', aviso.slice(0, 800)),
-          acao: `equipe:${motivo}`,
-          nota: resumo ? `🤖 Resumo da IA para a equipe: ${resumo}`.slice(0, 1500) : undefined,
+          resultado: await ferramentas.equipe(MOTIVOS[motivo] ?? 'atendente', aviso.slice(0, 900), { manterEtapa }),
+          acao: `equipe:${motivo}${manterEtapa ? ' (passo mantido)' : ''}`,
+          nota: `🤖 Resumo da IA para a equipe: ${resumo}`.slice(0, 1500),
         }
       }
       throw new Error(`ferramenta desconhecida: ${final.name}`)
@@ -646,32 +926,100 @@ async function conversarComClaude(
  * de escolher de novo o que acabara de combinar. Aqui o fluxo e aberto como
  * sempre e, a cada passo, o robo recebe a unidade e depois o dia como se a
  * familia os tivesse digitado - com as regras dele (convenio, telemedicina,
- * "nesta unidade nao tem sabado"). So avanca enquanto o robo estiver no passo
- * esperado: ja tem consulta, mais de um filho ou pergunta de convenio param o
- * atalho ali, e o robo pergunta como sempre. Nada e reservado: quem marca e o
- * toque no horario, e o cadastro e o questionario do paciente novo seguem
- * depois, do jeito de sempre.
+ * "nesta unidade nao tem sabado"). So avanca enquanto o robo estiver num passo
+ * que o pedido responde: ja tem consulta ou pergunta de convenio param o atalho
+ * ali, e o robo pergunta como sempre.
+ *
+ * Painel com IA (17/10/2026): a crianca e o horario tambem. "Quero marcar pro
+ * Theo" perguntava "Para quem e a consulta?" com a Helena em primeiro; "pode
+ * ser dia 28 as 16:40" abria a lista do dia 28 e pedia o numero do horario.
+ * O horario so vem quando a familia escolheu um: ai ele fica guardado na hora,
+ * e o cadastro e o questionario do paciente novo seguem do jeito de sempre.
  */
-async function adiantarAgendamento(
+async function seguirComOPedido(
   ferramentas: Ferramentas,
   aberto: Resultado | null,
-  pedido: { unidade?: unknown; dia?: unknown },
+  pedido: { paciente?: unknown; unidade?: unknown; dia?: unknown; horario?: unknown },
 ): Promise<Resultado | null> {
   if (!ferramentas.etapa) return aberto
+  const respostas: Record<string, string> = {
+    aguardando_paciente: String(pedido.paciente ?? '').trim(),
+    aguardando_unidade: String(pedido.unidade ?? '').trim(),
+    aguardando_dia: String(pedido.dia ?? '').trim(),
+    aguardando_horario: String(pedido.horario ?? '').trim(),
+  }
   let atual = aberto
-  const passos: [string, string][] = [
-    ['aguardando_unidade', String(pedido.unidade ?? '').trim()],
-    ['aguardando_dia', String(pedido.dia ?? '').trim()],
-  ]
-  for (const [esperada, texto] of passos) {
+  for (let passo = 0; passo < 5; passo++) {
+    const etapa = await ferramentas.etapa()
+    // Remarcar abre direto nas datas da unidade atual: se a familia pediu outra,
+    // a unidade vai antes do dia (o robo troca de unidade pelo nome).
+    const chave = etapa === 'aguardando_dia' && respostas.aguardando_unidade ? 'aguardando_unidade' : etapa
+    const texto = chave ? respostas[chave] : ''
     if (!texto) break
-    if ((await ferramentas.etapa()) !== esperada) break
+    // Cada parte do pedido vale uma vez: o robo que voltou ao mesmo passo nao
+    // entendeu, e repetir seria um laco.
+    respostas[chave as string] = ''
     const r = await ferramentas.robo(texto.slice(0, 60), 'atual')
     // O robo nao entendeu: vale a pergunta anterior, que ainda esta de pe.
     if (!r || roboNaoEntendeu(r)) break
     atual = r
   }
   return atual
+}
+
+/**
+ * A trava de conduta (16/10/2026), sem apagar a urgencia (17/10/2026).
+ *
+ * Painel com IA: na febre de um bebe de 7 semanas a IA chamou a equipe com
+ * urgencia, a trava trocou o texto pela frase padrao e mandou a conversa como
+ * "atendente" - o alerta ao medico so saiu na mensagem seguinte, porque a mae
+ * insistiu. Agora a urgencia continua urgencia (alerta, horario mais proximo,
+ * pronto-socorro no rodape). A frase padrao nao se repete igual na mensagem
+ * seguinte, e a nota da equipe conta o que a IA tinha escrito, em vez de dizer
+ * que ela "ia orientar remedio" quando estava recusando.
+ */
+async function travarConduta(
+  s: Situacao,
+  ferramentas: Ferramentas,
+  bruto: string,
+  usos: Extract<Bloco, { type: 'tool_use' }>[],
+  resumo: string,
+  emEtapa: boolean,
+): Promise<{ resultado: Resultado; acao: string; nota: string }> {
+  const urgencia =
+    usos.some((u) => u.name === 'chamar_equipe' && u.input?.motivo === 'urgencia') ||
+    familiaFalouDeUrgencia(s.texto) ||
+    Boolean(sinalDeAlarme(s.texto)) ||
+    // "Posso dar dipirona?" depois da dor forte (rodada 3, IA04): a conversa ja
+    // e de urgencia, mesmo que a pergunta de agora nao seja.
+    conversaDeUrgencia(s)
+  const jaDisse = /quem orienta [eé]/i.test(s.ultimaDoConsultorio ?? '')
+  const fechado = !dentroDoExpediente(s.agora)
+  const nota =
+    '🤖 A resposta da IA citava remédio ou dose numa mensagem com sintoma; por segurança saiu a frase padrão.' +
+    (resumo.trim() ? `\nResumo da IA: ${resumo.trim()}` : '') +
+    `\nO que a IA tinha escrito: «${bruto.slice(0, 600)}»`
+  if (urgencia) {
+    const aviso =
+      `🚨 Entendo a preocupação. Já avisei ${s.quemAtende}, que vai avaliar o que você contou e responder por aqui. ` +
+      'Remédio e dose, só com a orientação médica.\n\n' +
+      AVISO_DE_URGENCIA
+    const r = await ferramentas.equipe('urgencia', aviso, { manterEtapa: emEtapa && fichaAberta(s) })
+    return { resultado: s.canal === 'Instagram' ? r : comOfertaDeHorario(r ?? { resposta: aviso, atencao: 'urgencia' }), acao: 'equipe:urgencia (trava de conduta)', nota }
+  }
+  const aviso = jaDisse
+    ? `Como falei, remédio e dose quem orienta é ${s.quemAtende}, e a equipe já está com a sua mensagem.`
+    : `Sobre o que fazer agora, quem orienta é ${s.quemAtende}: já passei para a equipe, que responde por aqui.`
+  const continuar = emEtapa ? '\n\nPara continuar de onde paramos, é só responder a pergunta acima 👆' : ''
+  return {
+    resultado: await ferramentas.equipe(
+      'atendente',
+      aviso + (fechado ? ' Se a criança estiver mal, procure o pronto-socorro mais próximo ou ligue 192.' : '') + continuar,
+      { manterEtapa: emEtapa },
+    ),
+    acao: 'equipe:medico (trava de conduta)',
+    nota,
+  }
 }
 
 /** No modo sombra nada acontece de verdade: o robo e a equipe sao de mentira. */
@@ -711,7 +1059,9 @@ export async function atenderComAssistente(opcoes: {
   const naoEntendeu = (r: Resultado | null) => roboNaoEntendeu(r) || Boolean(opcoes.roboNaoEntendeuAgora?.())
   const { modo, situacao, ferramentas, chamar, roboDireto } = opcoes
   const modelo = opcoes.modelo || MODELO_PADRAO
-  const prazo = opcoes.prazoMs ?? 12_000
+  // 15 s desde 17/10/2026: o Sonnet com duas voltas de ver_horarios passava dos
+  // 12, e a urgencia caia no robo. "todas" num ver_horarios so tirou voltas.
+  const prazo = opcoes.prazoMs ?? 15_000
   if (modo === 'desligado') return { resultado: await roboDireto(), origem: 'robo', eventos: [] }
 
   if (!chamar) {
@@ -744,7 +1094,16 @@ export async function atenderComAssistente(opcoes: {
   }
 
   // Ligado.
-  if (doRobo) return { resultado: await roboDireto(), origem: 'robo', eventos: [{ evento: 'ia_passou_ao_robo', detalhe: doRobo }] }
+  if (doRobo) {
+    const doRoboAgora = await roboDireto()
+    // Sinal de alarme logo depois do aviso de urgencia: o robo cala para nao
+    // repetir o texto pronto (mandadoHaPouco). Mas a mae perguntou alguma coisa
+    // (rodada 2 do painel: "e ate as 15h? ele nao para de vomitar" ficou sem
+    // resposta), e quem responde e a IA, que le a conversa toda.
+    if (doRoboAgora || doRobo !== 'urgencia') {
+      return { resultado: doRoboAgora, origem: 'robo', eventos: [{ evento: 'ia_passou_ao_robo', detalhe: doRobo }] }
+    }
+  }
 
   if (emEtapa) {
     const doRoboNaEtapa = await roboDireto()
@@ -763,7 +1122,18 @@ export async function atenderComAssistente(opcoes: {
     return { resultado, origem: 'ia', eventos: [{ evento: 'ia_respondeu', detalhe: acao }], nota }
   } catch (erro) {
     console.warn('Atendente com IA falhou; o robo responde', erro)
-    return { resultado: await roboDireto(), origem: 'robo', eventos: [{ evento: 'ia_falhou', detalhe: String(erro).slice(0, 120) }] }
+    const eventos = [{ evento: 'ia_falhou', detalhe: String(erro).slice(0, 120) }]
+    const doRobo = await roboDireto()
+    if (doRobo) return { resultado: doRobo, origem: 'robo', eventos }
+    // Na fila da equipe o robo fica calado de proposito - mas quem respondia ali
+    // era a IA, e ela falhou (17/10/2026, painel com IA: "ta confirmado ne?" de
+    // uma mae com o filho vomitando ficou sem resposta duas vezes). Silencio
+    // nunca: a familia sabe que a equipe viu, e a conversa sobe na fila.
+    return {
+      resultado: await ferramentas.equipe('atendente', 'Recebi sua mensagem e já passei para a equipe, que responde por aqui.'),
+      origem: 'robo',
+      eventos: [...eventos, { evento: 'ia_falhou_sem_robo' }],
+    }
   }
 }
 
@@ -788,6 +1158,7 @@ export async function montarSituacao(
     quemAtende: string
     agora: Date
     equipeConversando: boolean
+    urgenciaAberta?: boolean
   },
 ): Promise<Situacao> {
   let historico: Situacao['historico'] = []
@@ -822,6 +1193,9 @@ export async function montarSituacao(
     const quando = new Date(c.inicio).toLocaleString('pt-BR', {
       timeZone: 'America/Sao_Paulo', weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
     })
+    // Sem cadastro, o nome e de quem marcou: dizer isso, e nao um nome que a
+    // IA leria como o da crianca.
+    if (c.semCadastro) return `${quando} · ${c.unidade} · cadastro da criança ainda incompleto`
     const de = (c.paciente ?? '').trim().split(/\s+/)[0]
     return `${quando} · ${c.unidade}${de ? ` · ${de}` : ''}`
   })
@@ -838,5 +1212,6 @@ export async function montarSituacao(
     quemAtende: p.quemAtende,
     agora: p.agora,
     equipeConversando: p.equipeConversando,
+    urgenciaAberta: p.urgenciaAberta ?? false,
   }
 }

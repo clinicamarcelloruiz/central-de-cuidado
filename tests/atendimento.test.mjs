@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica, sinalDeAlarme } from './atendimento.build.mjs'
+import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica, sinalDeAlarme, pediuUrgencia, desistiuDoAgendamento } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 import { montarMensagens } from './conteudo.build.mjs'
 
@@ -23,6 +23,9 @@ function fazerAdmin({
   falharSlots = false,
   erroInsert = null,
   remarcacoesAnteriores = 0,
+  // A unidade e o paciente da consulta lidos de volta (remarcacao, 17/10/2026).
+  // Sem eles, a remarcacao pergunta a unidade, como antes.
+  daConsulta = {},
   respostasProntas = [],
   telemedicina = { ativa: false, texto: '' },
   // Colunas que este banco falso NÃO tem. Recusa o update inteiro quando
@@ -178,6 +181,7 @@ function fazerAdmin({
                 starts_at: '2027-09-14T18:00:00Z',
                 modality: 'presencial',
                 clinic_units: { name: 'Livance Ibirapuera - São Paulo', address: 'Rua Y, 30' },
+                ...daConsulta,
               },
             }),
           // A consulta marcada e lida de volta: e o id dela que a ficha de
@@ -309,6 +313,7 @@ async function caso(titulo, passos, opcoes = {}) {
     falharSlots: opcoes.falharSlots,
     erroInsert: opcoes.erroInsert,
     remarcacoesAnteriores: opcoes.remarcacoesAnteriores ?? 0,
+    daConsulta: opcoes.daConsulta ?? {},
     respostasProntas: opcoes.respostasProntas ?? [],
     telemedicina: opcoes.telemedicina ?? { ativa: false, texto: '' },
     colunasAusentes: opcoes.colunasAusentes ?? [],
@@ -3394,8 +3399,9 @@ for (const [frase, esperado] of [
 }
 
 // Ficha: sem "dele(a)" de formulario.
-await caso('Data de nascimento pergunta pela criança, sem "dele(a)"', [
-  ['Helena Souza Lima', '*data de nascimento* da criança'],
+// 'do paciente' desde 17/10/2026: o painel com IA marcou uma moca de 17 anos.
+await caso('Data de nascimento pergunta pelo paciente, sem "dele(a)"', [
+  ['Helena Souza Lima', '*data de nascimento* do paciente'],
 ], { consultas: CONSULTA_SEM_FICHA, fichas: FICHA_VAZIA, estadoInicial: NO_MENU })
 
 // ---------------------------------------------------------------------------
@@ -4084,13 +4090,13 @@ await caso('Painel: "8h" marca as 08:00 direto', [
   ['quero marcar', 'Em qual unidade'],
   ['1', 'Datas disponíveis'],
   ['1', 'Horários de'],
-  ['8h', 'às 08:00* está guardado'],
+  ['8h', ['às 08:00*', 'está guardado']],
 ])
 await caso('Painel: "9 e 20" é 09:20', [
   ['quero marcar', 'Em qual unidade'],
   ['1', 'Datas disponíveis'],
   ['1', 'Horários de'],
-  ['tem 9 e 20?', 'às 09:20* está guardado'],
+  ['tem 9 e 20?', ['às 09:20*', 'está guardado']],
 ])
 await caso('Painel: "o mais cedo que tiver" escolhe o primeiro dia', [
   ['quero marcar', 'Em qual unidade'],
@@ -4328,6 +4334,211 @@ await caso('Cocô molinho não é urgência', [
     else passou++
   },
 })
+
+// ---------------------------------------------------------------
+// Painel com IA (17/10/2026): o que a regra tem de pegar sozinha
+// ---------------------------------------------------------------
+{
+  const confere = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  // A mae descreve o que viu, sem a palavra da lista. Com a IA fora do ar, so
+  // a regra responde.
+  for (const frase of ['ele comeu uma pilhinha do controle', 'a moedinha, acho que ele engoliu', 'vomitou um negócio tipo pó de café', 'ela vomitou escuro agora'])
+    confere(`painel IA, risco de vida: "${frase}"`, sinalDeAlarme(frase)?.risco === 'vida', JSON.stringify(sinalDeAlarme(frase)))
+  for (const frase of ['a barriga está durinha e ela chora', 'a barriga da Helena está durinha', 'ele não segura nada, tudo volta'])
+    confere(`painel IA, urgente: "${frase}"`, sinalDeAlarme(frase)?.risco === 'urgente', JSON.stringify(sinalDeAlarme(frase)))
+  confere('moedinha de chocolate é doce', sinalDeAlarme('ele comeu as moedinhas de chocolate da páscoa') === null, JSON.stringify(sinalDeAlarme('ele comeu as moedinhas de chocolate da páscoa')))
+
+  // Pressa com papel nao e urgencia de saude; com sintoma, continua sendo.
+  confere('"urgente" do relatório da escola não é urgência', !pediuUrgencia('mas eh rapidinho, ele so assina. preciso urgente a escola ta cobrando, da pra mandar hj?'))
+  confere('"urgente" do atestado não é urgência', !pediuUrgencia('preciso do atestado com urgência'))
+  confere('urgente com febre continua urgência', pediuUrgencia('é urgente, ela está com febre alta e a escola pediu atestado'))
+  confere('"urgente" sozinho continua urgência', pediuUrgencia('é urgente'))
+
+  // "Pensando bem" com outra unidade ou dia e troca, nao desistencia.
+  confere('"pensando bem melhor são paulo" não é desistir', !desistiuDoAgendamento('pensando bem melhor sao paulo, tem segunda?'))
+  confere('"pensando bem, melhor não" é desistir', desistiuDoAgendamento('pensando bem, melhor não'))
+  confere('"pensando bem" sozinho é desistir', desistiuDoAgendamento('Pensando bem...'))
+}
+
+// Troca de unidade escrita do jeito da familia, com as datas na tela.
+const SLOTS_DUAS_UNIDADES = {
+  ...SLOTS_CHEIOS,
+  'u-vila': ['2026-10-12', '2026-10-17'].flatMap((d) => ['18:00', '18:40'].map((h) => ({ slot_start: `${d}T${h}:00Z`, slot_end: `${d}T${h}:40Z` }))),
+}
+await caso('Painel IA: "na vdd prefiro sp" com as datas de Santos troca de unidade', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis em Liferty'],
+  ['na vdd prefiro sp', 'Datas disponíveis em Livance Ibirapuera'],
+], { slots: SLOTS_DUAS_UNIDADES })
+await caso('Painel IA: "pensando bem melhor são paulo" nos horários não encerra', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  // A segunda vai junto: direto nos horarios dela em Sao Paulo.
+  ['pensando bem melhor são paulo, tem segunda?', 'Horários de segunda, 12/10 em Livance Ibirapuera'],
+], { slots: SLOTS_DUAS_UNIDADES })
+await caso('Painel IA: "quero 8h, moro em são paulo" escolhe a hora, não troca', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  // A unidade no titulo: quando a IA pula a lista de unidades, e aqui que a
+  // familia confere onde vai ser.
+  ['1', 'em Liferty · Santos:*'],
+  ['quero 8h, moro em são paulo', 'está guardado'],
+], { slots: SLOTS_DUAS_UNIDADES })
+
+// Cadastro (painel com IA).
+const fichaGravada = (titulo, campos) => ({ dadosDasConsultas }) => {
+  const gravado = Object.assign({}, ...dadosDasConsultas)
+  for (const [campo, esperado] of Object.entries(campos)) {
+    if (gravado[campo] === esperado) passou++
+    else falhas.push(`${titulo} | ${campo}: esperado ${JSON.stringify(esperado)}, veio ${JSON.stringify(gravado[campo])}`)
+  }
+}
+const ATE_A_FICHA = [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['1', 'nome completo do paciente'],
+]
+await caso('Painel IA: "eu, fernanda" grava Fernanda, e data sem barra vale', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['02022024', 'nome do responsável'],
+  ['eu, fernanda', 'CPF do paciente'],
+], { verificar: fichaGravada('eu, fernanda', { intake_birth_date: '02/02/2024', intake_guardian: 'Fernanda' }) })
+await caso('Painel IA: "31 de agosto" pergunta o ano e junta', [
+  ...ATE_A_FICHA,
+  ['Davi Lucas Fontes', 'data de nascimento'],
+  ['31 de agosto', 'Faltou só o ano'],
+  ['2026', 'nome do responsável'],
+], { verificar: fichaGravada('31 de agosto', { intake_birth_date: '31/08/2026' }) })
+await caso('Painel IA: dúvida no meio da ficha não vira nome nem gasta tentativa', [
+  ...ATE_A_FICHA,
+  ['pera, e enquanto isso eu corto leite da minha dieta ou nao?', ['Não entendi isso como resposta', 'nome completo do paciente']],
+  ['nao é o nome kkk é uma pergunta, tiro o leite ou espero a consulta?', ['Não entendi isso como resposta', 'nome completo do paciente']],
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+], { verificar: fichaGravada('dúvida no meio da ficha', { intake_patient_name: 'Bernardo Nogueira Costa' }) })
+await caso('Painel IA: relato de sintoma no lugar do nome não é gravado', [
+  ...ATE_A_FICHA,
+  ['ele vomitou dnv agora. o q eu faço ate la?', 'Não entendi isso como resposta'],
+], {
+  verificar: ({ dadosDasConsultas, ultimoToque, titulo }) => {
+    if (!Object.assign({}, ...dadosDasConsultas).intake_patient_name) passou++
+    else falhas.push(`${titulo} | gravou o relato como nome`)
+    if (ultimoToque.atencao === 'atendente') passou++
+    else falhas.push(`${titulo} | a equipe não ficou sabendo (${ultimoToque.atencao})`)
+  },
+})
+await caso('Painel IA: a ficha inteira numa mensagem só', [
+  ...ATE_A_FICHA,
+  ['Pedro Henrique Alves Costa, nasceu 12/05/2020, mae Aline Costa, cpf 529.982.247-25, email aline.costa@exemplo.com', 'Tudo certo'],
+], {
+  verificar: fichaGravada('ficha numa mensagem', {
+    intake_patient_name: 'Pedro Henrique Alves Costa',
+    intake_birth_date: '12/05/2020',
+    intake_guardian: 'Aline Costa',
+    intake_cpf: '52998224725',
+    intake_email: 'aline.costa@exemplo.com',
+  }),
+})
+
+// Urgencia no meio da ficha (rodada 3): a ficha fica aberta, e o nome que vem
+// depois e gravado - antes a consulta das 15h ficava sem crianca.
+await caso('Painel IA: urgência no meio da ficha não fecha o cadastro', [
+  ...ATE_A_FICHA,
+  ['ele nao para de vomitar', ['Já avisei o Dr. Marcello', 'pergunta do cadastro acima']],
+  ['Lucas Ferreira Nunes', 'data de nascimento'],
+], {
+  verificar: ({ dadosDasConsultas, ultimoToque, titulo }) => {
+    const gravado = Object.assign({}, ...dadosDasConsultas)
+    if (gravado.intake_patient_name === 'Lucas Ferreira Nunes') passou++
+    else falhas.push(`${titulo} | nome não gravado: ${gravado.intake_patient_name}`)
+  },
+})
+
+// Consulta para hoje: nao ha vespera, e o comprovante nao promete lembrete.
+const SLOTS_HOJE = { 'u-santos': [{ slot_start: '2026-10-07T17:00:00Z', slot_end: '2026-10-07T17:40:00Z' }], 'u-andre': [], 'u-vila': [] }
+const SLOTS_SEXTA = { 'u-santos': [{ slot_start: '2026-10-09T17:00:00Z', slot_end: '2026-10-09T17:40:00Z' }], 'u-andre': [], 'u-vila': [] }
+const semLembrete = (deveTer) => ({ ultimoToque, titulo }) => {
+  const tem = (ultimoToque.resposta ?? '').includes('confirmar sua presença')
+  if (tem === deveTer) passou++
+  else falhas.push(`${titulo} | lembrete da véspera ${tem ? 'prometido' : 'faltando'}`)
+}
+await caso('Painel IA: consulta de hoje não promete lembrete da véspera', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['1', 'Consulta marcada!'],
+], { pacientes: [ANA], slots: SLOTS_HOJE, verificar: semLembrete(false) })
+await caso('Painel IA: consulta de sexta continua com o lembrete', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['1', 'Consulta marcada!'],
+], { pacientes: [ANA], slots: SLOTS_SEXTA, verificar: semLembrete(true) })
+
+// O valor na tela das datas (rodada 2: familia nova marcava sem saber o preco).
+await caso('Painel IA: as datas mostram o valor da unidade', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', ['Datas disponíveis em Liferty', '💰 Consulta: R$ 450,00']],
+], { unidades: [{ ...TRES_UNIDADES[0], price_cents: 45000 }, TRES_UNIDADES[1], TRES_UNIDADES[2]] })
+await caso('Painel IA: sem valor cadastrado, sem a linha', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis em Liferty'],
+], {
+  verificar: ({ ultimoToque, titulo }) => {
+    if (!ultimoToque.resposta.includes('💰')) passou++
+    else falhas.push(`${titulo} | linha de valor sem valor`)
+  },
+})
+
+// Remarcar abre nas datas da mesma unidade, com a crianca da consulta (rodada 2
+// do painel: depois do SIM vinha "Vamos agendar! Em qual unidade?").
+await caso('Painel IA: remarcar abre nas datas da mesma unidade', [
+  ['Oi', 'Como podemos ajudar'],
+  ['4', 'Sua consulta'],
+  ['REMARCAR', 'Vamos remarcar'],
+  ['SIM', ['Vamos remarcar a consulta de', 'Datas disponíveis em Liferty']],
+  ['1', 'Horários de'],
+  ['1', 'Consulta remarcada!'],
+], {
+  consultas: [CONSULTA_ANA],
+  pacientes: [ANA, PEDRO],
+  daConsulta: { unit_id: 'u-santos', patient_id: 'p1' },
+  verificar: ({ marcadas, canceladas, titulo }) => {
+    const nova = marcadas[0] ?? {}
+    if (nova.patient_id === 'p1' && nova.rescheduled_from === 'a1' && canceladas.includes('a1')) passou++
+    else falhas.push(`${titulo} | remarcação errada: ${JSON.stringify({ paciente: nova.patient_id, de: nova.rescheduled_from, canceladas })}`)
+  },
+})
+await caso('Painel IA: cancelar oferece o botão de marcar outra data', [
+  ['Oi', 'Como podemos ajudar'],
+  ['4', 'Sua consulta'],
+  ['CANCELAR', 'Confirma o cancelamento'],
+  ['SIM', 'Consulta cancelada'],
+], {
+  consultas: [CONSULTA_ANA],
+  pacientes: [ANA],
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.botoes?.some((b) => b.id === '2')) passou++
+    else falhas.push(`${titulo} | "digite 2" sem o botão`)
+  },
+})
+
+// Urgencia de quem ja tem consulta logo mais: confirma a dela, sem oferecer outra.
+await caso('Painel IA: urgência com consulta hoje confirma a consulta', [
+  ['ele não para de vomitar', ['Já avisei o Dr. Marcello', 'continua marcada']],
+], {
+  pacientes: [ANA],
+  consultas: [{ ...CONSULTA_ANA, inicio: '2026-10-07T18:00:00Z' }],
+  verificar: ({ ultimoToque, titulo }) => {
+    if (!ultimoToque.botoes?.some((b) => b.id === 'MARCAR_AGORA')) passou++
+    else falhas.push(`${titulo} | ofereceu marcar outra`)
+  },
+})
+await caso('Painel IA: urgência sem consulta perto oferece o horário', [
+  ['ele não para de vomitar', ['Já avisei o Dr. Marcello', 'Marcar uma consulta']],
+], { pacientes: [ANA], consultas: [CONSULTA_ANA] })
 
 console.log('\n============================================')
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)

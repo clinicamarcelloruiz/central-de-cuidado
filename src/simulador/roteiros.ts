@@ -89,9 +89,11 @@ export const ROTEIROS: Roteiro[] = [
   {
     chave: 'remarcar',
     titulo: 'Paciente remarca a consulta',
-    resumo: 'Escolhe a data nova; a antiga só é cancelada depois que a nova está garantida.',
+    resumo: 'Escolhe a data nova na mesma unidade; a antiga só é cancelada depois que a nova está garantida.',
     familia: 'com_consulta',
-    passos: [t('Oi! Preciso remarcar a consulta da Helena.'), toque('REMARCAR'), toque('SIM'), toque('2'), toque('1'), toque('3')],
+    // Desde 17/10/2026 o SIM abre direto as datas da unidade da consulta: a
+    // pergunta da unidade saiu do caminho.
+    passos: [t('Oi! Preciso remarcar a consulta da Helena.'), toque('REMARCAR'), toque('SIM'), toque('1'), toque('3')],
     espera: { marcadas: 1, canceladas: 1, pacientes: 1, motivo: null },
   },
   {

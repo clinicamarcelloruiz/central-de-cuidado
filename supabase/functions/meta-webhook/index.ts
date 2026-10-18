@@ -468,6 +468,7 @@ Deno.serve(async (req) => {
               (a.contact_name as string) ??
               '',
             confirmada: Boolean(a.confirmed_by_clinic),
+            semCadastro: !a.patient_id,
           }))
 
           // Consulta de hoje e consulta recente (09/10/2026), em consulta propria
@@ -1098,7 +1099,7 @@ Deno.serve(async (req) => {
                 })
               },
               horarios: (unidade) => horariosEmTexto(admin, clinicId, unidade),
-              equipe: (motivo, texto) => entregarParaEquipe(admin, conversation.id, motivo, texto),
+              equipe: (motivo, texto, o) => entregarParaEquipe(admin, conversation.id, motivo, texto, o?.manterEtapa),
               etapa: async () => ((await etapaNoBanco())?.booking_state ?? null) as string | null,
             }
             const situacaoDaIA = () =>
@@ -1113,6 +1114,10 @@ Deno.serve(async (req) => {
                 quemAtende: quemAtende(clinicId).o,
                 agora: new Date(),
                 equipeConversando: equipeFalouRecentemente,
+                urgenciaAberta: Boolean(
+                  (conversaAnterior as unknown as { needs_attention?: boolean | null; attention_reason?: string | null } | null)?.needs_attention &&
+                    (conversaAnterior as unknown as { attention_reason?: string | null } | null)?.attention_reason === 'urgencia',
+                ),
               })
 
             let resultado: Resultado | null
@@ -1225,9 +1230,15 @@ Deno.serve(async (req) => {
                   .eq('id', conversation.id)
               }
               if (resultado.atencao) {
+                // Urgencia nao desce por outra etiqueta (17/10/2026, rodada 2 do
+                // painel com IA): um pedido de "excecao" no meio da conversa
+                // trocou urgencia por atendente com a crianca ainda vomitando, e
+                // a conversa desceu na lista da recepcao. Quem baixa e a equipe.
+                const antes = conversaAnterior as unknown as { needs_attention?: boolean | null; attention_reason?: string | null } | null
+                const etiqueta = antes?.needs_attention && antes.attention_reason === 'urgencia' ? 'urgencia' : resultado.atencao
                 const { error: erroDaBandeira } = await admin
                   .from('whatsapp_conversations')
-                  .update({ needs_attention: true, attention_reason: resultado.atencao })
+                  .update({ needs_attention: true, attention_reason: etiqueta })
                   .eq('id', conversation.id)
                 // Motivo novo, banco antigo.
                 //

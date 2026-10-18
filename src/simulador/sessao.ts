@@ -148,15 +148,26 @@ export class Simulacao {
   equipeConversando = false
   private contador = 0
   private relogio: () => Date
+  /**
+   * Quem responde a familia (17/10/2026). Sem ele, o robo de regras, como na
+   * demonstracao. O painel de pacientes simulados passa aqui o atendente com IA
+   * (tests/painel/conversar-ia.mjs), na mesma ordem do meta-webhook.
+   */
+  private atender?: (opcoes: Parameters<typeof tratarConversa>[0], sessao: Simulacao) => ReturnType<typeof tratarConversa>
 
   constructor(
     identidade: Identidade,
     familia: Familia,
-    opcoes: { agenda?: AgendaDaClinica; relogio?: () => Date } = {},
+    opcoes: {
+      agenda?: AgendaDaClinica
+      relogio?: () => Date
+      atender?: (opcoes: Parameters<typeof tratarConversa>[0], sessao: Simulacao) => ReturnType<typeof tratarConversa>
+    } = {},
   ) {
     this.identidade = identidade
     this.familia = familia
     this.relogio = opcoes.relogio ?? (() => new Date())
+    this.atender = opcoes.atender
     const agora = this.relogio()
     this.banco = new BancoFalso(bancoInicial(identidade, opcoes.agenda ?? identidade.agendaPadrao, familia, agora), {
       liberar_reservas_vencidas: () => 0,
@@ -298,7 +309,7 @@ export class Simulacao {
         new Date(String(c.starts_at)).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }) === hoje,
     )
 
-    const resultado = await tratarConversa({
+    const opcoesDoRobo: Parameters<typeof tratarConversa>[0] = {
       admin: this.banco,
       clinicId: this.identidade.clinicId,
       conversationId: CONVERSA,
@@ -320,6 +331,7 @@ export class Simulacao {
         endereco: String(unidades.find((u) => u.id === c.unit_id)?.address ?? ''),
         paciente: (c.patient_id ? nomePorId.get(String(c.patient_id)) : null) ?? String(c.contact_name ?? ''),
         confirmada: Boolean(c.confirmed_by_clinic),
+        semCadastro: !c.patient_id,
       })),
       consultaASubstituir: (conversa.booking_replaces_id as string | null) ?? null,
       consultaEmCadastro: (conversa.booking_intake_id as string | null) ?? null,
@@ -330,7 +342,8 @@ export class Simulacao {
       nomeDoPerfil: this.familia.nomeDoPerfil,
       textos: this.identidade.textos,
       agora,
-    })
+    }
+    const resultado = this.atender ? await this.atender(opcoesDoRobo, this) : await tratarConversa(opcoesDoRobo)
 
     // A bandeira de atencao, na mesma ordem do meta-webhook: concluida fecha,
     // pedido de gente acende com o motivo, e silencio acende com o motivo que
@@ -341,7 +354,11 @@ export class Simulacao {
       if (resultado.concluida && !resultado.atencao && !atencaoAntes.ligada) {
         Object.assign(conversa, { status: 'resolved', needs_attention: false, attention_reason: null })
       }
-      if (resultado.atencao) Object.assign(conversa, { needs_attention: true, attention_reason: resultado.atencao })
+      // Urgencia nao desce por outra etiqueta: igual ao webhook (17/10/2026).
+      if (resultado.atencao) {
+        const etiqueta = atencaoAntes.ligada && atencaoAntes.motivo === 'urgencia' ? 'urgencia' : resultado.atencao
+        Object.assign(conversa, { needs_attention: true, attention_reason: etiqueta })
+      }
       if (resultado.atencao) eventos.push({ evento: 'chamou_equipe', detalhe: resultado.atencao })
       if (resultado.concluida) eventos.push({ evento: 'concluiu_sozinho' })
     } else {
