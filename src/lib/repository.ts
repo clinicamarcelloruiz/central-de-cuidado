@@ -164,6 +164,7 @@ function mapPatient(row: PatientRow, followupRows: FollowupRow[]): Patient {
     observacoes: row.notes ?? '',
     criadoEm: row.created_at,
     criadoAutomaticamenteEm: (row as { auto_created_at?: string | null }).auto_created_at ?? '',
+    nomeDoContatoEm: (row as { name_from_contact_at?: string | null }).name_from_contact_at ?? '',
     followups,
   }
 }
@@ -2950,6 +2951,18 @@ export async function editConsultation(
 }
 
 export async function editPatient(clinicId: string, id: string, patch: Partial<Patient>) {
+  // Salvou o nome pela tela: o aviso de "nome do contato" sai (ver a migration
+  // 20261018100000). Em consulta separada, antes do UPDATE principal: coluna
+  // nova que o banco ainda nao tem recusaria o UPDATE inteiro, e o cadastro nao
+  // salvaria. Perder o aviso e arranhao; perder a edicao, nao.
+  if (patch.nome !== undefined) {
+    const { error: erroDoAviso } = await supabase
+      .from('patients')
+      .update({ name_from_contact_at: null } as PatientUpdate)
+      .eq('clinic_id', clinicId)
+      .eq('id', id)
+    if (erroDoAviso) console.warn('Nao consegui tirar o aviso de nome do contato', erroDoAviso)
+  }
   const { data, error } = await supabase
     .from('patients')
     .update(patientUpdatePayload(patch) as PatientUpdate)

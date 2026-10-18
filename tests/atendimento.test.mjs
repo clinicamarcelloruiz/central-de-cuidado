@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica, sinalDeAlarme, pediuUrgencia, desistiuDoAgendamento } from './atendimento.build.mjs'
+import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica, sinalDeAlarme, pediuUrgencia, desistiuDoAgendamento, contaPiora } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 import { montarMensagens } from './conteudo.build.mjs'
 
@@ -376,7 +376,8 @@ async function caso(titulo, passos, opcoes = {}) {
       respostasNaEspera: conversa.auto_replies_while_waiting ?? 0,
       // A mensagem e um anexo? No teste, o texto "[ANEXO]" faz as vezes da foto
       // que a Meta entrega sem corpo nenhum.
-      anexo: texto === '[ANEXO]',
+      // "[ANEXO] legenda" e a foto com legenda (rodada 7 do painel).
+      anexo: texto.startsWith('[ANEXO]'),
       // ... e sem corpo nenhum e literal: foto sem legenda chega com texto
       // vazio. Mandar a palavra "[ANEXO]" como se fosse o que a pessoa
       // escreveu faria o robo guardar isso como resposta dela - foi assim que
@@ -386,7 +387,7 @@ async function caso(titulo, passos, opcoes = {}) {
       jaViuOMenu: Boolean(conversa.menu_sent_at),
       podeIniciarMenu: ajustes.podeIniciarMenu ?? opcoes.podeIniciarMenu ?? true,
       posAcompanhamento: ajustes.posAcompanhamento ?? opcoes.posAcompanhamento ?? false,
-      texto: texto === '[ANEXO]' ? '' : texto,
+      texto: texto.startsWith('[ANEXO]') ? texto.slice('[ANEXO]'.length).trim() : texto,
       telefone: opcoes.telefone ?? '5511999999999',
       pacientes: opcoes.pacientes ?? [],
       nomeDoPerfil: opcoes.nomeDoPerfil ?? 'Paula Medina',
@@ -395,6 +396,8 @@ async function caso(titulo, passos, opcoes = {}) {
       // fora do expediente, e o teste nao pode depender da hora em que roda.
       agora: opcoes.agora ?? QUARTA_10H,
       consultaHoje: ajustes.consultaHoje ?? opcoes.consultaHoje ?? false,
+      // A etiqueta de urgencia ja acesa na conversa (o webhook le do banco).
+      urgenciaAberta: ajustes.urgenciaAberta ?? opcoes.urgenciaAberta ?? false,
     })
 
     const resposta = r?.resposta ?? null
@@ -4358,6 +4361,9 @@ await caso('Cocô molinho não é urgência', [
   confere('"pensando bem melhor são paulo" não é desistir', !desistiuDoAgendamento('pensando bem melhor sao paulo, tem segunda?'))
   confere('"pensando bem, melhor não" é desistir', desistiuDoAgendamento('pensando bem, melhor não'))
   confere('"pensando bem" sozinho é desistir', desistiuDoAgendamento('Pensando bem...'))
+  // Rodada 6: "nada urgente" mandou alerta ao medico.
+  confere('"nada urgente" não é urgência', !pediuUrgencia('oi, ele ta otimo mamando bem nada urgente. qro marca em santos'))
+  confere('"n é urgente" não é urgência', !pediuUrgencia('n é urgente, so queria marcar'))
 }
 
 // Troca de unidade escrita do jeito da familia, com as datas na tela.
@@ -4385,6 +4391,39 @@ await caso('Painel IA: "quero 8h, moro em são paulo" escolhe a hora, não troca
   ['1', 'em Liferty · Santos:*'],
   ['quero 8h, moro em são paulo', 'está guardado'],
 ], { slots: SLOTS_DUAS_UNIDADES })
+
+// Rodada 5: o artigo antes de "mae" sai junto, e a pergunta que vem com a
+// unidade nao some (vira "nao entendi", que chama a IA).
+await caso('Painel IA: "sou eu priscila ... a mae dele" grava sem o artigo', [
+  ...[['quero marcar', 'Em qual unidade'], ['1', 'Datas disponíveis'], ['1', 'Horários de'], ['1', 'nome completo do paciente']],
+  ['Caio Santos Rocha', 'data de nascimento'],
+  ['10/02/2020', 'nome do responsável'],
+  ['sou eu priscila santos rocha a mae dele', 'CPF do paciente'],
+], {
+  verificar: ({ dadosDasConsultas, titulo }) => {
+    const gravado = Object.assign({}, ...dadosDasConsultas)
+    if (gravado.intake_guardian === 'Priscila Santos Rocha') passou++
+    else falhas.push(`${titulo} | responsável: ${gravado.intake_guardian}`)
+  },
+})
+// O robo escolhe a unidade; a pergunta e respondida pela IA (perguntaLateral).
+await caso('Painel IA: unidade com pergunta junto escolhe a unidade', [
+  ['quero marcar', 'Em qual unidade'],
+  ['santos. mas ele atende 17 msm ne?', 'Datas disponíveis em Liferty'],
+], {})
+await caso('Painel IA: "pode ser em santos?" continua sendo escolha', [
+  ['quero marcar', 'Em qual unidade'],
+  ['pode ser em santos?', 'Datas disponíveis em Liferty'],
+], {})
+
+// "3 e 10" com a tarde na tela (rodada 5 do painel): 15:10, no relogio de 12 horas.
+const SLOTS_TARDE = { 'u-santos': ['17:30', '18:10', '18:50'].map((h) => ({ slot_start: `2026-10-09T${h}:00Z`, slot_end: `2026-10-09T${h}:40Z` })), 'u-andre': [], 'u-vila': [] }
+await caso('Painel IA: "o das 3 e 10" na lista da tarde é 15:10', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['quero o das 3 e 10', ['às 15:10*', 'está guardado']],
+], { slots: SLOTS_TARDE })
 
 // Cadastro (painel com IA).
 const fichaGravada = (titulo, campos) => ({ dadosDasConsultas }) => {
@@ -4453,6 +4492,108 @@ await caso('Painel IA: urgência no meio da ficha não fecha o cadastro', [
     const gravado = Object.assign({}, ...dadosDasConsultas)
     if (gravado.intake_patient_name === 'Lucas Ferreira Nunes') passou++
     else falhas.push(`${titulo} | nome não gravado: ${gravado.intake_patient_name}`)
+  },
+})
+
+// Rodada 5, segunda leva: nomes no meio de frases, a ficha toda numa mensagem,
+// "quarta 28", dia com hora, o valor na troca de unidade, sinais e remedio.
+const FICHA_ATE_RESPONSAVEL = [...ATE_A_FICHA, ['Davi Oliveira Prado', 'data de nascimento'], ['03/02/2020', 'nome do responsável']]
+for (const [frase, esperado] of [
+  ['Aline Oliveira Prado. Eu escrevi tudo junto lá em cima, o CPF e o e-mail também', 'Aline Oliveira Prado'],
+  ['ja mandei em cima, aline souza ramos', 'Aline Souza Ramos'],
+  ['eu patricia moreira alves', 'Patricia Moreira Alves'],
+  // Rodada 7: "e Aline..." gravado com o "e" na frente.
+  ['Já mandei ali em cima, é Aline Andrade Pires', 'Aline Andrade Pires'],
+  // Rodada 6: "sou eu a mae dela priscila..." voltava "Nao consegui ler o nome".
+  ['sou eu a mae dela priscila gomes ferreira', 'Priscila Gomes Ferreira'],
+  // Rodada 6: "sou eu msm, daniela lima ramos" foi gravado como "Msm".
+  ['sou eu msm, daniela lima ramos', 'Daniela Lima Ramos'],
+  ['sou eu mesma, Daniela Lima Ramos', 'Daniela Lima Ramos'],
+  ['Daniela Mendes Carvalho. E o valor? Você não me respondeu', 'Daniela Mendes Carvalho'],
+]) {
+  await caso(`Painel IA: responsável em "${frase.slice(0, 30)}..."`, [...FICHA_ATE_RESPONSAVEL, [frase, 'CPF do paciente']], {
+    verificar: ({ dadosDasConsultas, titulo }) => {
+      const gravado = Object.assign({}, ...dadosDasConsultas)
+      if (gravado.intake_guardian === esperado) passou++
+      else falhas.push(`${titulo} | responsável: ${gravado.intake_guardian}`)
+    },
+  })
+}
+for (const frase of [
+  'Davi Oliveira Prado, nasceu em 03/02/2020. Eu sou a Aline Oliveira Prado, mãe dele, CPF 529.982.247-25, e-mail aline.prado@exemplo.com',
+  'davi oliveira prado 03/02/2020 sou a mae aline oliveira prado cpf 52998224725 email aline.prado@exemplo.com',
+  // Rodada 7: a virgula depois de "mae" e o "sou eu msm, fulana" no meio da ficha.
+  'Ele se chama Davi Oliveira Prado, nasceu 03/02/2020. Sou a mãe, Aline Oliveira Prado, CPF 529.982.247-25, email aline.prado@exemplo.com',
+  'davi oliveira prado 03/02/2020 responsavel sou eu msm, aline oliveira prado cpf 52998224725 email aline.prado@exemplo.com',
+]) {
+  await caso(`Painel IA: a ficha toda em "${frase.slice(0, 30)}..."`, [...ATE_A_FICHA, [frase, 'Tudo certo']], {
+    verificar: fichaGravada('ficha toda', { intake_patient_name: 'Davi Oliveira Prado', intake_birth_date: '03/02/2020', intake_guardian: 'Aline Oliveira Prado', intake_cpf: '52998224725' }),
+  })
+}
+{
+  const quartas = ['2026-10-21', '2026-10-28']
+  const confere = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  confere('"quarta 28" escolhe o dia 28', diaPeloNome('quarta 28', quartas) === 1, String(diaPeloNome('quarta 28', quartas)))
+  confere('"quarta dia 21" escolhe o 21', diaPeloNome('quarta dia 21', quartas) === 0)
+  confere('"quarta as 14" nao le a hora como dia', diaPeloNome('quarta as 14', quartas) === 0, String(diaPeloNome('quarta as 14', quartas)))
+  confere('"quarta 30" nao adivinha', diaPeloNome('quarta 30', quartas) === -1)
+  for (const frase of ['acho que ela tinha engulido uma moeda', 'vomitou uma coisa escura parece cafe moido'])
+    confere(`painel IA, risco de vida: "${frase}"`, sinalDeAlarme(frase)?.risco === 'vida', JSON.stringify(sinalDeAlarme(frase)))
+}
+await caso('Painel IA: dia e hora na mesma frase marcam direto', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['sexta dia 9 as 15:10', ['às 15:10*', 'está guardado']],
+], { slots: SLOTS_TARDE })
+await caso('Painel IA: troca de unidade direto nos horários mostra o valor', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['pensando bem melhor são paulo, tem segunda?', ['Em Livance Ibirapuera - São Paulo, a consulta é R$ 600,00', 'Horários de segunda']],
+], { slots: SLOTS_DUAS_UNIDADES, unidades: [TRES_UNIDADES[0], TRES_UNIDADES[1], { ...TRES_UNIDADES[2], price_cents: 60000 }] })
+await caso('Painel IA: urgência com pergunta de remédio responde o remédio', [
+  ['a barriga da Helena está durinha, posso dar buscopan?', ['Já avisei o Dr. Marcello', 'Sobre remédio e dose, quem orienta é o Dr. Marcello']],
+], { pacientes: [ANA] })
+await caso('Painel IA: risco de vida diz para não esperar', [
+  ['ela vomitou uma coisa escura parece cafe moido', 'sem esperar a consulta nem a nossa resposta'],
+], { verificar: exigeRiscoDeVida })
+
+// Rodada 7: a crianca com a unidade e o dia na mesma frase segue direto.
+await caso('Painel IA: "o theo, em santos, segunda" depois de "para quem"', [
+  ['quero marcar', 'Para quem é a consulta'],
+  ['o pedro, em santos, segunda', 'Horários de segunda'],
+], { pacientes: [ANA, PEDRO] })
+
+// Rodada 6, ultima leva.
+await caso('Painel IA: "depois das 14:30" é limite, não escolha', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['sexta dia 9, precisa ser depois das 14:30', 'Horários de'],
+], {
+  slots: SLOTS_TARDE,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas.length === 0) passou++
+    else falhas.push(`${titulo} | marcou ${marcadas[0]?.starts_at}`)
+  },
+})
+for (const frase of ['ta bom entao marca as 16 horas', 'São Paulo']) {
+  await caso(`Painel IA: "${frase}" não vira nome de paciente`, [...ATE_A_FICHA, [frase, []]], {
+    verificar: ({ dadosDasConsultas, titulo }) => {
+      const nome = Object.assign({}, ...dadosDasConsultas).intake_patient_name
+      if (!nome) passou++
+      else falhas.push(`${titulo} | gravou "${nome}"`)
+    },
+  })
+}
+await caso('Painel IA: piora numa urgência aberta manda ao pronto-socorro', [
+  ['ela piorou mt, ta gritando de dor e a barriga ta mais dura ainda', ['Se piorou, não espere', 'pronto-socorro', 'de novo']],
+], {
+  pacientes: [ANA],
+  estadoInicial: { booking_state: 'atendente' },
+  urgenciaAberta: true,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (ultimoToque.atencao === 'urgencia') passou++
+    else falhas.push(`${titulo} | atenção ${ultimoToque.atencao}`)
   },
 })
 
@@ -4539,6 +4680,435 @@ await caso('Painel IA: urgência com consulta hoje confirma a consulta', [
 await caso('Painel IA: urgência sem consulta perto oferece o horário', [
   ['ele não para de vomitar', ['Já avisei o Dr. Marcello', 'Marcar uma consulta']],
 ], { pacientes: [ANA], consultas: [CONSULTA_ANA] })
+
+// ---------------------------------------------------------------
+// Rodada 7 do painel com IA (17/10/2026)
+// ---------------------------------------------------------------
+
+// Critica: a foto com legenda de alarme recebia o texto padrao do anexo, sem
+// pronto-socorro e sem alerta. Vale fora de fluxo, no meio dele e na fila.
+const viraUrgencia = ({ ultimoToque, titulo }) => {
+  if (ultimoToque.atencao === 'urgencia' && !(ultimoToque.resposta ?? '').includes('Recebi o que você enviou')) passou++
+  else falhas.push(`${titulo} | atenção ${ultimoToque.atencao}: ${(ultimoToque.resposta ?? '').slice(0, 90)}`)
+}
+await caso('Rodada 7: foto com legenda de alarme vai para a urgência', [
+  ['[ANEXO] olha o vomito dela, saiu com sangue', 'pronto-socorro'],
+], { pacientes: [ANA], verificar: viraUrgencia })
+await caso('Rodada 7: foto com legenda de alarme no meio do agendamento', [
+  ['quero marcar', 'Em qual unidade'],
+  ['[ANEXO] acho que ele engoliu essa pilha', 'pronto-socorro'],
+], { pacientes: [ANA], verificar: viraUrgencia })
+await caso('Rodada 7: foto com legenda de alarme na fila da equipe', [
+  ['[ANEXO] olha o vomito dela, saiu com sangue', 'pronto-socorro'],
+], { pacientes: [ANA], estadoInicial: { booking_state: 'atendente' }, verificar: viraUrgencia })
+await caso('Rodada 7: foto com "urgente" na legenda vai para a urgência', [
+  ['[ANEXO] é urgente, olha como está a barriga dele', 'urgência'],
+], { pacientes: [ANA], verificar: viraUrgencia })
+
+// Com legenda, o robo nao pede "escreva junto o que e"; sem legenda, pede.
+await caso('Rodada 7: foto com legenda não pede para escrever o que é', [
+  ['[ANEXO] o exame de fezes que ele fez', 'Recebi o que você enviou'],
+], {
+  verificar: ({ ultimoToque, titulo }) => {
+    if (!ultimoToque.resposta.includes('escreva junto')) passou++
+    else falhas.push(`${titulo} | pediu legenda de quem mandou legenda`)
+  },
+})
+await caso('Rodada 7: foto sem legenda continua pedindo o que é', [
+  ['[ANEXO]', 'escreva junto o que é'],
+])
+// No webhook de verdade a foto sem legenda chega como "[image]", e o PDF com o
+// nome do arquivo (messageBody): nenhum dos dois e legenda.
+for (const corpo of ['[image]', 'exame_hemograma.pdf']) {
+  await caso(`Rodada 7: "${corpo}" sem legenda continua pedindo o que é`, [
+    [`[ANEXO] ${corpo}`, 'escreva junto o que é'],
+  ])
+}
+
+// IA06: a foto da receita antiga na fila ficou sem resposta e a mae perguntou
+// "chegou?". Sem ninguem da equipe conversando, uma confirmacao curta - e so uma.
+await caso('Rodada 7: foto na fila recebe confirmação, e só uma', [
+  ['[ANEXO] posso seguir essa dose?', 'Recebi o que você enviou. A equipe já está com a sua mensagem'],
+  ['[ANEXO]', null],
+], { estadoInicial: { booking_state: 'atendente' } })
+await caso('Rodada 7: foto na fila com a equipe conversando fica calada', [
+  ['[ANEXO] posso seguir essa dose?', null],
+], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false })
+
+// IA17-v2: "hj n consigo. pode ser segunda q vem 19h?" com a lista de hoje na
+// tela marcou hoje as 19:00. Aqui, com as quartas de 07/10 e 14/10.
+const SLOTS_DUAS_QUARTAS = {
+  'u-santos': ['2026-10-07', '2026-10-14'].map((d) => ({ slot_start: `${d}T17:00:00Z`, slot_end: `${d}T17:40:00Z` })),
+  'u-andre': [],
+  'u-vila': [],
+}
+await caso('Rodada 7: "hj n consigo, quarta q vem 14h" marca a outra quarta', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['hj n consigo. pode ser quarta q vem 14h?', []],
+], {
+  slots: SLOTS_DUAS_QUARTAS,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas[0]?.starts_at === '2026-10-14T17:00:00Z') passou++
+    else falhas.push(`${titulo} | marcou ${marcadas[0]?.starts_at ?? 'nada'}`)
+  },
+})
+await caso('Rodada 7: "hoje nao da" na lista de hoje volta para as datas', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['hoje nao da', 'escolha outro dia'],
+], {
+  slots: SLOTS_DUAS_QUARTAS,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas.length === 0) passou++
+    else falhas.push(`${titulo} | marcou ${marcadas[0]?.starts_at}`)
+  },
+})
+
+// IA18-v2: "12 3 2019" fechava o cadastro sem data. IA22 e IA24: frases que
+// viravam nome do paciente.
+await caso('Rodada 7: "12 3 2019" grava a data de nascimento', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['12 3 2019', 'nome do responsável'],
+], { verificar: fichaGravada('12 3 2019', { intake_birth_date: '12/03/2019' }) })
+for (const frase of ['N Eh O Nome', 'Antes do nome: quero trocar o horario pra sexta']) {
+  await caso(`Rodada 7: "${frase}" não vira nome de paciente`, [...ATE_A_FICHA, [frase, []]], {
+    verificar: ({ dadosDasConsultas, titulo }) => {
+      const nome = Object.assign({}, ...dadosDasConsultas).intake_patient_name
+      if (!nome) passou++
+      else falhas.push(`${titulo} | gravou "${nome}"`)
+    },
+  })
+}
+// IA22: "ela pode ir sozinha ou tem q ir com responsavel", sem "?", gastava a
+// tentativa do nome ("Nao consegui ler o nome") em vez de ir para a equipe.
+await caso('Rodada 7: pergunta sem "?" no passo do nome vai para a equipe', [
+  ...ATE_A_FICHA,
+  ['ela pode ir sozinha ou tem q ir com responsavel', 'Não entendi isso como resposta'],
+])
+// "n sei de cabeca" era lido como CPF errado.
+await caso('Rodada 7: "n sei de cabeca" pula o CPF', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['02/02/2024', 'nome do responsável'],
+  ['Fernanda Nogueira', 'CPF do paciente'],
+  ['n sei de cabeca', 'e-mail'],
+])
+
+{
+  const confere = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  // "A febre ta subindo" e piora (a urgencia ja aberta reavisa o medico).
+  for (const frase of ['a febre ta subindo, 39,8 agora', 'aumentou a dor dela', 'subiu pra 40'])
+    confere(`rodada 7, piora: "${frase}"`, contaPiora(frase))
+  confere('rodada 7: "pode ser o proximo horario" nao e piora', !contaPiora('pode ser o proximo horario'))
+  // IA21-v1: "umas 9 e 20" era lido como o dia 9.
+  const sextas = ['2026-10-09', '2026-10-16']
+  confere('rodada 7: "sexta ... umas 9 e 20" acha a sexta', diaPeloNome('sexta de manha ta otimo pode ser umas 9 e 20', sextas) === 0, String(diaPeloNome('sexta de manha ta otimo pode ser umas 9 e 20', sextas)))
+  confere('rodada 7: "sexta 16 as 9 e meia" acha o 16', diaPeloNome('sexta 16 as 9 e meia', sextas) === 1, String(diaPeloNome('sexta 16 as 9 e meia', sextas)))
+  // Bateria do outro lado do ponto, "pilinha" e o vomito marrom.
+  for (const frase of [
+    'a bateria redondinha sumiu. acho q ele colocou na boca e engoliu',
+    'ele comeu uma pilinha',
+    'ela vomitou uma coisa marrom',
+    'o vomito saiu meio escuro',
+  ])
+    confere(`rodada 7, risco de vida: "${frase}"`, sinalDeAlarme(frase)?.risco === 'vida', JSON.stringify(sinalDeAlarme(frase)))
+  confere('rodada 7: "comprei pilha. ele comeu bem" nao e alarme', sinalDeAlarme('comprei pilha pro controle. ele comeu bem hoje') === null)
+  confere('rodada 7: "a pilha sumiu. ele nao engoliu" nao e alarme', sinalDeAlarme('a pilha sumiu. ele nao engoliu, achei no chao') === null)
+}
+
+// ---------------------------------------------------------------
+// Rodada 8 do painel com IA (18/10/2026)
+// ---------------------------------------------------------------
+
+// "Quarta que vem" numa quarta, na lista de DATAS (IA11 e IA17-v2: a segunda de
+// hoje foi guardada depois de "segunda que vem").
+await caso('Rodada 8: "quarta que vem as 14h" nas datas marca a outra quarta', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['hj n consigo, quarta que vem as 14h', []],
+], {
+  slots: SLOTS_DUAS_QUARTAS,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas[0]?.starts_at === '2026-10-14T17:00:00Z') passou++
+    else falhas.push(`${titulo} | marcou ${marcadas[0]?.starts_at ?? 'nada'}`)
+  },
+})
+{
+  const confere = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  const quartas = ['2026-10-07', '2026-10-14']
+  confere('rodada 8: "quarta que vem" pula a de hoje', diaPeloNome('quarta que vem', quartas, QUARTA_10H) === 1)
+  confere('rodada 8: "quarta" sozinha continua a de hoje', diaPeloNome('quarta', quartas, QUARTA_10H) === 0)
+  confere('rodada 8: "hoje nao" nao escolhe hoje', diaPeloNome('hoje nao', quartas, QUARTA_10H) === -1)
+  // IA16: dois dias na frase, um recusado.
+  confere('rodada 8: "sabado n da, segunda q vem"', diaPeloNome('ah sabado n da, segunda q vem 19h', ['2026-10-10', '2026-10-12'], QUARTA_10H) === 1, String(diaPeloNome('ah sabado n da, segunda q vem 19h', ['2026-10-10', '2026-10-12'], QUARTA_10H)))
+  // IA17-v1: o dia recusado nao conta como numero.
+  const frase = 'essa segunda dia 12 eu nao consigo, tenho reuniao. teria na segunda dia 19 as 19h?'
+  confere('rodada 8: o dia recusado nao vale', diaPeloNome(frase, ['2026-10-12', '2026-10-19'], QUARTA_10H) === 1, String(diaPeloNome(frase, ['2026-10-12', '2026-10-19'], QUARTA_10H)))
+  // Piora e sinais com as palavras da mae.
+  for (const f of ['a febre voltou', 'hj veio mais sangue q ontem, olha']) confere(`rodada 8, piora: "${f}"`, contaPiora(f))
+  confere('rodada 8: "ta mt molinho" e urgente', sinalDeAlarme('agr ele ta mt molinho')?.risco === 'urgente', JSON.stringify(sinalDeAlarme('agr ele ta mt molinho')))
+  confere('rodada 8: "n quer mama" e urgente', sinalDeAlarme('n quer mama e a febre voltou')?.nome === 'não quer mamar', JSON.stringify(sinalDeAlarme('n quer mama e a febre voltou')))
+  confere('rodada 8: "nao quer comer" nao e alarme', sinalDeAlarme('ele nao quer comer verdura') === null)
+}
+
+// Protesto, pedido e dia nao viram nome (IA11, IA17, IA24).
+for (const frase of ['nao!! hj nao, quarta q vem dia 14', 'n!! hj n da, eh dia 14', 'Antes do nome, uma coisa: ela chega mais descansada de tarde', 'Eu pedi quarta dia 14']) {
+  await caso(`Rodada 8: "${frase}" não vira nome de paciente`, [...ATE_A_FICHA, [frase, []]], {
+    verificar: ({ dadosDasConsultas, titulo }) => {
+      const nome = Object.assign({}, ...dadosDasConsultas).intake_patient_name
+      if (!nome) passou++
+      else falhas.push(`${titulo} | gravou "${nome}"`)
+    },
+  })
+}
+// IA20: "Sou a avo dele, Elaine..." gravou "Avo Dele".
+await caso('Rodada 8: "Sou a avó dele, Elaine Albuquerque Santos" grava Elaine', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['02/02/2024', 'nome do responsável'],
+  ['Sou a avó dele, Elaine Albuquerque Santos.', 'CPF'],
+], { verificar: fichaGravada('avo', { intake_guardian: 'Elaine Albuquerque Santos' }) })
+
+// Data com espaco no meio da frase (IA03, IA16, IA17, IA18), e a frase com ano
+// que nao e data nao fecha o cadastro em silencio.
+await caso('Rodada 8: "Ele nasceu em 14 06 2017, tá?" grava a data', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['Ele nasceu em 14 06 2017, tá?', 'nome do responsável'],
+], { verificar: fichaGravada('14 06 2017', { intake_birth_date: '14/06/2017' }) })
+await caso('Rodada 8: "lara souza lima nasceu 12 03 2019" grava nome e data', [
+  ...ATE_A_FICHA,
+  ['lara souza lima nasceu 12 03 2019', 'nome do responsável'],
+], { verificar: fichaGravada('nome e data', { intake_patient_name: 'Lara Souza Lima', intake_birth_date: '12/03/2019' }) })
+await caso('Rodada 8: frase com ano que não é data pede de novo', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['acho que foi em 2019, perto do natal', 'Não consegui ler a data'],
+])
+await caso('Rodada 8: "Ele nasceu dia 15 de julho" pede só o ano', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['Ele nasceu dia 15 de julho', 'Faltou só o ano'],
+])
+await caso('Rodada 8: "março de 2019" continua aceito', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['março de 2019', 'nome do responsável'],
+])
+
+// Correcao do nome num passo seguinte (IA11, IA16, IA24), com a data junto.
+await caso('Rodada 8: "12 1 2023. mas o nome dele eh ..." corrige o nome e grava a data', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['12 1 2023. mas o nome dele eh bernardo nogueira da costa', ['Corrigi o nome para *Bernardo Nogueira da Costa*', 'nome do responsável']],
+], {
+  verificar: ({ dadosDasConsultas, titulo }) => {
+    const nomes = dadosDasConsultas.map((d) => d.intake_patient_name).filter(Boolean)
+    const data = Object.assign({}, ...dadosDasConsultas).intake_birth_date
+    if (nomes.at(-1) === 'Bernardo Nogueira da Costa' && data === '12/01/2023') passou++
+    else falhas.push(`${titulo} | nome ${nomes.at(-1)}, data ${data}`)
+  },
+})
+await caso('Rodada 8: "pera o nome ta errado, eh ..." sem dado do passo', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['pera o nome ta errado, eh bernardo nogueira da costa', ['Corrigi o nome', 'data de nascimento']],
+])
+await caso('Rodada 8: "o nome da mãe é ..." no responsável não troca o nome da criança', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['02/02/2024', 'nome do responsável'],
+  ['o nome da mãe é Fernanda Nogueira Costa', []],
+], {
+  verificar: ({ dadosDasConsultas, titulo }) => {
+    const nomes = dadosDasConsultas.map((d) => d.intake_patient_name).filter(Boolean)
+    if (nomes.length === 1 && nomes[0] === 'Bernardo Nogueira Costa') passou++
+    else falhas.push(`${titulo} | nomes gravados: ${nomes.join(', ')}`)
+  },
+})
+
+// IA16: "Esse CPF e o dele ou o meu" virou "CPF nao confere".
+await caso('Rodada 8: "Esse CPF é o dele ou o meu" é dúvida, não CPF errado', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['02/02/2024', 'nome do responsável'],
+  ['Fernanda Nogueira', 'CPF'],
+  ['Esse CPF é o dele ou o meu', 'Não entendi isso como resposta'],
+])
+
+// Troca de horario no meio da ficha (IA07, IA10, IA17, IA21, IA24): a nova
+// entra, a antiga cai, e o que ja foi respondido vai junto.
+const SLOTS_TROCA = {
+  'u-santos': [
+    { slot_start: '2026-10-14T17:00:00Z', slot_end: '2026-10-14T17:40:00Z' },
+    { slot_start: '2026-10-14T18:20:00Z', slot_end: '2026-10-14T19:00:00Z' },
+  ],
+  'u-andre': [],
+  'u-vila': [],
+}
+const CONSULTA_GUARDADA = { unit_id: 'u-santos', starts_at: '2026-10-14T17:00:00Z', modality: 'presencial' }
+await caso('Rodada 8: "pera, da pra trocar pra 15:20?" no passo do nome troca o horário', [
+  ...ATE_A_FICHA,
+  ['pera, da pra trocar pra 15:20?', ['Horário trocado', '15:20', 'nome completo do paciente']],
+], {
+  slots: SLOTS_TROCA,
+  daConsulta: CONSULTA_GUARDADA,
+  verificar: ({ marcadas, canceladas, titulo }) => {
+    if (marcadas[1]?.starts_at === '2026-10-14T18:20:00Z' && canceladas.includes('consulta-1')) passou++
+    else falhas.push(`${titulo} | marcadas ${marcadas.map((m) => m.starts_at).join(', ')}, canceladas ${canceladas.join(', ')}`)
+  },
+})
+await caso('Rodada 8: a troca leva o nome já respondido e segue para a data', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['da pra mudar pras 15:20?', ['Horário trocado', 'data de nascimento']],
+], {
+  slots: SLOTS_TROCA,
+  daConsulta: { ...CONSULTA_GUARDADA, intake_patient_name: 'Bernardo Nogueira Costa' },
+  verificar: ({ ultimoToque, titulo }) => {
+    if (!ultimoToque.resposta.includes('nome completo do paciente')) passou++
+    else falhas.push(`${titulo} | perguntou o nome de novo`)
+  },
+})
+await caso('Rodada 8: troca para um horário que não existe vira dúvida', [
+  ...ATE_A_FICHA,
+  ['da pra trocar pra 7h?', 'Não achei esse horário livre para trocar'],
+], { slots: SLOTS_TROCA, daConsulta: CONSULTA_GUARDADA })
+
+// Rodada 9 (IA21-v1): "pras 4 da tarde" e a hora pedida; "as 3" e a da escola.
+const SLOTS_TROCA_TARDE = {
+  'u-santos': ['17:00', '18:00', '19:00'].map((h) => ({ slot_start: `2026-10-14T${h}:00Z`, slot_end: `2026-10-14T${h.slice(0, 2)}:40:00Z` })),
+  'u-andre': [],
+  'u-vila': [],
+}
+await caso('Rodada 9: "trocar pras 4 da tarde... sai da escola as 3" troca para as 16h', [
+  ...ATE_A_FICHA,
+  ['nao e o nome ainda eu quero trocar o horario pras 4 da tarde primeiro que ela sai da escola as 3 da pra', 'Horário trocado'],
+], {
+  slots: SLOTS_TROCA_TARDE,
+  daConsulta: CONSULTA_GUARDADA,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas[1]?.starts_at === '2026-10-14T19:00:00Z') passou++
+    else falhas.push(`${titulo} | marcou ${marcadas.map((m) => m.starts_at).join(', ')}`)
+  },
+})
+// IA24-v2: sem verbo de troca, so a hora.
+await caso('Rodada 9: "pera antes do nome da p ser 3 e 20 msm dia" troca', [
+  ...ATE_A_FICHA,
+  ['pera antes do nome da p ser 3 e 20 msm dia', ['Horário trocado', '15:20']],
+], { slots: SLOTS_TROCA, daConsulta: CONSULTA_GUARDADA })
+
+// ---------------------------------------------------------------
+// Rodada 9 do painel com IA (18/10/2026)
+// ---------------------------------------------------------------
+
+// Critica (IA01-v2): a foto com "engoliu uma dessa" e o objeto.
+await caso('Rodada 9: foto "bb de 10 mes engoliu uma dessa acho" é risco de vida', [
+  ['[ANEXO] bb de 10 mes engoliu uma dessa acho', 'pronto-socorro'],
+], { verificar: viraUrgencia })
+await caso('Rodada 9: foto "ele nao engoliu, ta na mao dele" é só anexo', [
+  ['[ANEXO] ele nao engoliu, ta na mao dele', 'Recebi o que você enviou'],
+])
+// IA02-v1: foto na urgencia aberta, sem piora, lembra o pronto-socorro.
+await caso('Rodada 9: foto na urgência aberta lembra o pronto-socorro', [
+  ['[ANEXO] vou ficar de olho nela essa noite e amanha levo na consulta', ['Recebi o que você enviou', 'Se piorar, não espere']],
+], { pacientes: [ANA], estadoInicial: { booking_state: 'atendente' }, urgenciaAberta: true })
+// IA15-v2: a hora recusada nao vale; vale a pedida.
+await caso('Rodada 9: "as 14h n vou consegui mais, tem as 15:20?" troca para 15:20', [
+  ...ATE_A_FICHA,
+  ['pera, as 14h n vou consegui mais, tem as 15:20?', 'Horário trocado'],
+], {
+  slots: SLOTS_TROCA,
+  daConsulta: CONSULTA_GUARDADA,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas[1]?.starts_at === '2026-10-14T18:20:00Z') passou++
+    else falhas.push(`${titulo} | marcou ${marcadas.map((m) => m.starts_at).join(', ')}`)
+  },
+})
+// A hora recusada sai mesmo sem "pra" nenhum na frase.
+await caso('Rodada 9: "15:20 talvez? 14h nao da" troca para 15:20', [
+  ...ATE_A_FICHA,
+  ['15:20 talvez? 14h nao da', 'Horário trocado'],
+], {
+  slots: SLOTS_TROCA,
+  daConsulta: CONSULTA_GUARDADA,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas[1]?.starts_at === '2026-10-14T18:20:00Z') passou++
+    else falhas.push(`${titulo} | marcou ${marcadas.map((m) => m.starts_at).join(', ')}`)
+  },
+})
+// IA03-v2: a data que veio junto da troca fica guardada.
+await caso('Rodada 9: "12 3 2022. e da p troca p 15:20?" guarda a data e troca', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['12 3 2022. e da p troca p 15:20?', 'Horário trocado'],
+], { slots: SLOTS_TROCA, daConsulta: CONSULTA_GUARDADA, verificar: fichaGravada('data junto da troca', { intake_birth_date: '12/03/2022' }) })
+// Nomes (IA01, IA03, IA15).
+await caso('Rodada 9: "Ué, já mandei lá em cima! Miguel Ferreira Rocha..." grava Miguel', [
+  ...ATE_A_FICHA,
+  ['Ué, já mandei lá em cima! Miguel Ferreira Rocha, nascido em 22/05/2020.', 'nome do responsável'],
+], { verificar: fichaGravada('ue', { intake_patient_name: 'Miguel Ferreira Rocha' }) })
+await caso('Rodada 9: "o responsável sou eu, Patrícia Martins Rocha" grava Patrícia', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['02/02/2024', 'nome do responsável'],
+  ['Que pergunta? Já falei, o responsável sou eu, Patrícia Martins Rocha', 'CPF'],
+], { verificar: fichaGravada('responsavel', { intake_guardian: 'Patrícia Martins Rocha' }) })
+await caso('Rodada 9: "to saindo pro ps agr, dps eu respondo isso" não vira nome', [...ATE_A_FICHA, ['to saindo pro ps agr, dps eu respondo isso', []]], {
+  verificar: ({ dadosDasConsultas, titulo }) => {
+    const nome = Object.assign({}, ...dadosDasConsultas).intake_patient_name
+    if (!nome) passou++
+    else falhas.push(`${titulo} | gravou "${nome}"`)
+  },
+})
+await caso('Rodada 9: "o nome dele é ..., escrevi trocado" corrige o nome', [
+  ...ATE_A_FICHA,
+  ['Bernardo Costa Nogueira', 'data de nascimento'],
+  ['pera o nome dele é bernardo nogueira costa, escrevi trocado', ['Corrigi o nome para *Bernardo Nogueira Costa*', 'data de nascimento']],
+])
+await caso('Rodada 9: "faltou o Henrique no nome, é ..." corrige o nome', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['09/04/2021. Ah, faltou o Henrique no nome, é Bernardo Henrique Nogueira Costa', ['Corrigi o nome', 'nome do responsável']],
+])
+// IA14: a crianca sem cadastro, com uma so no telefone.
+await caso('Rodada 9: "marcar para outra criança" pergunta para quem, e o nome novo é a outra', [
+  ['quero marcar uma consulta para outra criança', 'Para quem'],
+  ['Theo', 'Em qual unidade'],
+], {
+  pacientes: [ANA],
+  verificar: ({ conversa, titulo }) => {
+    if (conversa.booking_patient_id === '00000000-0000-0000-0000-000000000000') passou++
+    else falhas.push(`${titulo} | paciente ${conversa.booking_patient_id}`)
+  },
+})
+{
+  const confere = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  // Critica (IA02): "gomitou" e o po de cafe longe do vomito.
+  for (const f of ['gomitou de novo umas coisa tipo po de cafe', 'ela vomitou de novo e veio umas bolinhas escuras, tipo pó de café molhado'])
+    confere(`rodada 9, risco de vida: "${f}"`, sinalDeAlarme(f)?.risco === 'vida', JSON.stringify(sinalDeAlarme(f)))
+  // Piora falsa (IA03-v1, IA04-v1).
+  confere('rodada 9: "a consulta das 15h continua?" nao e piora', !contaPiora('Tá, vamos levar ele agora. A consulta das 15h continua?'))
+  confere('rodada 9: "da outra vez" nao e piora', !contaPiora('É o que a pediatra passou da outra vez.'))
+  confere('rodada 9: "continua vomitando" e piora', contaPiora('ele continua vomitando'))
+  // IA13-v1: tres dias citados, o numero decide; IA17-v1: dois dias recusados.
+  const f1 = 'Sexta também não dá, só volto de viagem no sábado. Pode ser na quarta seguinte, dia 28, lá pelas 3 e 20 da tarde?'
+  confere('rodada 9: "sexta tambem nao... quarta, dia 28"', diaPeloNome(f1, ['2026-10-23', '2026-10-24', '2026-10-28'], QUARTA_10H) === 2, String(diaPeloNome(f1, ['2026-10-23', '2026-10-24', '2026-10-28'], QUARTA_10H)))
+  const f2 = 'Hoje não consigo, e na próxima segunda, dia 26, também não, vou estar viajando. Teria na segunda 16 de novembro, às 19h?'
+  confere('rodada 9: "dia 26, tambem nao... 16 de novembro"', diaPeloNome(f2, ['2026-10-19', '2026-10-26', '2026-11-16'], QUARTA_10H) === 2, String(diaPeloNome(f2, ['2026-10-19', '2026-10-26', '2026-11-16'], QUARTA_10H)))
+}
+
+// IA05-v2 e IA07-v2: foto com piora na legenda, com a urgencia aberta.
+await caso('Rodada 8: foto "38,9 ta subindo" na urgência aberta é piora', [
+  ['[ANEXO] olha o termometro agr 38,9 ta subindo', 'Se piorou, não espere'],
+], { pacientes: [ANA], estadoInicial: { booking_state: 'atendente' }, urgenciaAberta: true, verificar: viraUrgencia })
+await caso('Rodada 8: a mesma foto sem urgência aberta é só anexo', [
+  ['[ANEXO] olha o termometro agr 38,9 ta subindo', 'Recebi o que você enviou'],
+], { pacientes: [ANA], estadoInicial: { booking_state: 'atendente' } })
 
 console.log('\n============================================')
 console.log(`VERIFICAÇÕES QUE PASSARAM: ${passou}`)

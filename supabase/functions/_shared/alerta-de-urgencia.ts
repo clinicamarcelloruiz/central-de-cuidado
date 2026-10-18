@@ -70,8 +70,11 @@ export function numerosDoAlerta(valor: unknown): string[] {
  * medico ja foi avisado e a conversa esta no topo da lista. Urgencia nova,
  * depois de a equipe resolver a anterior, alerta de novo.
  */
-export function deveAlertar(e: { atencaoAntes: boolean; motivoAntes: string | null; motivoAgora: string | null }): boolean {
+export function deveAlertar(e: { atencaoAntes: boolean; motivoAntes: string | null; motivoAgora: string | null; piora?: boolean }): boolean {
   if (e.motivoAgora !== 'urgencia') return false
+  // Piora contada na mesma urgencia avisa de novo (17/10/2026, rodada 6 do
+  // painel): "ela piorou, ta gritando de dor" as 3h nao gerava alerta nenhum.
+  if (e.piora) return true
   return !(e.atencaoAntes && e.motivoAntes === 'urgencia')
 }
 

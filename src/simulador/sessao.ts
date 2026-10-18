@@ -320,7 +320,11 @@ export class Simulacao {
       podeIniciarMenu: !this.equipeConversando,
       posAcompanhamento: false,
       consultaHoje,
-      texto: entrada.anexo ? '' : (entrada.idDoToque ?? entrada.texto),
+      urgenciaAberta: Boolean(conversa.needs_attention) && conversa.attention_reason === 'urgencia',
+      // A legenda da foto vai como texto, como no webhook (messageBody). Antes
+      // ia vazia, e o painel da rodada 8 nao conseguia testar a foto com
+      // "olha o vomito, saiu com sangue".
+      texto: entrada.anexo ? (entrada.texto ?? '').trim() : (entrada.idDoToque ?? entrada.texto),
       telefone: this.familia.telefone,
       pacientes,
       pacienteEmAndamento: (conversa.booking_patient_id as string | null) ?? null,

@@ -34,6 +34,12 @@ export interface Patient {
    * salva - e vazio tambem em todo cadastro feito por gente.
    */
   criadoAutomaticamenteEm: string
+  /**
+   * Quando o cadastro nasceu com o nome do contato do WhatsApp, porque a ficha
+   * ficou sem o nome da crianca (quase sempre e o nome da mae). O prontuario
+   * mostra um aviso vermelho ate alguem salvar o nome conferido.
+   */
+  nomeDoContatoEm?: string
   followups: Record<FollowupKey, FollowupState>
 }
 

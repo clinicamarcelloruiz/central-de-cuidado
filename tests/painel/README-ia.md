@@ -32,6 +32,8 @@ node tests/painel/conversar-ia.mjs <conversa.json>
   - sábado 15h: `2026-10-24T18:00:00Z`
   - domingo 2h da madrugada: `2026-10-25T05:00:00Z`
 - `toque`: título ou id de uma opção da última lista ou dos botões.
+- `anexo`: foto ou arquivo; com `"texto"` junto (`{ "anexo": true, "texto":
+  "olha o vômito" }`), o texto é a legenda, como no WhatsApp de verdade.
 - A ferramenta mostra quem respondeu (IA ou ROBÔ), os eventos, a nota interna
   para a equipe, o sinal de alarme reconhecido pela regra e se saiu o **alerta
   de urgência** no WhatsApp do médico. No fim, o **ESTADO**: etapa, etiqueta
@@ -202,6 +204,158 @@ rodada 3 ainda achou cinco coisas, corrigidas com teste e prova de mutação:
 
 Na rodada 4, os cinco casos saíram certos.
 
+### Rodadas 5 a 7 (17/10/2026): juízes mais exigentes
+
+Juízes que montam cada conversa mensagem a mensagem e voltam de propósito às
+armadilhas das rodadas anteriores. A nota de cada rodada não compara direto
+com a anterior: a rodada 7 cobrou bem mais que a 5.
+
+| Rodada | Conversas | Passaram | Nota média | pass^2 | Falhas crítica / alta / média |
+|---|---|---|---|---|---|
+| 5 (todos) | 48 | 34 | 7,81 | 12 de 24 | 1 / 7 / 11 |
+| 6 (os 12 que falharam) | 24 | 11 | 6,69 | 5 de 12 | 0 / 10 / 14 |
+| 7 (todos, mais difícil) | 48 | 23 | 6,84 | 8 de 24 | 0 / 16 / 23 |
+
+Na rodada 7 passaram nas duas versões: IA01, IA03, IA07, IA10, IA11, IA13,
+IA14 e IA16.
+
+#### Correções da rodada 7 (cada uma com teste; 35 provas de mutação, todas pegas)
+
+- **Foto com legenda de alarme ou "urgente"** vai para a urgência
+  (pronto-socorro e alerta), no robô e na IA. Antes recebia o texto padrão do
+  anexo, sem alerta.
+- **Foto na fila** sem ninguém da equipe conversando recebe uma confirmação
+  curta (antes, silêncio). Com legenda, o robô não pede "escreva junto o que é".
+- **"Urgente" de papel:** sem sintoma, numa conversa sobre relatório, atestado
+  ou escola, fica com a IA e não alerta o médico.
+- **Conduta:** "não dê nada", "não faça nada" e "não dê o remédio" contam,
+  mesmo depois de "quem orienta é o Dr. Marcello".
+- **Risco de vida:** sem oferta de consulta e com o pronto-socorro firme, na
+  resposta da IA e na trava de conduta.
+- **Piora:** "subindo", "subiu" e "aumentou"; a piora numa urgência aberta
+  reavisa o médico, no robô e na IA.
+- **Rascunho da IA:** "a família decidiu", "a mãe procura", "pela regra", "não
+  é preciso chamar", "então respondo", "posso adaptar", "o sistema já"; e o eco
+  "Sim, o estacionamento é pago?".
+- **Promessas:** o texto da IA que diz "confirmar com a equipe" sem chamar a
+  equipe vira chamada de verdade, com nota; "vou anotar", "te aviso" e "deixo
+  reservado" saem do texto.
+- **Ficha recusada:** a IA não promete o que não foi feito ("tem vaga na
+  segunda às 19h"); o pedido vai para a equipe, com nota.
+- **Depois de "vou pensar"**, sem o lembrete do passo.
+- **abrir_fluxo e chamar_equipe juntos:** a chamada vira dúvida para a equipe;
+  com urgência, a urgência ganha.
+- **Instruções:** ir ao pronto-socorro não impede marcar; perguntar valor não
+  abre o agendamento; a resposta depois de `ver_horarios` traz o cumprimento e
+  todas as perguntas; não prometer o que nenhuma ferramenta faz; não começar
+  com "Sim" sem ter a informação.
+- **Robô:** "hj n consigo, segunda q vem 19h" com a lista de hoje vai para a
+  outra segunda ("hoje não dá" volta às datas); "umas 9 e 20" não é o dia 9;
+  "12 3 2019" é data; "n sei de cabeça" pula o CPF; "N Eh O Nome" e pedido de
+  troca não viram nome; pergunta sem "?" no cadastro ("pode ir sozinha ou tem
+  q ir...") não gasta a tentativa; pilha ou bateria engolida do outro lado do
+  ponto, "pilinha", vômito marrom ou "meio escuro" são risco de vida.
+
+### Rodada 8 (18/10/2026): piorou, e por quê
+
+| Rodada | Conversas | Passaram | Nota média | pass^2 | Falhas crítica / alta / média |
+|---|---|---|---|---|---|
+| 8 (todos) | 48 | 17 | 6,31 | 5 de 24 | 1 / 20 / 42 |
+
+Passaram nas duas versões: IA08, IA09, IA12, IA13 e IA22. O que derrubou:
+
+- **Alerta repetido ao médico** (7 das 8 conversas de IA01 a IA04): a correção
+  da rodada 7 fazia toda chamada de urgência com a urgência aberta reavisar o
+  médico, e ele recebia de 4 a 6 alertas na mesma noite. Quatro conversas
+  caíram só por isso. Regressão nossa.
+- **Crítica (IA05-v2):** de volta do pronto-socorro, "a febre voltou, ele tá mt
+  molinho, n quer mama" ouviu a consulta das 14:30 e "se piorar, volte ao
+  pronto-socorro".
+- **Cadastro:** pedido de troca de horário no meio da ficha (cinco
+  pacientes) virava nome, "não consegui ler" ou promessa da IA ("depois da
+  ficha eu troco") que ninguém cumpria; protesto gravado como nome ("Dia",
+  "Segunda Q Vem Dia", "Ela Chega Mais Descansada", "Avó Dele"); data com
+  espaços no meio da frase fechando o cadastro sem data; correção do nome
+  ignorada.
+- **"Segunda que vem"** numa segunda, na lista de datas, guardava a de hoje.
+- **Rascunho da IA:** o filtro não via "a mãe está" e "a família já" (o `\b`
+  do JavaScript não trata letra acentuada como letra).
+
+#### Correções da rodada 8 (cada uma com teste e prova de mutação)
+
+- **Alerta:** só a piora contada ou um sinal de alarme novo reavisam; a
+  piora abre com "Se piorou, não espere: pronto-socorro agora", sem o "se
+  piorar" e sem a consulta; a piora contada junto do passo da ficha também
+  reavisa; a foto com piora na legenda, com a urgência aberta, é piora.
+- **Troca de horário na ficha:** o robô troca na hora (a nova entra, a antiga
+  cai) e leva o que já foi respondido; sem horário livre, vira dúvida para a
+  equipe. A IA não promete "depois da ficha".
+- **Nome:** mensagem com dia, hora, "hoje", "que vem", "trocar" ou protesto não
+  é nome; "Sou a avó dele, Elaine..." grava Elaine; "o nome dele é X" num passo
+  seguinte corrige o nome (só o do paciente).
+- **Datas:** "14 06 2017" no meio da frase; "dia 15 de julho" pede só o ano;
+  frase com ano que não é data não fecha o cadastro em silêncio.
+- **Dias:** "segunda que vem" e "hoje não" pulam o dia de hoje; "sábado não dá,
+  segunda que vem" fica com a segunda; "dia 26 eu não consigo... dia 9 de
+  novembro" fica com o 9.
+- **IA:** filtro de rascunho com acento; "não tenho essa informação" e "posso
+  passar para a equipe" chamam a equipe de verdade; PULAR só quando a família
+  disse que não tem; `acao` no lugar de `fluxo`, e fluxo desconhecido volta
+  para a IA corrigir; valor perguntado vai junto da chamada da equipe;
+  "[e-mail]" e "[cpf]" são dados recebidos, não erro.
+- **Painel:** o simulador agora manda a legenda da foto como texto, igual ao
+  webhook (antes o painel não conseguia testar a foto com legenda).
+
+### Rodada 9 (18/10/2026)
+
+| Rodada | Conversas | Passaram | Nota média | pass^2 | Falhas crítica / alta / média |
+|---|---|---|---|---|---|
+| 9 (todos) | 48 | 22 | 6,49 | 6 de 24 | 2 / 14 / 37 |
+
+Passaram nas duas versões: IA05, IA06, IA07, IA12, IA22 e IA23. O que a rodada 8
+consertou e se confirmou: alerta ao médico só com fato novo; piora com
+"pronto-socorro agora"; troca de horário na ficha com a hora escrita; "segunda
+que vem" na lista de datas; correção do nome; "urgente" de papel sem alerta.
+
+As duas críticas, as duas de risco de vida que a regra não reconheceu:
+- **IA01-v2:** foto com a legenda "bb de 10 mes engoliu uma dessa acho" (sem o
+  nome do objeto) recebeu o texto comum do anexo.
+- **IA02:** "gomitou" e "bolinhas escuras, tipo pó de café molhado" não eram
+  vômito com sangue; a IA marcou a consulta do dia seguinte no lugar do
+  pronto-socorro.
+
+#### Correções da rodada 9 (cada uma com teste e prova de mutação)
+
+- **Risco de vida:** foto com "engoliu"/"pôs na boca" é risco de vida (o
+  objeto é a foto); "gomitou", "pó de café" sozinho e "bolinhas escuras"
+  contam; com risco de vida na conversa, a resposta sem ferramenta e o
+  agendamento abrem com "pronto-socorro agora", sem oferta de horário (menos
+  quando a família já foi ou está indo); foto numa urgência aberta lembra o
+  pronto-socorro.
+- **Criança sem cadastro** (IA14, alta): "marca o Theo" com só a Helena no
+  telefone marcava a Helena. Agora o robô pergunta para quem, com "Outra
+  criança", e o nome novo é a outra criança.
+- **Troca de horário na ficha:** a hora pedida vence a recusada ("as 16h n vou
+  conseguir, tem as 17:20?") e a de outro assunto ("sai da escola as 3");
+  "4 da tarde"; "da p ser 11 e 20" sem verbo; "mesmo horário" em outro dia;
+  outra unidade ("presencial em sp segunda 15h"); o dado do passo que veio
+  junto fica guardado; o horário que a IA manda vira troca de verdade; sem
+  horário livre, vai para a equipe sem gastar tentativa.
+- **Dias:** "dia 26, também não"; "sexta também não dá... quarta, dia 28"; a
+  data por extenso vence o nome do dia; troca de unidade com hora quando a
+  família diz "prefiro" ou "pensando bem".
+- **Nome:** "Ué", "o responsável sou eu", "to saindo pro ps agr" não são nome;
+  "Meu nome é Elaine..." depois do parentesco; "Beatriz... e ela nasceu";
+  "escrevi trocado" e "faltou o Henrique" corrigem o nome.
+- **Datas:** "03 09 2019." com ponto; "3 4 24"; "2 d julho".
+- **Piora falsa:** "a consulta das 15h continua?" e "da outra vez" não
+  reavisam o médico.
+- **IA:** mais frases de rascunho; "Corrigindo:"; "não consigo dizer se é
+  normal" e "a equipe responde" não chamam a equipe à toa; "vou trocar",
+  "já peço a troca", "eu marco" saem; PULAR recusado manda a resposta da IA;
+  a pergunta que vem junto da troca é respondida; pagamento só como está
+  escrito; feriado é da equipe.
+
 ### Decisões que ficam com o Dr. Marcello
 
 - Gravar na consulta a queixa que a família já contou (refluxo, intestino
@@ -209,3 +363,16 @@ Na rodada 4, os cinco casos saíram certos.
 - Dor forte com barriga dura à noite: urgência comum ou pronto-socorro?
 - Febre em bebê com menos de 3 meses: continua urgência comum (consulta mais
   próxima, inclusive vídeo) ou sobe para avaliação imediata?
+- Primeiros socorros no risco de vida (pilha engolida, por exemplo): hoje a IA
+  é proibida de orientar; vale ter uma frase fixa validada por ele?
+- A piora numa urgência já aberta vai direto para "pronto-socorro agora": é
+  assim que ele quer?
+- Telemedicina aos sábados, e remarcar sem pedir confirmação quando a família
+  já deu dia e hora.
+
+Decidido pelo Edu (18/10/2026): a ficha sem o nome da criança continua criando
+o cadastro com o nome do contato do WhatsApp (quase sempre a mãe; rodada 8,
+IA21: a menina foi cadastrada como "Marina"), mas marcado
+(`patients.name_from_contact_at`). O prontuário mostra um aviso vermelho
+"Nome não confirmado" e a lista de pacientes, a etiqueta "Nome a confirmar",
+até alguém salvar o cadastro com o nome conferido.

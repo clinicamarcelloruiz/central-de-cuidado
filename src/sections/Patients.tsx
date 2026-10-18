@@ -127,6 +127,21 @@ function AConferir() {
   )
 }
 
+/**
+ * O nome do cadastro veio do contato do WhatsApp, e nao da ficha (18/10/2026):
+ * quase sempre e o nome da mae. Vermelho, como a alergia no prontuario.
+ */
+function NomeAConfirmar() {
+  return (
+    <span
+      title="A família não informou o nome da criança no WhatsApp: o cadastro usa o nome do contato, que pode ser o da mãe ou do pai. Confirme e corrija."
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#fceceb] px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-[#b42318]"
+    >
+      Nome a confirmar
+    </span>
+  )
+}
+
 function emptyDraft(unidadePadrao = ''): PatientDraft {
   return {
     nome: '',
@@ -782,6 +797,7 @@ export default function Patients({
                     {patient.nome}
                   </p>
                   {patient.criadoAutomaticamenteEm && <AConferir />}
+                  {patient.nomeDoContatoEm && <NomeAConfirmar />}
                 </div>
                 <p className="truncate text-[10px] text-slate-400">
                   {[
@@ -845,6 +861,7 @@ export default function Patients({
                       <div className="flex items-center gap-1.5">
                         <h2 className="truncate text-sm font-extrabold uppercase tracking-[-0.01em] text-[#081b2c]">{patient.nome}</h2>
                         {patient.criadoAutomaticamenteEm && <AConferir />}
+                        {patient.nomeDoContatoEm && <NomeAConfirmar />}
                       </div>
                       <p className="mt-1 text-[10px] font-semibold text-slate-400">
                         {idade(patient.nascimento)} · {patient.sexo === 'F' ? 'Feminino' : patient.sexo === 'M' ? 'Masculino' : 'Outro / NI'}

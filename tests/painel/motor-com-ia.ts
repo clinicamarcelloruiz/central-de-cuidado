@@ -5,4 +5,4 @@
 export { Simulacao } from '../../src/simulador/sessao.ts'
 export { IDENTIDADES, FAMILIAS } from '../../src/simulador/dados.ts'
 export { atenderComAssistente, montarSituacao, claudePelaApi, MODELO_PADRAO } from '../../supabase/functions/_shared/assistente.ts'
-export { horariosEmTexto, entregarParaEquipe, tratarConversa, sinalDeAlarme } from '../../supabase/functions/_shared/atendimento.ts'
+export { horariosEmTexto, entregarParaEquipe, tratarConversa, sinalDeAlarme, roboRegistrou } from '../../supabase/functions/_shared/atendimento.ts'

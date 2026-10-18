@@ -178,7 +178,10 @@ const atender = async (op, sim) => {
     ferramentas,
     chamar,
     roboDireto: () => M.tratarConversa(op),
-    roboNaoEntendeuAgora: () => false,
+    // Igual ao webhook (rodada 6 do painel): com "() => false", a resposta pronta
+    // que o "nao entendi" devolve no meio de um passo saia como final, onde a
+    // familia de verdade leria a IA.
+    roboNaoEntendeuAgora: () => M.roboRegistrou(op.conversationId, 'nao_entendi'),
   })
   if (ultimoDesfecho.nota) {
     sim.banco.linhas('conversation_notes').push({ conversation_id: op.conversationId, texto: ultimoDesfecho.nota, created_at: agora.toISOString() })
@@ -246,6 +249,10 @@ for (const bruto of roteiro.mensagens ?? []) {
   if (s.motivo === 'urgencia' && motivoAntes !== 'urgencia') {
     alertas.push(n)
     console.log('      🚨 ALERTA DE URGÊNCIA disparado para o WhatsApp do Dr. Marcello')
+  } else if (s.motivo === 'urgencia' && ultimoDesfecho?.resultado?.piora) {
+    // A piora na mesma urgencia avisa de novo (deveAlertar com piora).
+    alertas.push(n)
+    console.log('      🚨 ALERTA DE URGÊNCIA (piora) disparado de novo para o WhatsApp do Dr. Marcello')
   }
   console.log('')
   agora = new Date(agora.getTime() + 45000)

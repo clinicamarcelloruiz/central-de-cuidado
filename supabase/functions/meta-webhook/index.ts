@@ -1029,6 +1029,11 @@ Deno.serve(async (req) => {
               // Consulta atendida ha poucos dias conta igual (ver consultouHaPouco).
               posAcompanhamento: (acompanhamentoRecente || consultouHaPouco) && !equipeFalouRecentemente,
               consultaHoje,
+              // Sinal de alarme novo numa urgencia aberta e piora (ver ehPiora).
+              urgenciaAberta: Boolean(
+                (conversaAnterior as unknown as { needs_attention?: boolean | null } | null)?.needs_attention &&
+                  (conversaAnterior as unknown as { attention_reason?: string | null } | null)?.attention_reason === 'urgencia',
+              ),
               texto: escolhido,
               telefone: waId,
               pacientes,
@@ -1375,6 +1380,7 @@ Deno.serve(async (req) => {
                   atencaoAntes: Boolean(conversaAnterior?.needs_attention),
                   motivoAntes: (conversaAnterior?.attention_reason as string | null) ?? null,
                   motivoAgora,
+                  piora: Boolean(resultado?.piora),
                 })
               ) {
                 const alerta = enviarAlertaDeUrgencia(admin, {

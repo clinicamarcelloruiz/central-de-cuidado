@@ -57,6 +57,7 @@ export type OpcoesDaConversa = {
   textos: { saudacao: string; saudacaoConhecida: string; informacoes: string }
   agora?: Date
   consultaHoje?: boolean
+  urgenciaAberta?: boolean
 }
 
 export function tratarConversa(opcoes: OpcoesDaConversa): Promise<Resultado>

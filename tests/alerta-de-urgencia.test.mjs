@@ -27,6 +27,9 @@ confere('alerta: conversa nova em urgencia', deveAlertar({ atencaoAntes: false, 
 confere('alerta: da fila do atendente para urgencia', deveAlertar({ atencaoAntes: true, motivoAntes: 'atendente', motivoAgora: 'urgencia' }))
 confere('alerta: mae escrevendo de novo na mesma urgencia nao repete', !deveAlertar({ atencaoAntes: true, motivoAntes: 'urgencia', motivoAgora: 'urgencia' }))
 confere('alerta: outro motivo nao alerta', !deveAlertar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'atendente' }))
+// Rodada 6 do painel: "ela piorou, ta gritando de dor" as 3h, na mesma urgencia.
+confere('alerta: piora na mesma urgencia avisa de novo', deveAlertar({ atencaoAntes: true, motivoAntes: 'urgencia', motivoAgora: 'urgencia', piora: true }))
+confere('alerta: piora sem urgencia nao alerta', !deveAlertar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'atendente', piora: true }))
 confere('alerta: urgencia resolvida e nova urgencia alerta', deveAlertar({ atencaoAntes: false, motivoAntes: 'urgencia', motivoAgora: 'urgencia' }))
 
 // 3. Parametros que a Meta aceita: sem quebra de linha, sem CPF, com limite.

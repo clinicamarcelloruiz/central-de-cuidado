@@ -108,6 +108,11 @@ export async function cadastrarDaFicha(
 
   const nome = (consulta.intake_patient_name || consulta.contact_name || '').trim()
   if (nome.length < 2) return null
+  // Sem nome na ficha, o nome e o do contato do WhatsApp - quase sempre a mae
+  // (rodada 8 do painel: a menina foi cadastrada como "Marina"). O cadastro
+  // nasce do mesmo jeito, marcado: o prontuario mostra um aviso vermelho ate
+  // alguem confirmar o nome (pedido do Edu, 18/10/2026).
+  const nomeDoContato = !(consulta.intake_patient_name ?? '').trim()
 
   // Data so quando e data. "marco de 2019" fica em branco e a equipe pergunta:
   // uma data inventada no prontuario e pior do que um campo vazio.
@@ -117,23 +122,37 @@ export async function cadastrarDaFicha(
     ? consulta.clinic_units[0]?.name ?? ''
     : consulta.clinic_units?.name ?? ''
 
-  const { data: criado, error } = await admin
+  const linha: Record<string, unknown> = {
+    clinic_id: clinicId,
+    name: nome.slice(0, 200),
+    guardian_name: (consulta.intake_guardian ?? '').slice(0, 200),
+    birth_date: nascimento,
+    phone: telefone.slice(0, 32),
+    cpf: (consulta.intake_cpf ?? '').replace(/\D/g, '') || null,
+    email: (consulta.intake_email ?? '') || null,
+    unit: unidade.slice(0, 160),
+    consultation_date: consulta.starts_at.slice(0, 10),
+    notes:
+      'Cadastro criado pelo sistema a partir do agendamento no WhatsApp. Confira os dados com a família.' +
+      (nomeDoContato ? ' ATENÇÃO: a ficha ficou sem o nome da criança, e o nome é o do contato do WhatsApp (pode ser o da mãe ou do pai).' : ''),
+    auto_created_at: new Date().toISOString(),
+    ...(nomeDoContato ? { name_from_contact_at: new Date().toISOString() } : {}),
+  }
+  let { data: criado, error } = await admin
     .from('patients')
-    .insert({
-      clinic_id: clinicId,
-      name: nome.slice(0, 200),
-      guardian_name: (consulta.intake_guardian ?? '').slice(0, 200),
-      birth_date: nascimento,
-      phone: telefone.slice(0, 32),
-      cpf: (consulta.intake_cpf ?? '').replace(/\D/g, '') || null,
-      email: (consulta.intake_email ?? '') || null,
-      unit: unidade.slice(0, 160),
-      consultation_date: consulta.starts_at.slice(0, 10),
-      notes: 'Cadastro criado pelo sistema a partir do agendamento no WhatsApp. Confira os dados com a família.',
-      auto_created_at: new Date().toISOString(),
-    })
+    .insert(linha)
     .select('id,name,phone,whatsapp_opt_out_at')
     .maybeSingle()
+  // Coluna nova que o banco ainda nao tem recusa o INSERT inteiro (ver o
+  // CLAUDE.md). Sem a marca, o aviso ainda vai nas observacoes; sem o
+  // cadastro, nao haveria prontuario.
+  if (error && (error as { code?: string }).code === '42703' && 'name_from_contact_at' in linha) {
+    console.warn('patients sem name_from_contact_at; cadastro criado sem a marca do nome', error)
+    delete linha.name_from_contact_at
+    const segunda = await admin.from('patients').insert(linha).select('id,name,phone,whatsapp_opt_out_at').maybeSingle()
+    criado = segunda.data
+    error = segunda.error
+  }
 
   if (error || !criado) {
     console.error('Falha ao criar cadastro automatico', { appointmentId: consulta.id, error })
