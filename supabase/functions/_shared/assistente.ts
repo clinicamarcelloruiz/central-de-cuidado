@@ -336,7 +336,7 @@ function instrucoes(s: Situacao): string {
     '- Não suponha o que a família não disse: plano de saúde ("se vocês tiverem plano, damos recibo para reembolso"), idade, quem é a criança. Exame pelo plano é "conforme a cobertura do seu plano", nunca um sim para um exame específico.',
     '- Oferta de marcar uma vez só: se a sua última mensagem já ofereceu e a família seguiu com outra dúvida, responda só a dúvida.',
     '- Paciente adolescente: fale "seu filho", "sua filha" ou o nome, não "a criança".',
-    '- Agenda: diga os dias e horários como estão em <clinica> ou em ver_horarios, sem "alguns" ou "às vezes" que não estejam escritos. A família fala a hora como fala no dia a dia: "19 e 20" e "sete e vinte da noite" são 19:20, "4 e 40" à tarde é 16:40, "7 da noite" é 19:00. Pergunta sobre um dia da semana ("atende sábado?") se responde olhando todas as unidades (ver_horarios "todas"), mesmo quando a família diz onde mora: nunca diga só "em Santos não tem" sem dizer onde tem.',
+    '- Agenda: diga os dias e horários como estão em <clinica> ou em ver_horarios, sem "alguns" ou "às vezes" que não estejam escritos. A família fala a hora como fala no dia a dia: "19 e 20" e "sete e vinte da noite" são 19:20, "4 e 40" à tarde é 16:40, "7 da noite" é 19:00. Hora que não existe: diga os dois horários mais perto, sem escolher um por ela e sem dizer que deixou algum selecionado. Pergunta sobre um dia da semana ("atende sábado?") se responde olhando todas as unidades (ver_horarios "todas"), mesmo quando a família diz onde mora: nunca diga só "em Santos não tem" sem dizer onde tem.',
     '',
     'Ferramentas:',
     '- abrir_fluxo: marcar, remarcar, cancelar, ver a consulta, 2ª via. O sistema conduz com botões e faz o cadastro; em para_familia, você pode responder em uma frase o que ela perguntou. Não peça CPF, e-mail nem dados da criança.',
@@ -613,6 +613,14 @@ function horarioEscolhido(s: Situacao, horario: unknown): string {
   const oferecidos = horasDitas(s.ultimaDoConsultorio ?? '')
   const sim = /^\s*(sim|pode|pode ser|quero|isso|ok|fechado|combinado|beleza|blz|perfeito)\b/i.test(s.texto)
   if (sim && oferecidos.length === 1 && disse(s.ultimaDoConsultorio ?? '')) return String(horario)
+  // Com varias horas na mensagem, vale a da pergunta (rodada 14, IA18-v1: "...O
+  // mais perto e o das 09:20. Quer que eu marque esse?" e o "pode ser" mostrou a
+  // lista inteira de novo).
+  const frases = (s.ultimaDoConsultorio ?? '').split(/\n+/).flatMap((l) => l.split(FIM_DE_FRASE))
+  const ultimaPergunta = frases.map((f) => /\?\s*$/.test(f)).lastIndexOf(true)
+  const perto = ultimaPergunta >= 0 ? frases.slice(Math.max(0, ultimaPergunta - 1), ultimaPergunta + 1).join(' ') : ''
+  const daPergunta = perto ? horasDitas(perto).filter((h) => h.minuto !== null) : []
+  if (sim && daPergunta.length === 1 && daPergunta[0].minuto === minuto && (daPergunta[0].hora === hora || daPergunta[0].hora + 12 === hora)) return String(horario)
   return ''
 }
 
@@ -665,6 +673,7 @@ function valoresDaClinica(conhecimento: string): string {
 }
 
 /** Sinal de risco de vida agora ou nas ultimas mensagens da familia. */
+const ORDEM_DE_IR_AGORA = /\b(?:leve|levem|levar|lev[aá]-l[oa]|procure|procurem|procurar|v[aá]|vão|ir|ligue)\b[^.!?\n]{0,40}\bagora\b|\bagora\b[^.!?\n]{0,15}\b(?:leve|levem|procure|procurem|v[aá]|vão|ligue)\b|\bagora\s*:/i
 function riscoDeVida(s: Situacao): boolean {
   const recentes = [...s.historico.filter((m) => m.de === 'familia').slice(-6).map((m) => m.texto), s.texto]
   if (recentes.some((t) => sinalDeAlarme(t)?.risco === 'vida')) return true
@@ -682,7 +691,10 @@ function riscoDeVida(s: Situacao): boolean {
     s.historico
       .filter((m) => m.de === 'consultorio')
       .slice(-4)
-      .some((m) => !frasePronta.test(m.texto) && m.texto.split(FIM_DE_FRASE).some((f) => PRONTO_SOCORRO.test(f) && /\bagora\b/i.test(f) && !/^\s*(?:🚨\s*)?\*?se\b/i.test(f)))
+      // O "agora" tem de ser a ordem de ir (rodada 14, IA05-v2, alta: "agora e
+      // madrugada, o mais seguro e leva-lo ao pronto-socorro" fechou a agenda de
+      // uma febre que ja tinha baixado).
+      .some((m) => !frasePronta.test(m.texto) && m.texto.split(FIM_DE_FRASE).some((f) => PRONTO_SOCORRO.test(f) && ORDEM_DE_IR_AGORA.test(f) && !/^\s*(?:🚨\s*)?\*?se\b/i.test(f)))
 }
 
 // Oferta de marcar, que nao cabe numa conversa de risco de vida (rodada 7).
@@ -690,7 +702,7 @@ function riscoDeVida(s: Situacao): boolean {
 // com vomito escuro de volta - a mae perguntou se podia esperar ate as 14:30.
 // Sem \b antes do "as" com crase (rodada 9, IA01-v1: "as 14:00" passava, e a
 // mae marcou quarta com o bebe que engoliu a bateria em casa).
-const OFERTA_DE_MARCAR = /\b(quer que eu (veja|procure|marque|abra)|posso (ver|procurar|marcar|abrir)|quer marcar|vamos marcar|ver um hor[aá]rio|marcar uma consulta|hor[aá]rio mais pr[oó]ximo|pr[oó]ximo hor[aá]rio|continua marcada|o pr[oó]ximo [eé]|eu marco|d[aá] (?:sim )?para marcar|vou mostrar os hor[aá]rios)\b|(?:^|\s)[àa]s\s+\d{1,2}[:h]\d{2}\b|R\$\s*\d/i
+const OFERTA_DE_MARCAR = /\b(quer que eu (veja|procure|marque|abra)|posso (ver|procurar|marcar|abrir)|quer marcar|vamos marcar|ver um hor[aá]rio|marcar uma consulta|hor[aá]rio mais pr[oó]ximo|pr[oó]ximo hor[aá]rio|continua marcada|o pr[oó]ximo [eé]|eu marco|d[aá] (?:sim )?para marcar|d[aá] sim|vou mostrar os hor[aá]rios)\b|(?:^|\s)[àa]s\s+\d{1,2}[:h]\d{2}\b|R\$\s*\d/i
 /** A familia ja foi, esta ou esta indo ao pronto-socorro (nas ultimas mensagens). */
 function jaNoProntoSocorro(s: Situacao): boolean {
   const recentes = [...s.historico.filter((m) => m.de === 'familia').slice(-3).map((m) => m.texto), s.texto]
@@ -705,6 +717,8 @@ function jaNoProntoSocorro(s: Situacao): boolean {
     // recusada). Com o "do": "a febre voltou, nao quero ir pro ps" nao e volta.
     /\bvolt\w*(?:\s+\S+){0,2}?\s+(?:d[oa]s?|de)\s+(?:ps|pronto[\s-]?socorro|hospital|upa)\b/i.test(semAcento(t)) ||
     /\b(ja )?(to|estou|tamo|estamos) saindo\b/i.test(semAcento(t)) ||
+    // "ja tamo d volta, liberaram ela do ps" (rodada 14, IA02-v2).
+    /\b(?:ja\s+)?(?:tamo|tamos|estamos|to|estou)\s+(?:de|d)\s+volta\b/i.test(semAcento(t)) ||
     // "Ta bom, vou levar agora", "vamos agora" (rodada 10). "vamo agr" (rodada 11,
     // IA01-v2: a mae saindo ouviu que o horario "fica marcado", e nada marcou).
     // "vo leva ela agr" e "estamos indo agora" (rodada 13, IA01).
@@ -924,6 +938,12 @@ const NARRACAO = [
   // Rodada 13 (IA07-v2): "Pelas regras, pergunta hipotetica nao e piora e nao
   // chama a equipe como urgencia. A resposta e direta, sem a ferramenta."
   /\bpelas? regras?\b|\bsem (?:a )?ferramenta\b|\bpergunta hipot[eé]tica\b|\bn[aã]o chama (?:a )?equipe\b|\ba resposta [eé] direta\b/i,
+  // Com o nome da mae no lugar de "a familia" (rodada 14, IA07-v2: "A Camila esta
+  // dizendo que... so preciso esclarecer com calma").
+  /^\s*(?:A|O)\s+[A-ZÀ-Ú][a-zà-ú]+\s+(?:est[aá] dizendo|disse que|quer saber|perguntou|pediu|escreveu|parece)\b/,
+  // Rodada 14 (IA03-v2): "Vou confirmar a consulta, dizer que a equipe ja esta
+  // com a mensagem e manter o pronto-socorro apenas como orientacao se piorar."
+  /\bvou confirmar a consulta\b|\bmanter o pronto[\s-]?socorro\b|\bapenas como orienta[cç][aã]o\b|\bdizer que a equipe\b/i,
   // "Responda diretamente." (rodada 12, IA01-v1): sobra de rascunho.
   /^\s*respond[ao]\s+diretamente\b|\bresponder diretamente\b/i,
   /\bn[aã]o (?:preciso|[eé] preciso|h[aá] (?:por)?que)\s+(?:chamar|abrir|usar|consultar|oferecer|passar|orientar|repetir|avisar|acionar)\b/i,
@@ -968,7 +988,10 @@ export function semNarracao(texto: string): string {
   // Com virgula tambem, quando a pergunta traz valor (rodada 12,
   // IA20-v2: "A consulta la e R$ 450,00? Nao, em Sao Paulo e R$ 600,00" chegou a
   // avo). "Atende sabado? Sim, aos sabados" continua.
+  // "e R$ 450,00... desculpe, o valor correto e R$ 600,00" (rodada 14, IA03-v1):
+  // sai o valor errado e a desculpa, fica o certo.
   const semAutoPergunta = texto
+    .replace(/R\$\s*[\d.,]+\s*(?:…|\.{2,3}|,)\s*(?:desculp\w*|perd[aã]o|corrigindo)[,!.]?\s*(?:o valor (?:correto|certo) [eé]\s*)?(?=R\$)/gi, '')
     .replace(
       /(^|[.!?]\s+|\n)[^.!?\n]*\?\s+(?:N[aã]o|Sim|Corrigindo)\s*:\s*(\S)/g,
       (_, antes: string, letra: string) => antes + letra.toUpperCase(),
@@ -1032,7 +1055,7 @@ function prometeuAEquipe(texto: string): boolean {
 // nome, eu troco", "da para trocar depois que terminar o cadastro" - nada fazia
 // a troca (o sistema troca na hora; ver trocarHorarioDaFicha no robo).
 const PROMESSA =
-  /\b(?:vou|irei|vamos)\s+(?:te\s+|lhe\s+)?(?:anotar|registrar|reservar|segurar|guardar|lembrar|avisar(?!\s+a\s+equipe)|mandar|enviar)\b|\b(?:anotei|registrei|reservei|guardei|segurei)\b|\bte\s+(?:aviso|lembro|mando|envio)\b|\bdeixo\s+(?:reservad|separad|anotad|guardad)\w*|\beu\s+(?:troco|mudo|altero|remarco|ajusto)\b|\bdepois\s+(?:da ficha|do cadastro|que (?:terminar|terminarmos|acabar))\b|\b(?:j[aá]\s+)?pe[cç]o\s+(?:a\s+)?(?:troca|mudan[cç]a|altera[cç][aã]o)\b|\bvou\s+(?:pedir|solicitar)\s+(?:a\s+)?(?:troca|mudan[cç]a|altera[cç][aã]o)\b|\bvou\s+(?:trocar|mudar|remarcar|alterar)\b|\bj[aá]\s+deixo\b|\bem seguida\b[^.!?\n]{0,30}\b(?:marc|deix|troc)\w*|\beu\s+(?:mesm[oa]\s+)?marco\b|\bmarco para voc[eê]|\bo combinado [eé]\b|\bassim que\b[^.!?\n]{0,30}\bficar pront|\bte mandar por aqui\b|\bem seguida\b[^.!?\n]{0,40}\b(?:faz|fazer|cadastr)\w*|\bvou\s+(?:procurar|ver\s+as\s+datas|buscar)\b|\b(?:a gente|eu|n[oó]s)\s+deix\w*\s+(?:marcad|reservad|agendad)\w*|\bvou deixar\b[^.!?\n]{0,30}\b(?:agendamento|marcad|reservad|aberto|anotad|encaminhad)\w*|\b(?:o|a)\s+Dra?\.\s+\S+\s+(?:j[aá]\s+)?sabe\b|\b(?:j[aá]\s+)?recebi\b[^.!?\n]{0,40}\b(?:dados|em cima|que voc[eê] mandou)|\b(?:dados|que voc[eê] mandou)\b[^.!?\n]{0,40}\bj[aá] recebi\b/i
+  /\b(?:vou|irei|vamos)\s+(?:te\s+|lhe\s+)?(?:anotar|registrar|reservar|segurar|guardar|lembrar|avisar(?!\s+a\s+equipe)|mandar|enviar)\b|\b(?:anotei|registrei|reservei|guardei|segurei)\b|\bte\s+(?:aviso|lembro|mando|envio)\b|\bdeixo\s+(?:reservad|separad|anotad|guardad)\w*|\beu\s+(?:troco|mudo|altero|remarco|ajusto)\b|\bdepois\s+(?:da ficha|do cadastro|que (?:terminar|terminarmos|acabar))\b|\b(?:j[aá]\s+)?pe[cç]o\s+(?:a\s+)?(?:troca|mudan[cç]a|altera[cç][aã]o)\b|\bvou\s+(?:pedir|solicitar)\s+(?:a\s+)?(?:troca|mudan[cç]a|altera[cç][aã]o)\b|\bvou\s+(?:trocar|mudar|remarcar|alterar)\b|\bj[aá]\s+deixo\b|\bem seguida\b[^.!?\n]{0,30}\b(?:marc|deix|troc)\w*|\beu\s+(?:mesm[oa]\s+)?marco\b|\bmarco para voc[eê]|\bo combinado [eé]\b|\bassim que\b[^.!?\n]{0,30}\bficar pront|\bte mandar por aqui\b|\bem seguida\b[^.!?\n]{0,40}\b(?:faz|fazer|cadastr)\w*|\bvou\s+(?:procurar|ver\s+as\s+datas|buscar)\b|\b(?:a gente|eu|n[oó]s)\s+deix\w*\s+(?:marcad|reservad|agendad)\w*|\bvou deixar\b[^.!?\n]{0,30}\b(?:agendamento|marcad|reservad|aberto|anotad|encaminhad|selecionad|separad|escolhid)\w*|\b(?:o|a)\s+Dra?\.\s+\S+\s+(?:j[aá]\s+)?sabe\b|\bdeixei\b[^.!?\n]{0,30}\bselecionad\w*|\bvou passar\s+(?:o|a)\s+\S+\s+para\s+(?:as|às)\b|\b(?:j[aá]\s+)?recebi\b[^.!?\n]{0,40}\b(?:dados|em cima|que voc[eê] mandou)|\b(?:dados|que voc[eê] mandou)\b[^.!?\n]{0,40}\bj[aá] recebi\b/i
 // Rodada 12: "Vou deixar o agendamento aberto para quarta" sem abrir nada
 // (IA01-v1), e "Os dados que voce mandou la em cima eu tambem ja recebi" em cima
 // da pergunta da data (IA15-v1: "se ja recebeu, por que esta perguntando?").
@@ -1045,7 +1068,10 @@ function semPromessa(t: string): string {
   // um envio que so a equipe confirma. Sai o "combinado", fica o resto.
   // A frase que sobra comeca com maiuscula (rodada 13, IA21: "a equipe ja
   // esta..." chegava minusculo depois do corte de "Combinado, ").
+  // "Passei para a equipe e para o Dr. Marcello": so a equipe recebe (rodada 14,
+  // IA05-v2); o "e para o Dr." sai.
   return t
+    .replace(/\s+e\s+(?:para|pro)\s+o\s+Dra?\.\s+[A-ZÀ-Ú][\wà-ú]+/g, '')
     .replace(/^\s*(?:combinado|fechado|pode deixar|beleza|certinho)\s*[!.,]\s*(?=\S)/i, '')
     .replace(/^\s*\p{Ll}/u, (letra) => letra.toUpperCase())
     .split('\n')
@@ -1060,8 +1086,14 @@ function semPromessa(t: string): string {
  * inteira pela terceira vez).
  */
 function valorPedidoENaoDito(s: Situacao): boolean {
-  const precoPerguntado = /\b(quanto (?:custa|e|é|fica|sai|ta|tá)|qnto|qto|qual (?:e |é )?o valor|valor da consulta|pre[cç]o)\b/i.test(s.texto)
-  const jaDissemos = s.historico.slice(-4).some((m) => m.de === 'consultorio' && /R\$/.test(m.texto))
+  const PRECO = /\b(quanto (?:custa|e|é|fica|sai|ta|tá)|quanto [eé] a consulta|qnto|qto|qual (?:e |é )?o valor|valor da consulta|pre[cç]o)\b/i
+  // A pergunta da mensagem anterior tambem, se nada com R$ saiu depois (rodada
+  // 14, IA03-v1: "E quanto e a consulta?" na 1a mensagem, e o toque seguinte no
+  // botao fez o valor sumir ate a 10a).
+  const ultimas = s.historico.slice(-4)
+  const ultimaDaFamilia = [...ultimas].reverse().find((m) => m.de === 'familia')?.texto ?? ''
+  const precoPerguntado = PRECO.test(s.texto) || PRECO.test(ultimaDaFamilia)
+  const jaDissemos = ultimas.some((m) => m.de === 'consultorio' && /R\$/.test(m.texto))
   return precoPerguntado && !jaDissemos
 }
 
@@ -1211,7 +1243,8 @@ async function conversarComClaude(
     // A pergunta "e se... faco o que?" tambem (rodada 13, IA07-v1: "E se vier mais
     // sangue ate a hora da consulta, faco o que?" perdeu a resposta "se vier, e
     // pronto-socorro", com o consultorio aberto). Sem alerta: so o texto fica.
-    const perguntaDoSe = /\bse\b[^?]{0,80}\b(fa[cç]o o (?:que|q)|fa[cç]o oq|o (?:que|q) eu fa[cç]o|eu dou oq|eu dou o (?:que|q))\b/i.test(semAcento(s.texto))
+    // "oq eu faco" e "eu levo no ps ou espero?" tambem (rodada 14, IA07-v2 e IA08).
+    const perguntaDoSe = /\bse\b[^?]{0,80}\b(fa[cç]o o (?:que|q)|fa[cç]o oq|o (?:que|q) eu fa[cç]o|oq eu fa[cç]o|eu dou oq|eu dou o (?:que|q)|levo (?:no|pro|ao|na) (?:ps|pronto|hospital|upa)|levo ou espero)\b/i.test(semAcento(s.texto))
     const urgente =
       usos.some((u) => u.name === 'chamar_equipe' && u.input?.motivo === 'urgencia') ||
       familiaFalouDeUrgencia(s.texto) ||
@@ -1415,7 +1448,7 @@ async function conversarComClaude(
           // "tb" e "tbm" (rodada 11, IA12-v2: "marca a helena tb hj, 17 e 20" parou
           // em "Remarcar essa", sobre a consulta do Theo, e foram 6 mensagens).
           const maisUma = /\b(tamb[eé]m|mais uma|outra consulta|al[eé]m d)|\btbm?\b/i.test(s.texto)
-          doRobo = await seguirComOPedido(ferramentas, doRobo, { ...final.input, horario: horarioEscolhido(s, final.input?.horario), maisUma })
+          doRobo = await seguirComOPedido(ferramentas, doRobo, { ...final.input, horario: horarioEscolhido(s, final.input?.horario) || horaUnicaDaFamilia(s.texto), maisUma })
         }
         // Remarcar ou cancelar a consulta que ja existe: o pedido vai junto, e a
         // familia so confirma. Com mais de uma consulta, a lista fica para ela
@@ -1425,7 +1458,10 @@ async function conversarComClaude(
         // nomes, CANCELAR/REMARCAR, SIM e as datas, com dia e hora ditos tres
         // vezes). A ordem de s.consultas e a mesma da lista do robo.
         let umaSo = s.consultas.length === 1
-        const criancaDoFluxo = semAcento(String(final.input?.paciente ?? '')).trim().split(/\s+/)[0]
+        // Sem o campo, a crianca escrita pela familia (rodada 14, IA12 v1 e v2: "O do
+        // Theo passa pra 8h?" e a IA abriu o remarcar sem paciente).
+        const escrita = s.criancas.filter((c) => c.trim() && new RegExp(`\\b${semAcento(c).trim().split(/\s+/)[0]}\\b`).test(semAcento(s.texto)))
+        const criancaDoFluxo = semAcento(String(final.input?.paciente ?? '') || (escrita.length === 1 ? escrita[0] : '')).trim().split(/\s+/)[0]
         const daCrianca = criancaDoFluxo.length >= 2 ? s.consultas.map((c, i) => ({ c, i })).filter(({ c }) => semAcento(c).endsWith(` · ${criancaDoFluxo}`)) : []
         if (fluxo.depois && !umaSo && daCrianca.length === 1 && ferramentas.etapa && (await ferramentas.etapa()) === 'minha_consulta') {
           const escolhida = await ferramentas.robo(String(daCrianca[0].i + 1), 'atual')
@@ -1444,7 +1480,7 @@ async function conversarComClaude(
           // esperando o SIM da familia.
           if (final.input.fluxo === 'remarcar' && (await ferramentas.etapa()) === 'confirmar_cancelamento') {
             const datas = await ferramentas.robo('sim', 'atual')
-            if (datas && !roboNaoEntendeu(datas)) doRobo = await seguirComOPedido(ferramentas, datas, { ...final.input, horario: horarioEscolhido(s, final.input?.horario) })
+            if (datas && !roboNaoEntendeu(datas)) doRobo = await seguirComOPedido(ferramentas, datas, { ...final.input, horario: horarioEscolhido(s, final.input?.horario) || horaUnicaDaFamilia(s.texto) })
           }
         }
         // A pergunta que veio junto e ficou sem resposta (rodada 6, IA21-v1: "e o
@@ -1523,7 +1559,13 @@ async function conversarComClaude(
       if (final.name === 'responder_etapa') {
         // Na ficha, so palavras que a familia escreveu (rodada 6 do painel): a IA
         // mandou "Sao Paulo" no passo do nome e a paciente foi gravada assim.
-        let traduzido = String(final.input?.texto ?? '').slice(0, 200)
+        // O "[cpf]" e o "[e-mail]" que a IA ve no lugar dos dados voltam ao que a
+        // familia escreveu (rodada 14, IA07-v2: o robo leu "[cpf]" e respondeu
+        // "Esse CPF nao confere").
+        let traduzido = String(final.input?.texto ?? '')
+          .replace(/\[cpf\]/gi, () => s.texto.match(/\d{3}[.\s]?\d{3}[.\s]?\d{3}\s?[-.\s]?\s?\d{2}/)?.[0] ?? '[cpf]')
+          .replace(/\[e-?mail\]/gi, () => s.texto.match(/[^\s@,;:<>()]+@[^\s@,;:<>()]+\.[a-z]{2,}/i)?.[0] ?? '[e-mail]')
+          .slice(0, 200)
         // A data que veio junto do nome segue com ele (rodada 13, IA17-v1: "O nome
         // dela e Laura Martins Prado, nasceu em 14/02/2019" - a IA mandou so o
         // nome, e a mae ouviu a pergunta da data: "Ja mandei acima").
@@ -1609,7 +1651,9 @@ async function conversarComClaude(
           // certa para "Passei o seu pedido para a equipe", e a mae perguntou de novo).
           // Pedido de agenda continua com a equipe (rodada 7, IA17-v2: "Tem vaga na
           // segunda as 19h" saiu da IA, e a troca nunca foi feita).
-          const pedidoDeAgenda = /\b\d{1,2}\s*(?:h|:|e\s+(?:\d{2}|meia))|\b(segunda|terca|quarta|quinta|sexta|sabado|domingo|hoje|hj|amanha|troca\w*|muda\w*|remarca\w*|outro dia|outro horario|mais tarde|mais cedo)\b/.test(semAcento(s.texto))
+          // "mais tarde" sem dia nem hora e pergunta (rodada 14, IA15-v2: "n tem mais
+          // tarde? eu saio do servico as 18" perdeu a resposta "o ultimo e 18:00").
+          const pedidoDeAgenda = /\b\d{1,2}\s*(?:h|:|e\s+(?:\d{2}|meia))|\b(segunda|terca|quarta|quinta|sexta|sabado|domingo|hoje|hj|amanha|troca\w*|muda\w*|remarca\w*|outro dia|outro horario)\b/.test(semAcento(s.texto.replace(/\b(?:saio|sai|chego|servico|trabalho|escola)\b[^.!?,]{0,20}/gi, ' ')))
           if (!pulouSemDizer && respostaDaIA && perguntaLateral(s.texto) && !pedidoDeAgenda) {
             return {
               resultado: { resposta: `${respostaDaIA}\n\nPara continuar o cadastro, é só responder a pergunta acima 👆` },
@@ -1619,13 +1663,16 @@ async function conversarComClaude(
           // O texto da IA nao vai (rodada 7, IA17-v2): ela escreveu "Tem vaga na
           // segunda, 26/10 as 19h", a troca nunca foi feita e a consulta ficou
           // no dia errado, sem nota. O pedido vai para a equipe, que resolve.
-          const daEquipe = await ferramentas.equipe(
-            'atendente',
-            'Passei o seu pedido para a nossa equipe, que confirma por aqui.\n\nPara continuar o cadastro, é só responder a pergunta acima 👆',
-            { manterEtapa: true },
-          )
+          // A mesma frase duas vezes seguidas vira ciclo (rodada 14, IA16-v2: "q
+          // pedido? eu qro trocar p sp, segunda a noite" ouviu de novo, palavra por
+          // palavra, "Passei o seu pedido"). Na segunda vez, o caminho que troca na hora.
+          const repetida = /Passei o seu pedido para a nossa equipe/.test(s.ultimaDoConsultorio ?? '')
+          const recado = repetida
+            ? 'A equipe já está com o seu pedido e confirma por aqui. Se preferir trocar agora, escreva o dia e a hora (por exemplo, "segunda às 19h") que eu troco.\n\nPara continuar o cadastro, é só responder a pergunta acima 👆'
+            : 'Passei o seu pedido para a nossa equipe, que confirma por aqui.\n\nPara continuar o cadastro, é só responder a pergunta acima 👆'
+          const daEquipe = await ferramentas.equipe('atendente', recado, { manterEtapa: true })
           return {
-            resultado: daEquipe ?? { resposta: 'Passei o seu pedido para a nossa equipe, que confirma por aqui.\n\nPara continuar o cadastro, é só responder a pergunta acima 👆', atencao: 'atendente' },
+            resultado: daEquipe ?? { resposta: recado, atencao: 'atendente' },
             acao: 'etapa_recusada',
             nota: `🤖 No meio do cadastro a família escreveu algo que não é resposta do passo: «${String(s.texto).slice(0, 400)}». A IA tentou preencher a ficha com «${traduzido}»; foi recusado. Confira se ela pediu outra data ou outra coisa.`.slice(0, 1500),
           }
@@ -1687,7 +1734,16 @@ async function conversarComClaude(
         return { resultado: r ? juntar(r, resposta) : { resposta: resposta || texto || 'Certo!' }, acao: 'etapa' }
       }
       if (final.name === 'chamar_equipe') {
-        const motivo = String(final.input?.motivo ?? 'pessoa')
+        // Pergunta hipotetica, sem sinal de alarme e sem urgencia aberta, nao e
+        // urgencia (rodada 14, IA08-v1 e IA07-v2, altas: "Se acontecer depois das
+        // 18h, eu levo no pronto-socorro ou espero?" mandou alerta ao medico por uma
+        // bebe que estava otima). A equipe fica sabendo como pergunta medica, e o
+        // pronto-socorro condicional da IA fica no texto.
+        const hipotetica =
+          /\b(?:e\s+)?se\s+(?:\S+\s+){0,4}?(?:acontecer|tiver|vier|ficar|piorar|aparecer|subir|voltar|der|quiser)\b/i.test(semAcento(s.texto)) &&
+          !sinalDeAlarme(s.texto.replace(/\b(?:e\s+)?se\s+[^.!?]*[.!?]?/gi, ' ')) &&
+          !conversaDeUrgencia(s)
+        const motivo = String(final.input?.motivo ?? 'pessoa') === 'urgencia' && hipotetica ? 'medico' : String(final.input?.motivo ?? 'pessoa')
         // `texto` era o nome do campo ate 16/10/2026; continua valendo.
         const escrito = (campoParaFamilia(final.input) || String(final.input?.texto ?? ''))
         let resumo = String(final.input?.resumo_para_equipe ?? '').trim()
@@ -1754,11 +1810,20 @@ async function conversarComClaude(
         }
         // Risco de vida: sem oferta de consulta e sem a frase condicional
         // (rodada 7 do painel). O pronto-socorro vai firme, mesmo repetido.
-        const vida = motivo === 'urgencia' && riscoDeVida(s)
+        // Indo ou de volta do pronto-socorro, a pergunta da consulta e respondida
+        // (rodada 14, IA02-v1: "vou levar ela de volta agora. A consulta de segunda
+        // continua de pe?" perdeu o "sim" para a trava).
+        const vida = motivo === 'urgencia' && riscoDeVida(s) && !jaNoProntoSocorro(s)
+        // O pronto-socorro agora da propria IA, nesta resposta, tira a oferta de
+        // horario dela (rodada 14, IA02-v2, alta: "borra escura tipo cafe" e, no mesmo
+        // texto, "o horario mais proximo e sabado as 14:30"; a mae marcou o sabado).
+        const firmeAgora = aviso.split(FIM_DE_FRASE).some((f) => !/^\s*(?:🚨\s*)?\*?se\b/i.test(f) && PRONTO_SOCORRO.test(f) && /\bagora\b/i.test(f))
         if (vida) {
           // A mesma trava das outras respostas (rodada 10, IA01-v1: "nao espere ate
           // quarta... so um exame no pronto-socorro mostra" saiu sem "agora" e sem 192).
           aviso = comProntoSocorroAgora(semOfertaDeMarcar(aviso), s)
+        } else if (motivo === 'urgencia' && firmeAgora && !jaNoProntoSocorro(s)) {
+          aviso = semOfertaDeMarcar(aviso)
         } else if (!piora && motivo === 'urgencia' && !PRONTO_SOCORRO.test(aviso) && !PRONTO_SOCORRO.test(s.ultimaDoConsultorio ?? '')) {
           aviso = `${aviso}\n\n${AVISO_DE_URGENCIA}`
         }
@@ -2169,7 +2234,21 @@ export async function atenderComAssistente(opcoes: {
   }
 
   if (emEtapa) {
-    const doRoboNaEtapa = await roboDireto()
+    let doRoboNaEtapa = await roboDireto()
+    // A unidade e o dia na mesma frase (rodada 13, IA16-v1: "Santos, como eu
+    // falei. Sexta de manha." abriu a lista de datas, e a mae escolheu de novo):
+    // com as datas na tela, o dia dito segue.
+    if (situacao.etapa === 'aguardando_unidade' && doRoboNaEtapa && !naoEntendeu(doRoboNaEtapa) && ferramentas.etapa && (await ferramentas.etapa()) === 'aguardando_dia') {
+      const t = semAcento(situacao.texto)
+      const achado = t.match(/\b(?:segunda|terca|quarta|quinta|sexta|sabado|domingo|hoje|amanha)\b(?:\s+(?:que|q)\s+vem)?|\b\d{1,2}\/\d{1,2}\b/)
+      // "hoje n da" e recusa: o dia recusado nao segue.
+      const recusado = achado && /^\s*(?:\S+\s+)?(?:n|nao)\b/.test(t.slice((achado.index ?? 0) + achado[0].length))
+      const dia = achado && !recusado ? achado[0] : ''
+      if (dia) {
+        const comODia = await ferramentas.robo(dia, 'atual')
+        if (comODia && !roboNaoEntendeu(comODia)) doRoboNaEtapa = comODia
+      }
+    }
     if (!naoEntendeu(doRoboNaEtapa)) {
       // O robo entendeu o passo, mas a mensagem trazia tambem uma pergunta
       // (rodada 5 do painel, IA16): "14/09/2018. Ah, e o valor em Sao Paulo e o

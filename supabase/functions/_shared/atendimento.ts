@@ -603,7 +603,8 @@ const SINAIS_DE_ALARME: { nome: string; risco: SinalDeAlarme['risco']; padrao: R
       // escuras, tipo po de cafe molhado" (longe do vomitou) passavam, e a
       // consulta foi marcada no lugar do pronto-socorro. "Po de cafe" sozinho,
       // num consultorio de gastro, e sangue digerido: vale como borra.
-      /\b(vomit\w*|golf\w*|gomit\w*)\b[^.!?\n]{0,30}\bsangue\b|\bsangue (no|nos|na) (vomit\w*|golf\w*|gomit\w*)\b|\bborra de cafe\b|\bpo de cafe\b|\b(vomit\w*|golf\w*|gomit\w*)\b[^.!?\n]{0,80}\b(cafe moido)\b|\b(vomit\w*|golf\w*|gomit\w*)\b[^.!?\n]{0,12}\b(escuro|escura|preto|preta|marrom)\b|\b(vomit\w*|golf\w*|gomit\w*)\b[^.!?\n]{0,40}\b(coisa|algo|liquido|negocio|bolinhas?)\s+(escur\w*|pret\w*|marrom)/,
+      // "umas borra escura tipo cafe" (rodada 14, IA02-v2, alta).
+      /\b(vomit\w*|golf\w*|gomit\w*)\b[^.!?\n]{0,30}\bsangue\b|\bsangue (no|nos|na) (vomit\w*|golf\w*|gomit\w*)\b|\bborra de cafe\b|\bborras?\b[^.!?\n]{0,20}\b(escur\w*|pret\w*|marrom|cafe)\b|\bpo de cafe\b|\b(vomit\w*|golf\w*|gomit\w*)\b[^.!?\n]{0,80}\b(cafe moido)\b|\b(vomit\w*|golf\w*|gomit\w*)\b[^.!?\n]{0,12}\b(escuro|escura|preto|preta|marrom)\b|\b(vomit\w*|golf\w*|gomit\w*)\b[^.!?\n]{0,40}\b(coisa|algo|liquido|negocio|bolinhas?)\s+(escur\w*|pret\w*|marrom)/,
     negavel: true,
   },
   // Vomito verde no bebe pode ser obstrucao do intestino: e cirurgia, nao consulta.
@@ -626,23 +627,26 @@ const SINAIS_DE_ALARME: { nome: string; risco: SinalDeAlarme['risco']; padrao: R
     negavel: true,
   },
   { nome: 'muito sangue', risco: 'vida', padrao: /\b(muito sangue|sangrando muito|so sangue|hemorragia|sangue sem parar)\b/, negavel: true },
-  { nome: 'não acorda', risco: 'vida', padrao: /\b(nao acorda|dificil de acordar|desacordad\w*|desmai\w*)\b/, negavel: true },
+  // O "n" de quem digita rapido nos sinais tambem (rodada 14, sondas do IA08:
+  // "ele n acorda", "n consegue respirar", "n para d vomita", "n faz xixi" e "n
+  // ta mamando nd" passavam sem sinal).
+  { nome: 'não acorda', risco: 'vida', padrao: /\b((?:nao|n) acorda|dificil de acordar|desacordad\w*|desmai\w*)\b/, negavel: true },
   {
     nome: 'falta de ar',
     risco: 'vida',
-    padrao: /\b(falta de ar|nao consegue respirar|respirando (mal|com dificuldade)|dificuldade (para|pra|de) respirar|labios? rox\w*|boca rox\w*|ficou rox\w*|ficando rox\w*)\b/,
+    padrao: /\b(falta de ar|(?:nao|n) consegue respirar|respirando (mal|com dificuldade)|dificuldade (para|pra|de) respirar|labios? rox\w*|boca rox\w*|ficou rox\w*|ficando rox\w*)\b/,
     negavel: true,
   },
   { nome: 'convulsão', risco: 'vida', padrao: /\bconvuls\w*/, negavel: true },
   // "sem fazer xixi" ja e negativa: nao passa pelo filtro de negacao.
-  { nome: 'sem fazer xixi', risco: 'urgente', padrao: /\b(nao|sem)\b[^.!?\n]{0,15}\b(faz|fez|fazendo|fazer)\b[^.!?\n]{0,8}\bxixi\b|\bdesidratad\w*/, negavel: false },
+  { nome: 'sem fazer xixi', risco: 'urgente', padrao: /\b(nao|n|sem)\b[^.!?\n]{0,15}\b(faz|fez|fazendo|fazer)\b[^.!?\n]{0,8}\bxixi\b|\bdesidratad\w*/, negavel: false },
   // "Nao segura nada" e o jeito de mae dizer que tudo volta (painel com IA).
   {
     nome: 'não para de vomitar',
     risco: 'urgente',
     padrao:
       // "n para nd no estomago" (rodada 12, IA01).
-      /\bnao (para|parou|consegue parar) de vomitar\b|\bvomit\w* (tudo|sem parar)\b|\b(nao|n) (segura|esta segurando|ta segurando|consegue segurar) (nada|nd)\b|\b(nao|n) (para|fica|parou|ficou) (nada|nd) no estomago\b/,
+      /\b(nao|n) (para|parou|consegue parar) (de|d) (vomitar|vomita|gomitar)\b|\bvomit\w* (tudo|sem parar)\b|\b(nao|n) (segura|esta segurando|ta segurando|consegue segurar) (nada|nd)\b|\b(nao|n) (para|fica|parou|ficou) (nada|nd) no estomago\b/,
     negavel: false,
   },
   // "Ta mt molinho" (rodada 8): o "mt" no meio passava.
@@ -655,7 +659,7 @@ const SINAIS_DE_ALARME: { nome: string; risco: SinalDeAlarme['risco']; padrao: R
   // quer mama"). So mamar: "nao quer comer" de crianca maior e outra coisa.
   // Negavel desde a rodada 12 (IA08-v1: "nao ta molinha nem mamando mal" mandou
   // alerta ao medico); o "nao" do proprio sinal vem dentro do achado, nao antes.
-  { nome: 'não quer mamar', risco: 'urgente', padrao: /\b(nao|n)\s+(quer|qr|aceita|consegue|esta conseguindo|ta conseguindo)\s+(mamar|mama|mamadeira|o peito|pega o peito|pegar o peito)\b|\b(recusa|recusando|recusou|rejeita|rejeitando)\s+(o peito|mamar|a mamadeira|a mama)\b|\b(nao|n)\s+(pega|pegou|esta pegando|ta pegando)\s+(o\s+)?peito\b|\bmamando mal\b|\b(nao|n)\s+(mama|mamou|esta mamando|ta mamando)\s+(direito|nada)\b/, negavel: true },
+  { nome: 'não quer mamar', risco: 'urgente', padrao: /\b(nao|n)\s+(quer|qr|aceita|consegue|esta conseguindo|ta conseguindo)\s+(mamar|mama|mamadeira|o peito|pega o peito|pegar o peito)\b|\b(recusa|recusando|recusou|rejeita|rejeitando)\s+(o peito|mamar|a mamadeira|a mama)\b|\b(nao|n)\s+(pega|pegou|esta pegando|ta pegando)\s+(o\s+)?peito\b|\bmamando mal\b|\b(nao|n)\s+(mama|mamou|esta mamando|ta mamando)\s+(direito|nada|nd)\b/, negavel: true },
   // "Barriga dura e chorando" e a colica de todo bebe: consulta logo, nao pronto-socorro.
   // "Durinha" (painel com IA, 17/10/2026): "a barriga esta durinha" passou
   // calada pela regra numa noite em que a IA estourou o prazo.
@@ -685,7 +689,11 @@ export function sinalDeAlarme(texto: string): SinalDeAlarme | null {
       // entre a negacao e o sinal. O "n" de quem digita rapido tambem (rodada 13,
       // IA08-v2, alta: "ela ta bem, n ta molinha n nem mamando mal" mandou
       // alerta ao medico as 2h).
-      if (s.negavel && /\b(nao|n|sem|nunca|nem)\b(\s+\S+){0,2}\s*$/.test(frase.slice(0, achado.index))) continue
+      // A negacao nao atravessa virgula nem "e" (rodada 14, sondas do IA08: "ele n
+      // mama, ta molinho", "nao mama e esta molinho" e "n sei, ta molinho" calavam).
+      // "nao e" (o "nao e" de "nao e sangue", sem acento) continua negacao.
+      const antesDoSinal = frase.slice(0, achado.index).split(/[,;]|(?<!\b(?:nao|n))\s+e\s+/).pop() ?? ''
+      if (s.negavel && /\b(nao|n|sem|nunca|nem)\b(\s+\S+){0,2}\s*$/.test(antesDoSinal)) continue
       if (s.risco === 'vida') return { nome: s.nome, risco: s.risco }
       urgente ??= { nome: s.nome, risco: s.risco }
     }
@@ -2316,8 +2324,12 @@ async function mostrarMinhaConsulta(
       linhas: comVoltar(
         consultas.map((c, i) => ({
           id: String(i + 1),
-          titulo: formatarData(c.inicio, timezone).slice(0, 24),
-          descricao: `${deQuem(c)}${c.unidade}`.slice(0, 72),
+          // O nome no titulo da linha, com a data curta para caber nos 24 (rodada
+          // 14, IA12: so o texto trazia o nome; a lista de tocar, nao).
+          titulo: deQuem(c)
+            ? `${deQuem(c)}${chaveDoDia(c.inicio, timezone).slice(8, 10)}/${chaveDoDia(c.inicio, timezone).slice(5, 7)} ${formatarHora(c.inicio, timezone)}`.slice(0, 24)
+            : formatarData(c.inicio, timezone).slice(0, 24),
+          descricao: `${deQuem(c) ? `${formatarData(c.inicio, timezone)} · ` : ''}${c.unidade}`.slice(0, 72),
         })),
       ),
     },
@@ -2565,7 +2577,10 @@ const DIAS_DA_SEMANA = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sext
  * continua ali. Devolve o indice na lista, ou -1.
  */
 export function diaPeloNome(texto: string, dias: string[], agora = new Date()): number {
-  const t = normalizar(texto)
+  // "sab 31", "seg 26" (rodada 14, IA09-v2): o dia abreviado, so com o numero
+  // logo depois ("vou ter" nao e terca).
+  const abreviado: Record<string, string> = { seg: 'segunda', ter: 'terca', qua: 'quarta', qui: 'quinta', sex: 'sexta', sab: 'sabado', dom: 'domingo' }
+  const t = normalizar(texto).replace(/\b(seg|ter|qua|qui|sex|sab|dom)\.?\s+(?=\d)/g, (_, d: string) => `${abreviado[d]} `)
   const semana = (chave: string) => new Date(`${chave}T12:00:00Z`).getUTCDay()
   const hoje = agora.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
   // O dia recusado nao conta (rodada 8 do painel, IA16): "sabado n da, segunda
@@ -2604,6 +2619,10 @@ export function diaPeloNome(texto: string, dias: string[], agora = new Date()): 
       const certo = dias.find((chave) => semana(chave) === alvo && Number(chave.slice(8, 10)) === Number(numero[1]))
       return certo ? dias.indexOf(certo) : -1
     }
+    // "a otra quarta", "a outra quarta", "a quarta seguinte" (rodada 14, IA13-v2):
+    // a primeira quarta da lista e a que ela recusou; vale a segunda.
+    const daQueVem = dias.filter((chave) => semana(chave) === alvo && !((daSemanaQueVem || recusouHoje) && chave === hoje))
+    if (new RegExp(`\\b(?:outra|otra)\\s+${citados[0]}\\b|\\b${citados[0]}\\s+seguinte\\b`).test(t) && daQueVem.length > 1) return dias.indexOf(daQueVem[1])
     return dias.findIndex((chave) => semana(chave) === alvo && !((daSemanaQueVem || recusouHoje) && chave === hoje))
   }
   // Mais de um dia citado, mas com o numero do dia ("so volto no sabado. pode
@@ -2807,6 +2826,7 @@ function mesmoHorarioOutroDia(texto: string): boolean {
 async function trocarHorarioDaFicha(
   admin: Admin, clinicId: string, conversationId: string, consultaId: string, texto: string,
   paciente: Paciente | null, telefone: string, nomeDoPerfil: string, convenio: string, agora: Date,
+  pendentes?: string[],
 ): Promise<Resultado | null> {
   try {
     const { data: atual, error } = await admin
@@ -2852,7 +2872,7 @@ async function trocarHorarioDaFicha(
     const slot = await horarioNaHora(admin, clinicId, unidade, chave, hora)
     if (!slot) return null
     registrar('troca_na_ficha')
-    return await marcar(admin, clinicId, conversationId, unidade, paciente, telefone, nomeDoPerfil, slot, consultaId, convenio, { fichaDaAnterior: true })
+    return await marcar(admin, clinicId, conversationId, unidade, paciente, telefone, nomeDoPerfil, slot, consultaId, convenio, { fichaDaAnterior: true, pendentes })
   } catch (erro) {
     console.warn('Troca de horario no meio da ficha falhou; a mensagem segue como duvida', erro)
     return null
@@ -3438,6 +3458,8 @@ export function contaPiora(texto: string): boolean {
     // "voltou a dormir" e "voltou do ps" nao sao piora (rodada 13, IA02-v1: o
     // medico recebeu um segundo alerta as 23h porque a bebe voltou a dormir).
     .replace(/\bvoltou a (?:dormir|comer|mamar|brincar|sorrir|beber|se alimentar|ficar bem|ficar boa|ficar bom)\b|\bvoltou (?:do|da|de|pra|para)\b/g, ' ')
+    // "ele dormiu d novo" (rodada 14, IA03): dormir de novo nao e piora.
+    .replace(/\b(?:dormiu|dormindo|dormir|acordou bem|mamou|comeu|brincando)\s+(?:de novo|d novo|dnv|outra vez)\b/g, ' ')
   return /\b(piorou|piorando|(ta|esta|ficou|bem|muito) pior|mais forte|mais dur[ao]|mais alta|nao melhora|nao melhorou|gritando|nao para de chorar|de novo|d novo|dnv|(?<!da |na |daquela )outra vez|voltou a|voltou|continua (?:com|vomitando|chorando|sangrando|mole|molinh\w*|quente|ruim|doendo|gemendo|sem)|subindo|subiu|aumentou|aumentando|mais sangue|veio mais|mais (que|q) ontem)\b/.test(t)
 }
 
@@ -3631,7 +3653,7 @@ async function marcar(
    * Troca pedida no meio da ficha (ver trocarHorarioDaFicha): o que ja foi
    * respondido na consulta antiga vai para a nova, e nao se pergunta de novo.
    */
-  extra: { fichaDaAnterior?: boolean } = {},
+  extra: { fichaDaAnterior?: boolean; pendentes?: string[] } = {},
 ): Promise<Resultado> {
   // Telemedicina: a consulta vai para a agenda que o horario trouxe - a da
   // telemedicina, desde 03/10/2026 (ver horariosLivres). Clinica sem essa
@@ -3823,7 +3845,9 @@ async function marcar(
       console.warn('Nao copiei a ficha da consulta trocada; as perguntas recomecam', erro)
     }
   }
-  const faltam = camposQueFaltam(paciente).filter((c) => !respondidas.includes(c))
+  // Na troca dentro da ficha, so o que ainda faltava la (o CPF pulado continua
+  // pulado; rodada 13, IA15-v1).
+  const faltam = camposQueFaltam(paciente).filter((c) => !respondidas.includes(c) && (!extra.pendentes || extra.pendentes.includes(c)))
   // O nome da crianca no comprovante (14/10/2026): com irmaos no mesmo
   // telefone, "Consulta marcada!" sem nome deixou a mae achando que tinha
   // marcado os dois, quando so a Helena entrou.
@@ -4033,7 +4057,9 @@ function nomeDaFicha(texto: string): string | null {
   // "...o nome dele e Theo Souza Prado" no fim de um relato (rodada 10, IA01-v1:
   // "voltamos do ps, fizeram raio x e n tinha bateria nenhuma..." foi gravado
   // como o nome): o que vem depois do rotulo vence o resto da frase.
-  const rotulado = texto.match(/\bnome\s+(?:dele|dela|do paciente|da paciente|completo(?:\s+dele|\s+dela)?)\s*(?:[eé]|eh|:)\s+([^.!?\n]+)/i)
+  // "o nome do meu neto e X" tambem (rodada 14, IA20 v1 e v2: a avo ouviu "Nao
+  // consegui ler o nome" duas vezes).
+  const rotulado = texto.match(/\bnome\s+(?:dele|dela|do paciente|da paciente|completo(?:\s+dele|\s+dela)?|d[oa]\s+(?:meu|minha)\s+(?:filh[oa]|net[oa]|bebe|bebê|menin[oa]|crianca|criança))\s*(?:[eé]|eh|:)\s+([^.!?\n]+)/i)
   // Sem o "e" tambem (rodada 11, IA03-v2: "ele ta aqui deitado cmg coitado,
   // nome dele lucas ferreira nogueira" ouviu "Nao consegui ler o nome"). So com
   // duas palavras que parecem nome: "nome dele ta errado" nao e nome.
@@ -4069,8 +4095,10 @@ function nomeDaFicha(texto: string): string | null {
   // nome e", "seria") sai da frente de cada pedaco - foi gravado "e Aline...".
   // O emoji tambem separa (rodada 11, IA15-v1: "Ja mandei ali em cima 😅 Bernardo
   // Teixeira Moura, nasceu..." gravou o paciente "Nasceu").
+  // O ":" tambem separa (rodada 14, IA17-v1, alta: "Acabei de mandar: Rafael
+  // Martins Prado, nascido em..." foi gravado com o "Acabei de mandar:").
   const partes = t
-    .split(/[,;(]|\s-\s|\s+\d|(?<=\p{L}{2})[.!?]+\s+|\p{Extended_Pictographic}/u)
+    .split(/[,;(:]|\s-\s|\s+\d|(?<=\p{L}{2})[.!?]+\s+|\p{Extended_Pictographic}/u)
     // O parentesco no fim sai antes da conferencia: "priscila santos rocha a mae
     // dele" e nome, e o "dele" agora barra o pedaco (ver FRASE_NAO_NOME).
     // Rodada 9: "Meu nome e Elaine Cristina Moura" depois de "Eu sou a avo dele."
@@ -4117,7 +4145,7 @@ function nomeDaFicha(texto: string): string | null {
 // Rodada 8: "dia", "pedi", "espera", pronome ("Ela chega mais descansada") e
 // parentesco ("avo dele") tambem.
 const FRASE_NAO_NOME =
-  /\b(ja|mandei|escrevi|falei|disse|cima|acima|aqui|isso|tudo|junto|valor|quanto|qual|quais|como|onde|quando|porque|pq|nao|sim|ok|obrigad\w*|consulta|cpf|email|respondeu|vc|voce|kkk\w*|pera|enquanto|duvida|pergunta|msm|mesmo|mesma|marca|marcar|entao|horas|hora|quero|pode|ta|beleza|certo|nome|eh|troca|trocar|muda|mudar|horario|horarios|antes|depois|dia|pedi|espera|ela|ele|dele|dela|avo|tia|tio|madrinha|padrinho|ue|opa|oi|ola|gente|nossa|poxa|eita|aff|putz|oxe|uai|responsavel|saindo|indo|agr|agora|dps|ps|hospital|respondo|sou|eu|raio|tinha|fizeram|bateria|achei|minha|meu|chegou|levando|levar|to|menina|menino|ficar|nasceu|nascid\w*|nasc|nascimento)\b/
+  /\b(ja|mandei|escrevi|falei|disse|cima|acima|aqui|isso|tudo|junto|valor|quanto|qual|quais|como|onde|quando|porque|pq|nao|sim|ok|obrigad\w*|consulta|cpf|email|respondeu|vc|voce|kkk\w*|pera|enquanto|duvida|pergunta|msm|mesmo|mesma|marca|marcar|entao|horas|hora|quero|pode|ta|beleza|certo|nome|eh|troca|trocar|muda|mudar|horario|horarios|antes|depois|dia|pedi|espera|ela|ele|dele|dela|avo|tia|tio|madrinha|padrinho|ue|opa|oi|ola|gente|nossa|poxa|eita|aff|putz|oxe|uai|responsavel|saindo|indo|agr|agora|dps|ps|hospital|respondo|sou|eu|raio|tinha|fizeram|bateria|achei|minha|meu|chegou|levando|levar|to|menina|menino|ficar|nasceu|nascid\w*|nasc|nascimento|mandar|acabei|enviei|enviar|acima|que|bom|boa|otimo|otima|blz|legal|maravilha|perfeito|perfeita|obrigad[ao]|show|bora|terminar|continuar|volt\w*|upa|limpo|gracas|deus)\b/
 
 /**
  * "O nome dela e Laura Mendes Prado", "pera escrevi errado o nome, eh maria
@@ -4279,6 +4307,12 @@ function pulou(texto: string, chave?: (typeof PERGUNTAS)[number]['chave']) {
     f = f.replace(
       /\b(?:nao|n) (?:tem|tenho|possui|uso|usa|usamos|sei|lembro)(?: (?:o|a|um|uma|ainda|nenhum))? (cpf|e ?mail)\b|\bsem (cpf|e ?mail)\b/g,
       (frase, campo?: string, campoSem?: string) => ((campo ?? campoSem ?? '').replace(' ', '') === chave ? frase : ' '),
+    )
+    // O campo antes do "nao sei" tambem (rodada 14, IA03-v1, alta: "Sou eu, Patricia
+    // Lopes Teixeira, mae dele. CPF dele nao sei agora." apagou o responsavel).
+    f = f.replace(
+      /\b(cpf|e ?mail)\b(?:\s+\S+){0,2}?\s+(?:nao|n)\s+(?:sei|tenho|tem|lembro|sabemos)\b/g,
+      (frase, campo: string) => (campo.replace(' ', '') === chave ? frase : ' '),
     )
     // "n tem msm?" e pergunta, nao recusa (rodada 11, IA15-v2: "18h n da pra
     // mim, eu pedi 7 da noite. n tem msm?" gastou a tentativa da data).
@@ -5864,9 +5898,14 @@ async function tratarConversaPorDentro(opcoes: {
       // data de novo).
       const valorJunto = perguntaAtual.chave !== 'nome' ? perguntaAtual.ler(texto) : null
       if (valorJunto !== null) await guardarDado(admin, consulta, perguntaAtual, valorJunto, pacienteDaConsulta)
+      // A ficha nova so pergunta o que ainda faltava aqui (rodada 13, IA15-v1: a
+      // troca reabriu a ficha e perguntou o CPF tres vezes, depois de "Ele ainda
+      // nao tem CPF"). O "nao tem CPF" da mesma mensagem tambem vale.
+      const semCpfAgora = /\b(nao|n)\s+(tem|possui)\s+(o\s+)?cpf\b|\bsem\s+cpf\b/.test(normalizar(texto))
+      const pendentes = faltam.filter((c) => !(semCpfAgora && c === 'cpf') && !(valorJunto !== null && c === perguntaAtual.chave))
       const trocada = await trocarHorarioDaFicha(
         admin, clinicId, conversationId, consulta, texto, pacienteDaConsulta,
-        opcoes.telefone, opcoes.nomeDoPerfil, opcoes.convenioEmAndamento ?? '', agora,
+        opcoes.telefone, opcoes.nomeDoPerfil, opcoes.convenioEmAndamento ?? '', agora, pendentes,
       )
       if (trocada) return trocada
       // Sem horario livre que bata (rodada 9, IA15-v2: "16:40 n, eu pedi 17:20"
@@ -6972,7 +7011,9 @@ async function tratarConversaPorDentro(opcoes: {
       const t = normalizar(texto)
       const recusouEsteDia = /\b(hj|hoje|esse dia|este dia|nesse dia)\s+(n|nao)\b|\bnao (da|consigo|posso)\s+(hj|hoje)\b/.test(t)
       const citaOutroDia =
-        DIAS_DA_SEMANA.some((d) => new RegExp(`\\b${d}\\b`).test(t)) || /\b(amanha|que vem|q vem|proxim[ao])\b/.test(t) || /\bdia\s+\d{1,2}\b/.test(t) || (dataEscrita(texto) ?? dataPorExtenso(texto)) !== null
+        DIAS_DA_SEMANA.some((d) => new RegExp(`\\b${d}\\b`).test(t)) || /\b(amanha|que vem|q vem|proxim[ao])\b/.test(t) || /\bdia\s+\d{1,2}\b/.test(t) || (dataEscrita(texto) ?? dataPorExtenso(texto)) !== null ||
+        // "sab 31" (rodada 14, IA09-v2: a hora foi respondida no dia da tela, 24).
+        /\b(seg|ter|qua|qui|sex|sab|dom)\s+\d{1,2}\b/.test(t)
       if (unidadeEmAndamento && listaAtual.length && (recusouEsteDia || citaOutroDia)) {
         const timezone = await fusoDaClinica(admin, clinicId)
         const diaDaLista = chaveDoDia(listaAtual[0].inicio, timezone)

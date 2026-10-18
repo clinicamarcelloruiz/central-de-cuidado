@@ -5399,8 +5399,91 @@ await caso('Rodada 13: e-mail e pedido de hora na mesma mensagem: grava e troca'
   ['02/02/2024', 'nome do responsável'],
   ['Fernanda Nogueira', 'CPF'],
   ['PULAR', 'e-mail'],
-  ['ana@exemplo.com. e se tiver mais tarde, tipo 15:20?', 'Horário trocado'],
+  // O e-mail era o ultimo dado: a ficha fecha com a troca (rodada 13), sem perguntas.
+  ['ana@exemplo.com. e se tiver mais tarde, tipo 15:20?', ['15:20', 'anterior foi cancelada']],
 ], { slots: SLOTS_TROCA, daConsulta: CONSULTA_GUARDADA, verificar: fichaGravada('email e hora', { intake_email: 'ana@exemplo.com' }) })
+// IA15-v1: o CPF pulado continua pulado depois da troca de horario.
+await caso('Rodada 13: depois de pular o CPF, a troca não pergunta o CPF de novo', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['02/02/2024', 'nome do responsável'],
+  ['Fernanda Nogueira', 'CPF'],
+  ['PULAR', 'e-mail'],
+  ['da pra trocar pra 15:20?', ['Horário trocado', 'e-mail']],
+], {
+  slots: SLOTS_TROCA,
+  daConsulta: CONSULTA_GUARDADA,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (!/CPF/.test(ultimoToque.resposta)) passou++
+    else falhas.push(`${titulo} | perguntou o CPF de novo`)
+  },
+})
+// Rodada 14 (IA17-v1, alta; IA20 v1 e v2): prefixo com ":" e "o nome do meu neto e".
+await caso('Rodada 14: "Acabei de mandar: Rafael Martins Prado, nascido em 22/09/2018."', [
+  ...ATE_A_FICHA,
+  ['Acabei de mandar: Rafael Martins Prado, nascido em 22/09/2018.', 'nome do responsável'],
+], { verificar: fichaGravada('acabei de mandar', { intake_patient_name: 'Rafael Martins Prado', intake_birth_date: '22/09/2018' }) })
+await caso('Rodada 14: "O nome do meu neto é Davi Andrade Lima, ele nasceu em 10/03/2019."', [
+  ...ATE_A_FICHA,
+  ['O nome do meu neto é Davi Andrade Lima, ele nasceu em 10/03/2019.', 'nome do responsável'],
+], { verificar: fichaGravada('meu neto', { intake_patient_name: 'Davi Andrade Lima', intake_birth_date: '10/03/2019' }) })
+await caso('Rodada 14: "sab 31 tem as 3?" com outro dia na tela abre o dia 31', [
+  ...ATE_OS_HORARIOS,
+  ['hmm e no sab 31 tem as 3?', ''],
+], {
+  slots: { ...SLOTS_TROCA_TARDE, 'u-santos': [...SLOTS_TROCA_TARDE['u-santos'], { slot_start: '2026-10-31T17:30:00Z', slot_end: '2026-10-31T18:10:00Z' }, { slot_start: '2026-10-31T18:10:00Z', slot_end: '2026-10-31T18:50:00Z' }] },
+  verificar: ({ ultimoToque, marcadas, titulo }) => {
+    if (!/Às 15h não tem horário livre nesse dia/.test(ultimoToque.resposta) && marcadas.length === 0) passou++
+    else falhas.push(`${titulo} | respondeu no dia da tela: ${marcadas.length} ${ultimoToque.resposta.slice(0, 160)}`)
+  },
+})
+// IA15-v1 (alta): "Que bom! Aline Teixeira Mota, sou a mae." nao grava "Que bom".
+await caso('Rodada 14: "Que bom! Aline Teixeira Mota, sou a mãe." grava a Aline', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['02/02/2024', 'nome do responsável'],
+  ['Que bom! Aline Teixeira Mota, sou a mãe.', 'CPF'],
+], { verificar: fichaGravada('que bom', { intake_guardian: 'Aline Teixeira Mota' }) })
+{
+  // IA13-v2: "a otra quarta" e a segunda quarta da lista.
+  const i = diaPeloNome('a otra quarta tem 7 da noite?', ['2026-10-14', '2026-10-21'], QUARTA_10H)
+  if (i === 1) passou++
+  else falhas.push(`rodada 14: "a otra quarta" e a segunda quarta | ${i}`)
+}
+// Rodada 14, IA01 a IA04 (altas).
+await caso('Rodada 14: "...bora terminar: Miguel Santana Rocha" grava só o nome', [
+  ...ATE_A_FICHA,
+  ['oi voltei. raio x limpo graças a deus 🙏 a bateria tava dentro do sapatinho dele kkk. bora terminar: Miguel Santana Rocha', 'data de nascimento'],
+], { verificar: fichaGravada('bora terminar', { intake_patient_name: 'Miguel Santana Rocha' }) })
+await caso('Rodada 14: "voltamo da upa... nome: davi lucas pereira" grava o Davi', [
+  ...ATE_A_FICHA,
+  ['voltamo da upa, n tinha nd no raio x 🙏 nome: davi lucas pereira', 'data de nascimento'],
+], { verificar: fichaGravada('nome:', { intake_patient_name: 'Davi Lucas Pereira' }) })
+await caso('Rodada 14: "CPF dele não sei agora" no passo do responsável grava a mãe', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['02/02/2024', 'nome do responsável'],
+  ['Sou eu, Patrícia Lopes Teixeira, mãe dele. CPF dele não sei agora.', ''],
+], { verificar: fichaGravada('cpf nao sei', { intake_guardian: 'Patrícia Lopes Teixeira' }) })
+{
+  const confere = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  confere('rodada 14: "umas borra escura tipo cafe" e risco de vida', sinalDeAlarme('a helena vomito 2x agr umas borra escura tipo cafe sabe')?.risco === 'vida', JSON.stringify(sinalDeAlarme('a helena vomito 2x agr umas borra escura tipo cafe sabe')))
+  confere('rodada 14: "dormiu d novo" nao e piora', !contaPiora('ta, vou espera entao. ele dormiu d novo agr'))
+}
+{
+  // Rodada 14 (sondas do IA08): o "n" nos sinais, e a negacao que nao atravessa virgula.
+  const confere = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  for (const [frase, risco] of [
+    ['ele n acorda direito', 'vida'],
+    ['ela n consegue respirar direito', 'vida'],
+    ['ela n para d vomita', 'urgente'],
+    ['ela n faz xixi desde ontem', 'urgente'],
+    ['ele n ta mamando nd', 'urgente'],
+    ['ele n mama, ta molinho', 'urgente'],
+    ['n sei, ta molinho', 'urgente'],
+  ]) confere(`rodada 14: "${frase}" e ${risco}`, sinalDeAlarme(frase)?.risco === risco, JSON.stringify(sinalDeAlarme(frase)))
+  confere('rodada 14: "nao e vomito com sangue" continua negado', sinalDeAlarme('nao e vomito com sangue, e so o suco') === null, JSON.stringify(sinalDeAlarme('nao e vomito com sangue, e so o suco')))
+}
 await caso('Rodada 13: a lista de duas consultas traz o nome de cada criança', [
   ['Oi', 'Como podemos ajudar'],
   ['4', ['Ana:', 'Pedro:']],

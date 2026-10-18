@@ -551,6 +551,54 @@ o "n" abreviado não negava o sinal ("n ta molinha" alertou o médico às 2h);
   maiúscula depois do corte de "Combinado,"; "vo pensa" é adiamento; a IA vê
   24 mensagens.
 
+### Rodada 14 (18/10/2026, com o código publicado em 586571c)
+
+| Rodada | Conversas | Passaram | Nota média | pass^2 | Falhas crítica / alta / média |
+|---|---|---|---|---|---|
+| 14 (todos) | 48 | 24 | 7,09 | 7 de 24 | 0 / 12 / 28 |
+
+Passaram nas duas versões: IA10, IA14, IA19, IA21, IA22, IA23 e IA24 (o grupo
+IA21 a IA24 passou inteiro, sem nenhuma falha média). Os juízes rodaram no
+máximo duas conversas ao mesmo tempo, e a IA não estourou o prazo. Confirmado
+com a IA de verdade: a hora cheia que não existe ouve os dois mais perto em
+todos os grupos; "às 18h fica apertado, às 17h teria?"; "eu saio do serviço as
+18"; "a das 15:20 saiu?"; "n ta molinha n" sem alerta; "estamos indo agora",
+"vo leva", "voltou a dormir"; "sab 31" com a hora na lista.
+
+As altas: nome com prefixo ("Acabei de mandar: X", "bora terminar: X", "Que
+bom! X, sou a mãe", "nome: X" depois de um relato); "umas borra escura tipo
+cafe"; "CPF dele não sei agora" apagando o responsável; a IA dizendo "já deixei
+o 19:20 selecionado" sem guardar nada; troca de unidade no cadastro em ciclo
+("Passei o seu pedido" duas vezes); pergunta hipotética ("se acontecer de noite,
+levo no ps?") mandando alerta ao médico; o pronto-socorro condicional cortado
+às 23h ("se ela ficar molinha"); uma frase da própria IA ("agora é madrugada, o
+mais seguro é o pronto-socorro") fechando a agenda.
+
+#### Correções da rodada 14 (cada uma com teste e prova de mutação)
+
+- **Nome:** o ":" separa ("nome: X" depois de um relato); "o nome do meu neto é X"; "que bom",
+  "bora terminar", "acabei de mandar", "voltamo da upa" não são nome.
+- **Risco:** "borra escura"; o "n" nos sinais ("n acorda", "n consegue
+  respirar", "n para d vomita", "n faz xixi", "n ta mamando nd"); a negação não
+  atravessa vírgula nem "e" (e "não é sangue" continua negado); "dormiu d novo"
+  não é piora; pergunta hipotética sem sinal e sem urgência aberta vai como
+  pergunta médica, sem alerta, com o pronto-socorro condicional no texto;
+  "molinha", "mamar", "peito" contam como sintoma; o "agora" que fecha a agenda
+  tem de ser a ordem de ir; o pronto-socorro agora da IA tira a oferta de
+  horário dela; indo ao pronto-socorro, a pergunta da consulta é respondida;
+  "ja tamo d volta".
+- **Agenda:** a hora da IA recusada não apaga a hora da família; "pode ser" a
+  hora da pergunta; com dois irmãos, a criança escrita escolhe a consulta (sem o
+  campo paciente); a lista traz o nome no título; "sab 31" é o sábado 31; "a
+  otra quarta" é a segunda quarta; unidade e dia na mesma frase seguem juntos;
+  o CPF pulado continua pulado depois da troca.
+- **IA:** "já deixei selecionado", "vou passar o Theo para", "e para o Dr. X"
+  saem; "R$ 450,00… desculpe, o valor correto é" fica só com o certo; "Vou
+  confirmar a consulta, dizer que a equipe..." e "A Camila está dizendo que..."
+  saem; o "[cpf]" que a IA vê volta ao CPF que a família escreveu; o preço da
+  mensagem anterior vai junto da agenda; "n tem mais tarde?" recebe a resposta
+  da IA; a frase "Passei o seu pedido" não se repete em ciclo.
+
 ### Decisões que ficam com o Dr. Marcello
 
 - Gravar na consulta a queixa que a família já contou (refluxo, intestino

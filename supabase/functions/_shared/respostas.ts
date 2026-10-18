@@ -67,6 +67,8 @@ const CLINICO = [
   // Rodada 13 (IA06-v2): "e ate segunda se doer mt eu dou oq? o buscopan msm?"
   // nao contava como sintoma, e o pronto-socorro condicional da IA era cortado.
   'doer', 'doeu', 'colica', 'colicas', 'buscopan', 'simeticona', 'tylenol', 'novalgina',
+  // Rodada 14 (IA08 v1 e v2): "se ela ficar molinha ou n quiser mamar" nao era sintoma.
+  'molinha', 'molinho', 'mole', 'molenga', 'molengo', 'mamar', 'mamando', 'peito',
 ]
 
 /**
