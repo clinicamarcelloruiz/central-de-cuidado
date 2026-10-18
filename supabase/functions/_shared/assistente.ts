@@ -307,6 +307,10 @@ function instrucoes(s: Situacao): string {
     '- Tudo o que você afirma tem de estar em <clinica> ou no <contexto>. Sem a informação exata, mas com uma próxima que já ajuda, responda com ela: "aceita cartão?" se responde com como é o pagamento, dizendo só o que está escrito. Se nada em <clinica> ajudar, não invente (valor, horário, endereço, convênio, prazo, regra): diga que vai confirmar com a equipe e use chamar_equipe com motivo sem_informacao.',
     '- As respostas oficiais foram escritas para o robô antigo: use o conteúdo, mas ignore instruções como "digite 9" ou "digite 2". No lugar delas, ofereça você mesmo o próximo passo ("Quer que eu veja um horário?").',
     '- Responda o que foi perguntado, e não tudo o que sabe sobre o assunto. Regra ou restrição que a família não perguntou (parcelamento, por exemplo) fica de fora.',
+    // Conversa real de 18/10/2026: "Ele atende convenios?" recebeu, junto da
+    // resposta, "Santos (R$ 450,00), Sao Paulo (R$ 600,00)". O Edu: valor so
+    // quando perguntam.
+    '- Valor da consulta só quando a família perguntar de valor, preço ou quanto custa. "Atende convênio?" se responde com o que <clinica> diz de convênio e reembolso, sem o valor.',
     '- Quando fizer sentido, termine oferecendo o próximo passo: marcar, ver horários, mandar o endereço.',
     '- Despedida ou adiamento ("vou pensar", "depois vejo", "obrigada", "boa noite" no fim da conversa): responda só com uma despedida curta e calorosa. Não repita oferta nem lembrete que já está na conversa: quando a família voltar, o sistema retoma de onde parou.',
     '',
@@ -2094,6 +2098,36 @@ const SO_A_PERGUNTA =
   'Correção de um dado já respondido (o nome escrito errado, outra data): use chamar_equipe com a correção no resumo, e diga que a equipe corrige. ' +
   'Nunca prometa fazer algo depois (trocar o horário depois da ficha, avisar, anotar): ou a tela já mostra, ou a equipe resolve.'
 
+// A pergunta solta no meio do passo (18/10/2026, conversa real: "Ele atende
+// convenios?" na escolha da unidade). O sistema nao seguiu: vai mandar a mesma
+// tela de novo. A IA so responde a duvida; a tela, com os numeros e os horarios
+// livres, e a do robo.
+const SO_A_DUVIDA =
+  'A família está num passo do agendamento e, em vez de responder, fez uma pergunta. O sistema vai mandar a tela do passo de novo logo depois do seu texto (ela está no fim destas instruções). ' +
+  'Responda só essa pergunta, em uma ou duas frases, falando com ela, com o que está em <clinica>. ' +
+  'Não repita a tela nem a pergunta do passo, não liste as unidades, não peça para escolher, não ofereça marcar. ' +
+  'Valor da consulta só se ela perguntou de valor ou preço. ' +
+  'Nunca diga o que fazer com a criança, a dieta, a amamentação ou o remédio: isso é do médico. ' +
+  'Pergunta da equipe (conduta, documento, exceção, dinheiro, pix): use chamar_equipe, com a resposta para a família em para_familia. ' +
+  'Nunca prometa fazer algo depois (avisar, anotar, reservar): ou a tela já mostra, ou a equipe resolve.'
+
+// Pedido para mudar o rumo do agendamento nao e duvida: a IA de conversa
+// resolve com as ferramentas (trocar de unidade, de filho, voltar).
+const PEDIDO_NO_PASSO = /\b(troca\w*|muda\w*|remarca\w*|outr[ao]s?|volta\w*|cancel\w*|desist\w*)\b/
+
+/**
+ * A tela do passo que o robo mandaria de novo: a que ele separou (Resultado.tela)
+ * ou, sem ela, a instrucao "Responda com o numero..." do fim da resposta dele,
+ * sem a resposta pronta da frente.
+ */
+function telaDoPasso(r: Resultado | null): string | null {
+  if (!r) return null
+  if (r.tela) return r.tela
+  // "Nao entendi. Responda..." ou "<resposta pronta>\n\nResponda...".
+  const achado = /(?:^|\n\n|\.\s)(Responda\b[\s\S]*)$/.exec(r.resposta)
+  return achado ? achado[1].trim() : null
+}
+
 // Conduta sobre dieta e amamentacao (rodada 6 do painel): "ate la, melhor nao
 // mudar nada por conta propria" para a mae que amamenta um bebe com sangue nas
 // fezes. A trava de remedio (CONDUTA) nao pegava.
@@ -2102,7 +2136,7 @@ const CONDUTA_DE_DIETA =
 
 type Lateral = { texto: string; equipe?: { motivo: string; resumo: string } }
 
-async function responderPerguntaLateral(s: Situacao, tela: string, chamar: ChamarClaude, modelo: string, prazoMs: number): Promise<Lateral> {
+async function responderPerguntaLateral(s: Situacao, tela: string, chamar: ChamarClaude, modelo: string, prazoMs: number, instrucao = SO_A_PERGUNTA): Promise<Lateral> {
   const resposta = await chamar(
     {
       model: modelo,
@@ -2110,7 +2144,7 @@ async function responderPerguntaLateral(s: Situacao, tela: string, chamar: Chama
       thinking: { type: 'between_tools' },
       system: [
         ...sistemaDoClaude(s, false),
-        { type: 'text', text: `${SO_A_PERGUNTA}\n\nA tela do sistema, que vai logo depois do seu texto:\n«${semDadosPessoais(tela).slice(0, 900)}»` },
+        { type: 'text', text: `${instrucao}\n\nA tela do sistema, que vai logo depois do seu texto:\n«${semDadosPessoais(tela).slice(0, 900)}»` },
       ],
       // So a ferramenta da equipe (rodada 6): sem nenhuma, a IA escreveu a
       // chamada como texto e o JSON cru chegou a mae.
@@ -2298,6 +2332,40 @@ export async function atenderComAssistente(opcoes: {
         }
       }
       return { resultado: doRoboNaEtapa, origem: 'robo', eventos: [] }
+    }
+    // Pergunta solta no passo do agendamento (18/10/2026, conversa real): "Ele
+    // atende convenios?" na escolha da unidade fez a IA reescrever a pergunta
+    // da unidade com os valores de cada uma e sem os horarios livres. A familia
+    // nao perguntou valor, e ficou sem saber se respondia com numero. Agora a
+    // IA responde so a duvida, e a tela que vai embaixo e a do robo, igual.
+    // Sintoma e pedido de mudanca (outra unidade, voltar) continuam com a IA
+    // de conversa, que tem as ferramentas para isso.
+    const tela = telaDoPasso(doRoboNaEtapa)
+    if (
+      tela && doRoboNaEtapa && PASSO_DO_AGENDAMENTO.test(situacao.etapa ?? '') && perguntaLateral(situacao.texto) &&
+      !relatoDeSintoma(situacao.texto) && !PEDIDO_NO_PASSO.test(semAcento(situacao.texto))
+    ) {
+      try {
+        const extra = await responderPerguntaLateral(situacao, tela, chamar, modelo, Math.min(prazo, 10_000), SO_A_DUVIDA)
+        if (extra.texto) {
+          const semTela = { ...doRoboNaEtapa }
+          delete semTela.tela
+          return {
+            resultado: {
+              ...semTela,
+              resposta: `${extra.texto}\n\n${tela}`,
+              ...(extra.equipe ? { atencao: extra.equipe.motivo === 'urgencia' ? 'urgencia' : (MOTIVOS[extra.equipe.motivo] ?? 'atendente') } : {}),
+            },
+            origem: 'ia',
+            eventos: [{ evento: 'ia_respondeu', detalhe: extra.equipe ? 'pergunta no passo + equipe' : 'pergunta no passo' }],
+            nota: extra.equipe ? `🤖 Resumo da IA para a equipe: ${extra.equipe.resumo}`.slice(0, 1500) : undefined,
+          }
+        }
+      } catch (erro) {
+        // A resposta pronta do robo, com a tela dele, ainda serve.
+        console.warn('Atendente com IA falhou na pergunta do passo; vale o robo', erro)
+        return { resultado: doRoboNaEtapa, origem: 'robo', eventos: [{ evento: 'ia_falhou', detalhe: String(erro).slice(0, 120) }] }
+      }
     }
     try {
       const { resultado, acao, nota } = await conversarComClaude(situacao, ferramentas, chamar, modelo, true, prazo)

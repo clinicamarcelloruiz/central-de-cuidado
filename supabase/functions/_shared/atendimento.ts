@@ -164,6 +164,14 @@ export type Resultado = {
    * aviso so sai quando a conversa ENTRA em urgencia.
    */
   piora?: boolean
+  /**
+   * A tela do passo, sem a resposta pronta na frente (18/10/2026). Quando a
+   * familia pergunta outra coisa no meio do agendamento ("Ele atende
+   * convenios?" na escolha da unidade), a IA responde so a duvida e manda esta
+   * tela, com os numeros e os horarios livres. Sem ela, a IA reescrevia a
+   * pergunta do passo do jeito dela, com os valores e sem a lista.
+   */
+  tela?: string
 } | null
 
 /**
@@ -6785,15 +6793,22 @@ async function tratarConversaPorDentro(opcoes: {
       if (desistiuDoAgendamento(texto)) {
         return await sairDoAgendamento(admin, conversationId, clinicId, opcoes.consultaASubstituir ?? null, opcoes.consultas)
       }
-      const naoEntendeu = await naoEntendi(admin, clinicId, texto, 'Responda com o número da unidade da lista acima.\n\n' + VOLTA)
-      // Resposta pronta (a pessoa perguntou outra coisa) fica como esta. O
-      // "nao entendi" puro volta COM a lista: sem ela, o unico botao na tela
+      const naoEntendeu = await naoEntendi(admin, clinicId, texto, '')
+      // O "nao entendi" puro volta COM a lista: sem ela, o unico botao na tela
       // era "Voltar ao inicio" (painel de 14/10/2026).
-      if (!naoEntendeu.startsWith('Não entendi')) return { resposta: naoEntendeu }
+      // A resposta pronta tambem, desde 18/10/2026: "Ele atende convenios?"
+      // recebia a resposta e "responda com o numero da lista acima", com a lista
+      // duas mensagens para cima; com a IA ligada, ela reescrevia a pergunta da
+      // unidade com os valores e sem os horarios livres. A tela vai separada
+      // para a IA responder so a duvida e mandar a lista do robo.
       const deNovo = await perguntarUnidade(admin, clinicId, conversationId)
-      return {
+      if (!naoEntendeu.startsWith('Não entendi')) {
+        return deNovo ? { ...deNovo, resposta: `${naoEntendeu.trim()}\n\n${deNovo.resposta}`, tela: deNovo.resposta } : { resposta: naoEntendeu.trim() }
+      }
+      return deNovo && {
         ...deNovo,
         resposta: `Não entendi qual unidade. Responda com o número da unidade ou escreva o nome (por exemplo, ${tituloCurto(unidades[0]?.name ?? 'Santos')}).\n\n${deNovo.resposta}`,
+        tela: deNovo.resposta,
       }
     }
 

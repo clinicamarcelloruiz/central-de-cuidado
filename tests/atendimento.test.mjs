@@ -418,7 +418,7 @@ async function caso(titulo, passos, opcoes = {}) {
         falhas.push(`${titulo} | mensagem com botão acima de 1024 caracteres`)
       }
     }
-    ultimoToque = { resposta: r?.resposta ?? '', botoes: r?.botoes, lista: r?.lista, concluida: r?.concluida, atencao: r?.atencao }
+    ultimoToque = { resposta: r?.resposta ?? '', botoes: r?.botoes, lista: r?.lista, concluida: r?.concluida, atencao: r?.atencao, tela: r?.tela }
     transcricao.push(`  > ${texto}\n    ${resposta ? resposta.replace(/\n/g, '\n    ') : '(silêncio)'}`)
 
     // Resposta vazia de proposito: o robo processou e decidiu nao dizer nada
@@ -1314,6 +1314,25 @@ await caso('Acento e plural não atrapalham', [
   ['Vocês atendem convênios?', 'particular. Emitimos recibo'],
 ], { respostasProntas: RESPOSTAS })
 
+// Real 18/10/2026: "Ele atende convenios?" na escolha da unidade recebia a
+// resposta e "responda com o numero da unidade da lista acima", com a lista duas
+// mensagens para cima. Agora a lista vai de novo, com os toques, e separada em
+// Resultado.tela para a IA responder so a duvida e mandar esta mesma tela.
+await caso('Real 18/10: convênio na escolha da unidade recebe a resposta e a lista de novo', [
+  ['agendar', 'Em qual unidade'],
+  ['Ele atende convênios?', ['particular. Emitimos recibo', 'Em qual unidade', '*1*']],
+], {
+  respostasProntas: RESPOSTAS,
+  verificar: ({ ultimoToque, conversa, titulo }) => {
+    if (ultimoToque.resposta.includes('lista acima')) falhas.push(`${titulo} | ainda mandou para a lista acima`)
+    else passou++
+    if (!ultimoToque.tela?.startsWith('📍') || ultimoToque.tela.includes('Emitimos recibo') || !ultimoToque.resposta.endsWith(ultimoToque.tela)) falhas.push(`${titulo} | tela separada errada: ${ultimoToque.tela}`)
+    else passou++
+    if (!(ultimoToque.lista || ultimoToque.botoes) || conversa.booking_state !== 'aguardando_unidade') falhas.push(`${titulo} | perdeu os toques ou o passo (${conversa.booking_state})`)
+    else passou++
+  },
+})
+
 await caso('Depois da resposta pronta o 2 ainda marca consulta', [
   ['Qual o valor?', 'custa R$ 450,00'],
   ['2', 'Em qual unidade'],
@@ -1531,7 +1550,7 @@ await caso('Depois do anexo, MENU ainda volta ao início', [
 await caso('Pergunta no meio da escolha da unidade é respondida', [
   ['Oi', 'Como podemos ajudar'],
   ['2', 'Em qual unidade'],
-  ['Vocês atendem convênio?', ['particular', 'número da unidade']],
+  ['Vocês atendem convênio?', ['particular', 'Em qual unidade']],
   ['1', 'Datas disponíveis'],
 ], { respostasProntas: RESPOSTAS })
 
@@ -1552,7 +1571,7 @@ await caso('E também no meio da escolha do dia e do horário', [
 await caso('Sintoma no meio da escolha não vira resposta automática', [
   ['Oi', 'Como podemos ajudar'],
   ['2', 'Em qual unidade'],
-  ['ele está com febre, quanto custa?', ['não posso orientar', 'número da unidade']],
+  ['ele está com febre, quanto custa?', ['não posso orientar', 'Em qual unidade']],
 ], { respostasProntas: RESPOSTAS })
 
 // Urgencia nunca entra na conta: ela responde sempre, mesmo depois do limite.

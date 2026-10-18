@@ -2177,6 +2177,63 @@ confere('narracao: "A Camila esta dizendo que..." sai', semNarracao('A Camila es
 }
 confere('narracao: "voce recebe nesta conversa" fica', semNarracao('Quando o relatório sair, você recebe nesta conversa.') === 'Quando o relatório sair, você recebe nesta conversa.', semNarracao('Quando o relatório sair, você recebe nesta conversa.'))
 
+// Conversa real de 18/10/2026: "Ele atende convenios?" na escolha da unidade.
+// A IA reescreveu a pergunta da unidade com os valores e sem os horarios livres.
+// Agora ela responde so a duvida, e embaixo vai a tela do robo, igual.
+{
+  const telaDaUnidade = '📍 *Vamos agendar!* Em qual unidade você prefere ser atendido?\n\n*1* Livance · Santos (70 horários livres)\n*2* Livance Ibirapuera - São Paulo (53 horários livres)\n\nResponda com o número.'
+  const lista = { rotulo: 'Escolher a unidade', linhas: [{ id: '1', titulo: 'Santos' }, { id: '2', titulo: 'São Paulo' }] }
+  const doRobo = { resposta: `Não atendemos convênio: a consulta é particular.\n\n${telaDaUnidade}`, tela: telaDaUnidade, lista }
+  const c = claudeFalso([texto('A consulta é particular, e emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.')])
+  const d = await atenderComAssistente({
+    modo: 'ligado',
+    situacao: situacao({ texto: 'Ele atende convênios?', etapa: 'aguardando_unidade', ultimaDoConsultorio: telaDaUnidade }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto(doRobo).fn, roboNaoEntendeuAgora: () => true,
+  })
+  confere('convenio no passo: a duvida e a tela do robo', d.origem === 'ia' && d.resultado.resposta === `A consulta é particular, e emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano.\n\n${telaDaUnidade}`, d.resultado.resposta)
+  confere('convenio no passo: a lista tocavel do robo vai junto', d.resultado.lista === lista && !('tela' in d.resultado), JSON.stringify(d.resultado))
+  confere('convenio no passo: so a ferramenta da equipe', c.chamadas.length === 1 && c.chamadas[0].tools?.length === 1 && c.chamadas[0].tools[0].name === 'chamar_equipe', JSON.stringify(c.chamadas[0]?.tools?.map((t) => t.name) ?? null))
+  confere('convenio no passo: a IA sabe que a tela vai de novo e que valor so se perguntarem', textoDoSistema(c.chamadas[0]).includes('em vez de responder, fez uma pergunta') && textoDoSistema(c.chamadas[0]).includes('Valor da consulta só se ela perguntou'), textoDoSistema(c.chamadas[0]).slice(-600))
+}
+{
+  // Sem a tela separada, vale o "Responda..." do fim da resposta do robo.
+  const c = claudeFalso([texto('Tem sim, o prédio tem estacionamento.')])
+  const d = await atenderComAssistente({
+    modo: 'ligado',
+    situacao: situacao({ texto: 'tem estacionamento?', etapa: 'aguardando_dia' }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar,
+    roboDireto: roboDireto({ resposta: 'Não entendi. Responda com o número do dia da lista acima.', botoes: [{ id: 'VOLTAR', titulo: 'Outra unidade' }] }).fn,
+  })
+  confere('pergunta no passo sem tela separada: a instrucao do robo vai embaixo', d.resultado.resposta === 'Tem sim, o prédio tem estacionamento.\n\nResponda com o número do dia da lista acima.' && d.resultado.botoes?.length === 1, d.resultado.resposta)
+}
+{
+  // Pedido de mudanca nao e duvida: segue a IA de conversa, com as ferramentas.
+  const c = claudeFalso([texto('Claro!')])
+  await atenderComAssistente({
+    modo: 'ligado',
+    situacao: situacao({ texto: 'da pra trocar pra São Paulo?', etapa: 'aguardando_dia' }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar,
+    roboDireto: roboDireto({ resposta: 'Não entendi. Responda com o número do dia da lista acima.' }).fn,
+  })
+  confere('pedido de troca no passo: IA de conversa com as ferramentas', (c.chamadas[0]?.tools?.length ?? 0) > 1, JSON.stringify(c.chamadas[0]?.tools?.map((t) => t.name) ?? null))
+}
+{
+  // Sintoma no passo tambem fica com a IA de conversa.
+  const c = claudeFalso([texto('Entendo.')])
+  await atenderComAssistente({
+    modo: 'ligado',
+    situacao: situacao({ texto: 'ele ta com febre, posso dar dipirona?', etapa: 'aguardando_unidade' }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar,
+    roboDireto: roboDireto({ resposta: 'Essa é uma avaliação para a consulta.\n\nResponda com o número da unidade.' }).fn, roboNaoEntendeuAgora: () => true,
+  })
+  confere('sintoma no passo: IA de conversa', (c.chamadas[0]?.tools?.length ?? 0) > 1, JSON.stringify(c.chamadas[0]?.tools?.map((t) => t.name) ?? null))
+}
+{
+  const c = claudeFalso([texto('oi')])
+  await atenderComAssistente({ modo: 'ligado', situacao: situacao(), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('regra geral: valor so quando perguntam', textoDoSistema(c.chamadas[0]).includes('Valor da consulta só quando a família perguntar'))
+}
+
 console.log(`assistente: ${ok} verificacoes ok`)
 if (falhas.length) {
   for (const f of falhas) console.log('✗ ' + f)
