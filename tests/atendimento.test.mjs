@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica, sinalDeAlarme, pediuUrgencia, desistiuDoAgendamento, contaPiora, etiquetaQueFica, horaEmNumeros } from './atendimento.build.mjs'
+import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica, sinalDeAlarme, pediuUrgencia, desistiuDoAgendamento, contaPiora, etiquetaQueFica, horaEmNumeros, horariosEmTexto } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 import { montarMensagens } from './conteudo.build.mjs'
 
@@ -5219,6 +5219,192 @@ await caso('Rodada 12: "tem em São Paulo depois das seis da tarde?" é limite, 
   ...ATE_OS_HORARIOS,
   ['tem em São Paulo depois das seis da tarde?', 'São Paulo'],
 ], { slots: SLOTS_TARDE_E_SP })
+{
+  // IA11-v1 (alta): a agenda de "todas" mostra tambem os outros dias, so a data.
+  const { admin } = fazerAdmin({
+    unidades: TRES_UNIDADES, slotsPorUnidade: SLOTS_CHEIOS, remarcacoesAnteriores: 0, daConsulta: {}, respostasProntas: [],
+    telemedicina: { ativa: false, texto: '' }, colunasAusentes: [], consultasComFicha: [], regrasPorUnidade: {}, slotsAlemDaAgenda: {},
+  })
+  const texto = await horariosEmTexto(admin, 'c1', 'todas')
+  if (/Outros dias com vaga: [^\n]*07\/09[^\n]*08\/09/.test(texto)) passou++
+  else falhas.push(`rodada 12: "todas" lista os outros dias | ${texto}`)
+}
+{
+  const confere = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  // IA01: "pilhazinha", "n para nd no estomago", e a bateria a 169 letras.
+  confere('rodada 12: "pilhazinha" engolida e risco de vida', sinalDeAlarme('acho que ele engoliu uma pilhazinha')?.risco === 'vida')
+  confere('rodada 12: "n para nd no estomago" e urgente', sinalDeAlarme('ela n para nd no estomago desde cedo')?.risco === 'urgente', JSON.stringify(sinalDeAlarme('ela n para nd no estomago desde cedo')))
+  const longe = 'sumiu uma bateria redondinha do controle da tv, dessas pequenas de relogio. meu filho de 1 ano tava brincando com o controle no tapete da sala faz uns 20 minutos e agora nao acho. sera q ele engoliu??'
+  confere('rodada 12: bateria e "engoliu" a 169 letras', sinalDeAlarme(longe)?.risco === 'vida', JSON.stringify(sinalDeAlarme(longe)))
+}
+// IA05-v1 (critica): "chegamos em casa" de volta do pronto-socorro nao e chegada
+// na clinica, e a piora segue para o pronto-socorro.
+await caso('Rodada 12: "Voltamos do PS... desde que chegamos em casa ele tá mamando mal" é piora, não chegada', [
+  ['Voltamos do PS agora. Lá falaram que é virose. Mas desde que chegamos em casa ele tá mamando mal e meio molengo. Mantenho a consulta das 15h?', 'Se piorou, não espere'],
+], { pacientes: [ANA], consultaHoje: true, urgenciaAberta: true, estadoInicial: { booking_state: 'atendente' } })
+await caso('Rodada 12: "chegamos, ele ta molengo" com a consulta hoje vai para a urgência', [
+  ['chegamos, mas ele ta molengo', ''],
+], {
+  consultaHoje: true,
+  verificar: ({ ultimoToque, titulo }) => {
+    if (/Obrigado por avisar que chegaram/.test(ultimoToque.resposta)) falhas.push(`${titulo} | virou chegada`)
+    else passou++
+  },
+})
+// IA05-v1: o "que avisa o Dr." do recado de chegada nao conta como aviso de urgencia.
+await caso('Rodada 12: depois do recado de chegada, "ele ta molengo agora" reavisa', [
+  ['estamos aqui na recepção', 'Obrigado por avisar que chegaram'],
+  ['ele ta molengo agora', 'Se piorou, não espere'],
+], { pacientes: [ANA], urgenciaAberta: true })
+{
+  const confere = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  confere('rodada 12: "chegamos em casa" nao e chegada', avisoDoDiaDaConsulta('desde que chegamos em casa ele ta mamando mal') === null)
+  // IA08-v1: a negacao do "mamando mal".
+  confere('rodada 12: "nao ta molinha nem mamando mal" nao e sinal', sinalDeAlarme('Ela tá ótima, não tá molinha nem mamando mal, sem febre.') === null, JSON.stringify(sinalDeAlarme('Ela tá ótima, não tá molinha nem mamando mal, sem febre.')))
+  confere('rodada 12: "n quer mamar" continua sinal', sinalDeAlarme('ela ta com febre e n quer mamar')?.nome === 'não quer mamar')
+  // IA07-v2: a pergunta hipotetica nao e piora.
+  confere('rodada 12: "e se vier mais sangue, faco oq?" nao e piora', !contaPiora('e se vier mais sangue q o normal antes d quarta, faço oq?'))
+  confere('rodada 12: "veio mais sangue" continua piora', contaPiora('hoje veio mais sangue'))
+}
+// IA07 v1 e v2 (alta): o CPF da mae nao e gravado como o do paciente.
+await caso('Rodada 12: "ele n tem cpf ainda, so o meu 529..." pula o CPF', [
+  ...ATE_A_FICHA,
+  ['Bernardo Teixeira Moura', 'data de nascimento'],
+  ['15/09/2020', 'nome do responsável'],
+  ['Aline Teixeira Moura', 'CPF'],
+  ['ele n tem cpf ainda, so o meu 52998224725', 'e-mail'],
+], {
+  verificar: ({ dadosDasConsultas, titulo }) => {
+    const gravado = Object.assign({}, ...dadosDasConsultas)
+    if (!gravado.intake_cpf) passou++
+    else falhas.push(`${titulo} | gravou o CPF ${gravado.intake_cpf}`)
+  },
+})
+await caso('Rodada 12: "o cpf do meu filho é 529..." grava', [
+  ...ATE_A_FICHA,
+  ['Bernardo Teixeira Moura', 'data de nascimento'],
+  ['15/09/2020', 'nome do responsável'],
+  ['Aline Teixeira Moura', 'CPF'],
+  ['o cpf do meu filho é 529.982.247-25', 'e-mail'],
+], { verificar: fichaGravada('cpf do filho', { intake_cpf: '52998224725' }) })
+// Rodada 13: hora cheia so vale o ":00"; sem ele, os dois mais perto.
+const SLOTS_SEM_HORA_CHEIA = {
+  'u-santos': ['17:40', '18:20', '11:40', '12:20'].map((h) => ({ slot_start: `2026-10-14T${h}:00Z`, slot_end: `2026-10-14T${h}:00Z` })),
+  'u-andre': [],
+  'u-vila': [],
+}
+await caso('Rodada 13: "n tem as 3?" com só 15:20 na hora não marca, oferece os vizinhos', [
+  ...ATE_OS_HORARIOS,
+  ['n tem as 3?', 'Os mais perto são 14:40 e 15:20'],
+], {
+  slots: SLOTS_SEM_HORA_CHEIA,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas.length === 0) passou++
+    else falhas.push(`${titulo} | marcou ${marcadas.map((m) => m.starts_at).join(', ')}`)
+  },
+})
+await caso('Rodada 13: "la pelas 9h" com só 09:20 na hora não marca', [
+  ...ATE_OS_HORARIOS,
+  ['la pelas 9h', 'Os mais perto são 08:40 e 09:20'],
+], {
+  slots: SLOTS_SEM_HORA_CHEIA,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas.length === 0) passou++
+    else falhas.push(`${titulo} | marcou ${marcadas.map((m) => m.starts_at).join(', ')}`)
+  },
+})
+const SLOTS_17_E_18 = { 'u-santos': ['20:00', '21:00'].map((h) => ({ slot_start: `2026-10-14T${h}:00Z`, slot_end: `2026-10-14T${h}:00Z` })), 'u-andre': [], 'u-vila': [] }
+await caso('Rodada 13: "às 18h fica apertado. Às 17h teria?" marca as 17h', [
+  ...ATE_OS_HORARIOS,
+  ['Hmm, às 18h fica apertado pra mim. Às 17h teria?', 'nome completo do paciente'],
+], {
+  slots: SLOTS_17_E_18,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas[0]?.starts_at === '2026-10-14T20:00:00Z') passou++
+    else falhas.push(`${titulo} | marcou ${marcadas.map((m) => m.starts_at).join(', ')}`)
+  },
+})
+await caso('Rodada 13: "17h da? porque 18h fica apertado" marca as 17h', [
+  ...ATE_OS_HORARIOS,
+  ['17h da? porque 18h fica apertado pra mim', 'nome completo do paciente'],
+], {
+  slots: SLOTS_17_E_18,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas[0]?.starts_at === '2026-10-14T20:00:00Z') passou++
+    else falhas.push(`${titulo} | marcou ${marcadas.map((m) => m.starts_at).join(', ')}`)
+  },
+})
+await caso('Rodada 13: a hora da saída do trabalho não é a pedida', [
+  ...ATE_OS_HORARIOS,
+  ['as cinco e meia e quando eu saio do trabalho nao da pra chegar entao seis da tarde ta otimo', 'nome completo do paciente'],
+], {
+  slots: SLOTS_17_E_18,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas[0]?.starts_at === '2026-10-14T21:00:00Z') passou++
+    else falhas.push(`${titulo} | marcou ${marcadas.map((m) => m.starts_at).join(', ')}`)
+  },
+})
+// IA15-v1 e v2 (altas): a consulta citada e a hora da saida do servico nao trocam.
+await caso('Rodada 13: "E a das 15:20 saiu, né?" na ficha não troca', [
+  ...ATE_A_FICHA,
+  ['Ele não tem CPF, já tinha falado 😅 E a das 15:20 saiu, né?', ''],
+], {
+  slots: SLOTS_TROCA,
+  daConsulta: CONSULTA_GUARDADA,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas.length === 1) passou++
+    else falhas.push(`${titulo} | trocou para ${marcadas[1]?.starts_at}`)
+  },
+})
+await caso('Rodada 13: "tipo umas sete da noite, eu saio do serviço as 18" pede as 19h', [
+  ...ATE_A_FICHA,
+  ['pera ai, n tem mais tarde? tipo umas sete da noite, eu saio do serviço as 18', 'Às 19h não tem horário livre'],
+], {
+  slots: SLOTS_TROCA,
+  daConsulta: CONSULTA_GUARDADA,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas.length === 1) passou++
+    else falhas.push(`${titulo} | trocou para ${marcadas[1]?.starts_at}`)
+  },
+})
+{
+  const confere = (nome, cond, detalhe = '') => (cond ? passou++ : falhas.push(`${nome} ${detalhe}`))
+  // IA13-v2 (alta): "7 da noite" nao e o dia 7.
+  const i = diaPeloNome('a otra quarta tem 7 da noite?', ['2026-10-14', '2026-10-21'], QUARTA_10H)
+  confere('rodada 13: "quarta tem 7 da noite" acha a quarta', i >= 0, String(i))
+  // IA02-v1: "voltou a dormir" nao e piora.
+  confere('rodada 13: "voltou a dormir" nao e piora', !contaPiora('Ela voltou a dormir. Meu marido está viajando.'))
+  confere('rodada 13: "a febre voltou" continua piora', contaPiora('a febre voltou'))
+  // IA08-v2 (alta): o "n" abreviado nega o sinal.
+  confere('rodada 13: "n ta molinha" nao e sinal', sinalDeAlarme('ela ta bem, n ta molinha n nem mamando mal') === null, JSON.stringify(sinalDeAlarme('ela ta bem, n ta molinha n nem mamando mal')))
+  confere('rodada 13: "n segura nd" e urgente', sinalDeAlarme('ele n segura nd desde cedo')?.risco === 'urgente')
+  confere('rodada 13: "barriguinha durinha" e urgente', sinalDeAlarme('a barriguinha dela ta durinha')?.risco === 'urgente')
+  const longe = 'sumiu uma bateria redondinha do controle remoto da televisao da sala, dessas pequenas de relogio de pulso. meu filho de um ano e dois meses tava brincando com o controle no tapete da sala faz uns vinte minutos enquanto eu fazia o almoco e agora nao acho de jeito nenhum. sera q ele engoliu??'
+  confere('rodada 13: bateria e "engoliu" a mais de 240 letras', sinalDeAlarme(longe)?.risco === 'vida', JSON.stringify(sinalDeAlarme(longe)))
+}
+await caso('Rodada 13: "quarta as 9" nas datas, com só 09:20 na hora, mostra a lista sem marcar', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['quarta as 9', 'Horários de'],
+], {
+  slots: SLOTS_SEM_HORA_CHEIA,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas.length === 0) passou++
+    else falhas.push(`${titulo} | marcou ${marcadas.map((m) => m.starts_at).join(', ')}`)
+  },
+})
+await caso('Rodada 13: e-mail e pedido de hora na mesma mensagem: grava e troca', [
+  ...ATE_A_FICHA,
+  ['Bernardo Nogueira Costa', 'data de nascimento'],
+  ['02/02/2024', 'nome do responsável'],
+  ['Fernanda Nogueira', 'CPF'],
+  ['PULAR', 'e-mail'],
+  ['ana@exemplo.com. e se tiver mais tarde, tipo 15:20?', 'Horário trocado'],
+], { slots: SLOTS_TROCA, daConsulta: CONSULTA_GUARDADA, verificar: fichaGravada('email e hora', { intake_email: 'ana@exemplo.com' }) })
+await caso('Rodada 13: a lista de duas consultas traz o nome de cada criança', [
+  ['Oi', 'Como podemos ajudar'],
+  ['4', ['Ana:', 'Pedro:']],
+], { pacientes: [ANA, PEDRO], consultas: DUAS_CONSULTAS })
 await caso('Rodada 12: "eu não tenho CPF" é da mãe, e o CPF do paciente continua', [
   ...ATE_A_FICHA,
   ['Bernardo Teixeira Moura', 'data de nascimento'],

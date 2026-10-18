@@ -454,6 +454,103 @@ Ficou para depois (médias, mais trabalho): a ficha mandada antes de marcar
 (quarta rodada seguida); pedido de marcar o irmão junto do "sim, cancelar" vai
 para a equipe; a pergunta junto do passo não recebe a agenda que a IA já viu.
 
+### Rodada 12 (18/10/2026, com o código publicado em b221ccc)
+
+| Rodada | Conversas | Passaram | Nota média | pass^2 | Falhas crítica / alta / média |
+|---|---|---|---|---|---|
+| 12 (todos) | 48 | 25 | 6,95 | 6 de 24 | 1 / 14 / 20 |
+
+Passaram nas duas versões: IA06, IA10, IA17, IA18, IA21 e IA23. A queda veio
+de uma **regressão da rodada 11**: a trava "o pronto-socorro agora já dito por
+nós fecha a agenda" contava o aviso comum ("Se for uma emergência com risco de
+vida, procure o pronto-socorro... ou ligue 192"), e toda urgência comum virou
+risco de vida, com a agenda recusada e a frase da própria trava religando a
+trava. Derrubou IA03, IA04, IA05, IA07 e IA08. Corrigida e publicada no mesmo
+dia (640238c), com teste e prova de mutação.
+
+A crítica (IA05-v1): "Voltamos do PS agora... desde que chegamos em casa ele tá
+mamando mal e meio molengo" foi lida como chegada na clínica ("Obrigado por
+avisar que chegaram!"), sem pronto-socorro e sem alerta de piora.
+
+#### Correções da rodada 12 (cada uma com teste e prova de mutação)
+
+- **Risco de vida:** só a frase com pronto-socorro e "agora", sem "Se" na
+  frente, e nunca a frase pronta da trava; a volta contada em duas frases
+  ("Voltamos agora. Deram soro..."), "acabou de voltar", "vou levar ele no
+  pronto socorro", "vo leva", "to saindo" contam como ida; "n quero leva no ps"
+  não; a janela entre o objeto e o "engoliu" vai a 240 letras; "pilhazinha";
+  "n para nd no estômago".
+- **Chegada e piora:** "chegamos em casa" e a volta do pronto-socorro não são
+  chegada na clínica; sinal de alarme na mensagem vai para a urgência; o
+  "que avisa o Dr." do recado não conta como aviso de urgência; "nem mamando
+  mal" é negação; pergunta hipotética ("e se vier mais sangue?") não é piora;
+  a IA vê 24 mensagens, e não 16.
+- **Horário:** na lista, a hora que a IA escolheu sozinha não vai (IA13-v2,
+  alta: remarcou para 18:00 quando a mãe perguntou das 19h); hora que não
+  existe ouve os dois mais perto, na lista e na ficha (também com ":00");
+  "as 3" sem "h"; sem hora da IA, vale a hora cheia da família; "depois das
+  seis da tarde" é limite; "mais fácil levar em São Paulo" troca a unidade.
+- **Ficha:** "ele não tem CPF" dito em outro passo pula o CPF; o CPF da mãe não
+  é gravado como o do paciente; o nome não vai no passo da data; o dia sem
+  hora não vai como resposta da data; sem troca, a resposta do robô (os
+  vizinhos) chega.
+- **Agenda "todas":** traz também os outros dias com vaga (IA11-v1, alta: "o
+  único sábado é 24/10", com 31/10 e 07/11 livres).
+- **IA:** "oi qnto ta" leva os valores junto do menu; a autocorreção "R$
+  450,00? Não, ..." e a conta "R$ 450 mais R$ 150, ou seja" saem; "> Correção:",
+  "Responda diretamente."; a tabela de preços só na pergunta de preço e só se
+  ainda não foi dita; "Combinado!" sozinho e "eu mesmo marco" chamam a equipe
+  de verdade; "vou deixar o agendamento aberto" e "já recebi os dados" saem;
+  "você recebe nesta conversa" fica; recado para o médico sem "?" ("avisa o
+  dr...") vai para a IA.
+
+### Rodada 13 (18/10/2026, com as correções da rodada 12)
+
+| Rodada | Conversas | Passaram | Nota média | pass^2 | Falhas crítica / alta / média |
+|---|---|---|---|---|---|
+| 13 (todos) | 48 | 24 | 7,19 | 9 de 24 | 0 / 10 / 26 |
+
+Passaram nas duas versões: IA01, IA03, IA04, IA05, IA09, IA19, IA20, IA22 e
+IA23. Confirmado com a IA de verdade: a urgência comum abre a agenda e o risco
+de vida a mantém fechada; a volta do pronto-socorro com piora ("desde que
+chegamos em casa") vai para o pronto-socorro e alerta o médico; "nem mamando
+mal" não alerta; a pergunta hipotética não alerta; o CPF da mãe não vira o do
+paciente; "o único sábado" não aparece mais.
+
+As altas ficaram quase todas na leitura da hora: a hora cheia marcava o único
+horário daquela hora sem perguntar ("n tem as 3?" virou consulta às 15:20,
+"la pelas 9h" às 09:20); a primeira hora da frase vencia a pedida ("às 18h
+fica apertado, às 17h teria?" remarcou para as 18h); "eu saio do serviço as
+18" e "a das 15:20 saiu?" viravam pedido de troca; "7 da noite" virava o dia 7;
+o "n" abreviado não negava o sinal ("n ta molinha" alertou o médico às 2h);
+"acabamo d volta do ps" não abria a agenda.
+
+#### Correções da rodada 13 (cada uma com teste e prova de mutação)
+
+- **Hora:** hora cheia só vale o ":00", e sem ele vão os dois mais perto, na
+  lista, nas datas e na ficha; vale a hora pedida, e não a primeira da frase;
+  "fica apertado", "ruim" são recusa; a hora de outro assunto ("saio do
+  trabalho as", "sai da escola") e a consulta citada ("a das 15:20 saiu?") não
+  são pedido; "7 da noite" não é dia; o e-mail na frase não esconde o pedido
+  de hora; os dois mais perto vão junto da lista; "já troquei" sai quando nada
+  foi trocado.
+- **Risco:** o "n" nega o sinal; "voltou a dormir" não é piora; "barriguinha
+  durinha", "n segura nd"; a janela entre objeto e "engoliu" vai a 320 letras;
+  "acabamo d volta do ps", "estamos indo agora", "vo leva" contam; "e se vier
+  mais sangue, faço o quê?" mantém o pronto-socorro condicional, sem alerta;
+  "se doer", "cólica", "buscopan" contam como sintoma; com a IA fora do ar no
+  risco de vida, vai o pronto-socorro, e nunca o botão de marcar.
+- **Ficha:** o dia sem hora vence a trava do texto; pergunta que não é de
+  agenda, com o texto da IA recusado, recebe a resposta dela; a data que veio
+  junto do nome segue com ele.
+- **Agenda:** com dois irmãos marcados, a consulta da criança dita é escolhida
+  e o remarcar segue até o horário; a lista de consultas traz o nome de cada
+  criança; o preço perguntado vai junto da agenda.
+- **IA:** "Pelas regras...", "o Dr. Marcello sabe que..." (chama a equipe),
+  "R$ 450,00? Não." com ponto; "conta pro dr", "qnts", "vlr", "valores";
+  maiúscula depois do corte de "Combinado,"; "vo pensa" é adiamento; a IA vê
+  24 mensagens.
+
 ### Decisões que ficam com o Dr. Marcello
 
 - Gravar na consulta a queixa que a família já contou (refluxo, intestino

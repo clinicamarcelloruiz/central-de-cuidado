@@ -64,6 +64,9 @@ const CLINICO = [
   'internado', 'internar', 'urgencia', 'emergencia', 'grave', 'piorou',
   'sintoma', 'sintomas', 'tratamento', 'exame', 'resultado', 'receita',
   'posso dar', 'pode tomar', 'e normal',
+  // Rodada 13 (IA06-v2): "e ate segunda se doer mt eu dou oq? o buscopan msm?"
+  // nao contava como sintoma, e o pronto-socorro condicional da IA era cortado.
+  'doer', 'doeu', 'colica', 'colicas', 'buscopan', 'simeticona', 'tylenol', 'novalgina',
 ]
 
 /**
