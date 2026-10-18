@@ -1,7 +1,7 @@
 // A resposta do medico ao alerta de urgencia, pelo WhatsApp dele (17/10/2026).
 // Regra em supabase/functions/_shared/resposta-ao-alerta.ts. Banco e Meta de
 // mentira: o que se testa e o que chega a familia, ao medico e ao registro.
-import { escolherAlerta, lerRespostaDaEquipe, papelDoNumero, textoParaAFamilia, tratarRespostaDaEquipe } from './resposta-ao-alerta.build.mjs'
+import { escolherAlerta, lerRespostaDaEquipe, papelDoNumero, repassarRespostaDaFamilia, textoParaAFamilia, tratarRespostaDaEquipe } from './resposta-ao-alerta.build.mjs'
 import { bancoFalso } from './fixtures/banco-falso.mjs'
 
 let ok = 0
@@ -11,6 +11,7 @@ const confere = (nome, cond, detalhe = '') => (cond ? ok++ : falhas.push(`${nome
 const MEDICO = '5513997039614'
 const EQUIPE = '5513991165576'
 const FAMILIA = '5513988887777'
+const FAMILIA2 = '5511977776666'
 const AGORA = new Date('2026-10-18T02:30:00Z')
 const haMinutos = (m) => new Date(AGORA.getTime() - m * 60000).toISOString()
 const A1 = '11111111-1111-4111-8111-111111111111'
@@ -28,8 +29,14 @@ function cenario({ alertas = [alerta()], ultimaDaFamilia = haMinutos(35), semTab
   const banco = bancoFalso(
     {
       alertas_de_urgencia: alertas,
-      whatsapp_conversations: [{ id: 'conv-1', wa_id: FAMILIA, patient_id: 'p1', profile_name: 'Maria Silva', needs_attention: true, attention_reason: 'urgencia' }],
-      whatsapp_messages: [{ conversation_id: 'conv-1', direction: 'inbound', message_type: 'text', created_at: ultimaDaFamilia }],
+      whatsapp_conversations: [
+        { id: 'conv-1', wa_id: FAMILIA, patient_id: 'p1', profile_name: 'Maria Silva', needs_attention: true, attention_reason: 'urgencia' },
+        { id: 'conv-2', wa_id: FAMILIA2, patient_id: 'p2', profile_name: 'Joana Lima', needs_attention: true, attention_reason: 'atendente' },
+      ],
+      whatsapp_messages: [
+        { conversation_id: 'conv-1', direction: 'inbound', message_type: 'text', created_at: ultimaDaFamilia },
+        { conversation_id: 'conv-2', direction: 'inbound', message_type: 'text', created_at: haMinutos(10) },
+      ],
       clinic_settings: [{ clinic_id: 'c1', whatsapp_reply_template_name: 'resposta_da_clinica', whatsapp_template_language: 'pt_BR' }],
       instagram_conversas: [{ id: 'ig-1', igsid: '987', ultima_da_pessoa_em: instagram?.ultima ?? haMinutos(20), motivo: 'urgencia' }],
       instagram_contas: [{ clinic_id: 'c1', ig_user_id: 'ig-user', access_token: 'tok', whatsapp: '5513996811279' }],
@@ -140,10 +147,97 @@ confere('mensagem do medico leva o nome dele', textoParaAFamilia('texto', 'medic
   await tratarRespostaDaEquipe(c.amb, MEDICO, { type: 'audio', audio: { id: 'a' } })
   confere('audio: pede texto', c.para(MEDICO).at(-1)?.includes('só consigo repassar texto'))
 }
+// 6b. Varias familias ao mesmo tempo (18/10/2026, primeiro dia de uso: Paula e
+// Heitor abertos, e cada mensagem do Edu voltava "Ha 2 alertas recentes").
+const dois = () => [alerta(), alerta({ id: A2, quem: 'João Pedro Lima de Souza', conversa_whatsapp: 'conv-2', mensagens: ['wamid.ALERTA2'], criado_em: haMinutos(5) })]
+const A3 = '33333333-3333-4333-8333-333333333333'
 {
-  const c = cenario({ alertas: [alerta(), alerta({ id: A2, quem: 'João', mensagens: ['wamid.ALERTA2'], criado_em: haMinutos(5) })] })
+  // Sem conversa ativa: a familia e escolhida num toque, que ja e o "Enviar".
+  const c = cenario({ alertas: dois() })
   await tratarRespostaDaEquipe(c.amb, MEDICO, texto('pode dar soro'))
-  confere('dois alertas sem citar: pergunta qual', c.para(MEDICO).at(-1)?.includes('segure a mensagem do alerta certo') && c.para(FAMILIA).length === 0)
+  const pergunta = c.enviados.at(-1)
+  const botoes = pergunta?.conteudo.interactive?.action?.buttons ?? []
+  confere('dois avisos: pergunta para qual familia, com botoes', c.textoDe(pergunta).startsWith('Para qual família vai esta mensagem?') && botoes.length === 3 && c.para(FAMILIA).length === 0 && c.para(FAMILIA2).length === 0, c.textoDe(pergunta))
+  // O aviso mais novo primeiro; nome longo vira primeiro e ultimo nome (botao tem 20 letras).
+  confere('dois avisos: botoes com os nomes e Cancelar', botoes[0]?.reply?.title === 'João Souza' && botoes[1]?.reply?.title === 'Helena' && botoes[2]?.reply?.title === 'Cancelar', JSON.stringify(botoes.map((b) => b.reply.title)))
+  confere('dois avisos: o texto guardado nos dois', c.banco.db.alertas_de_urgencia.every((a) => a.rascunho === 'pode dar soro' && a.rascunho_de === MEDICO))
+  await tratarRespostaDaEquipe(c.amb, MEDICO, toqueInterativo(botoes.find((b) => b.reply.title === 'João Souza').reply.id))
+  confere('dois avisos: o toque manda para a familia escolhida', c.para(FAMILIA2).at(-1) === '💬 Mensagem do Dr. Marcello: pode dar soro' && c.para(FAMILIA).length === 0, JSON.stringify(c.para(FAMILIA2)))
+  confere('dois avisos: o texto sai do outro aviso', c.banco.db.alertas_de_urgencia.every((a) => a.rascunho === null), JSON.stringify(c.banco.db.alertas_de_urgencia.map((a) => a.rascunho)))
+  // A seguinte vai para a mesma familia, sem perguntar de novo.
+  await tratarRespostaDaEquipe(c.amb, MEDICO, texto('e me avisa se ele vomitar de novo'))
+  confere('conversa ativa: a seguinte segue para a mesma familia', c.textoDe(c.enviados.at(-1)).includes('Vou mandar para João Pedro Lima de Souza'), c.textoDe(c.enviados.at(-1)))
+}
+{
+  // "Eu respondo" num aviso tambem abre a conversa com ele (o caso do Heitor).
+  const c = cenario({ alertas: dois() })
+  await tratarRespostaDaEquipe(c.amb, EQUIPE, toque(`URG:${A2}:responde`))
+  await tratarRespostaDaEquipe(c.amb, EQUIPE, texto('Tudo bem. Como podemos ajudar?'))
+  confere('eu respondo: o texto seguinte vai para a mesma familia', c.textoDe(c.enviados.at(-1)).includes('Vou mandar para João Pedro Lima de Souza, como mensagem da equipe'), c.textoDe(c.enviados.at(-1)))
+  // Conversa de um numero nao vale para o outro.
+  await tratarRespostaDaEquipe(c.amb, MEDICO, texto('pode dar soro'))
+  confere('conversa ativa e por numero', c.textoDe(c.enviados.at(-1)).startsWith('Para qual família'), c.textoDe(c.enviados.at(-1)))
+}
+{
+  // Aviso novo depois da ultima resposta: pergunta de novo.
+  const c = cenario({ alertas: dois() })
+  await tratarRespostaDaEquipe(c.amb, MEDICO, toque(`URG:${A1}:responde`))
+  c.banco.db.alertas_de_urgencia.push(alerta({ id: A3, quem: 'Paula', conversa_whatsapp: 'conv-2', mensagens: ['wamid.ALERTA3'], criado_em: new Date(AGORA.getTime() + 60000).toISOString() }))
+  c.amb.agora = new Date(AGORA.getTime() + 2 * 60000)
+  await tratarRespostaDaEquipe(c.amb, MEDICO, texto('como ele esta?'))
+  const ultima = c.enviados.at(-1)
+  confere('aviso novo: pergunta de novo, em lista com tres familias', c.textoDe(ultima).startsWith('Para qual família') && ultima.conteudo.interactive?.type === 'list' && ultima.conteudo.interactive.action.sections[0].rows.length === 4, JSON.stringify(ultima.conteudo).slice(0, 300))
+  // A lista volta em list_reply.
+  const linha = ultima.conteudo.interactive.action.sections[0].rows.find((r) => r.title === 'Helena')
+  await tratarRespostaDaEquipe(c.amb, MEDICO, { type: 'interactive', interactive: { list_reply: { id: linha.id, title: 'Helena' } } })
+  confere('lista: o toque na linha manda', c.para(FAMILIA).at(-1) === '💬 Mensagem do Dr. Marcello: como ele esta?', JSON.stringify(c.para(FAMILIA)))
+}
+{
+  const c = cenario({ alertas: dois() })
+  await tratarRespostaDaEquipe(c.amb, MEDICO, texto('liga pra ela'))
+  const cancelar = c.enviados.at(-1).conteudo.interactive.action.buttons[2].reply.id
+  await tratarRespostaDaEquipe(c.amb, MEDICO, toqueInterativo(cancelar))
+  confere('escolha cancelada: nada sai e o texto some dos dois', c.para(FAMILIA).length === 0 && c.para(FAMILIA2).length === 0 && c.banco.db.alertas_de_urgencia.every((a) => a.rascunho === null))
+}
+{
+  const c = cenario({ alertas: dois() })
+  await tratarRespostaDaEquipe(c.amb, MEDICO, texto('ok'))
+  confere('"ok" com dois avisos: nao pergunta a familia', c.para(MEDICO).at(-1)?.includes('segure a mensagem do aviso certo'), c.para(MEDICO).at(-1))
+}
+confere('escolherAlerta: ultima resposta decide', escolherAlerta(dois(), null, AGORA, { id: A1, em: haMinutos(1) })?.alerta?.id === A1)
+confere('escolherAlerta: aviso mais novo que a resposta pergunta', escolherAlerta(dois(), null, AGORA, { id: A1, em: haMinutos(10) })?.ambiguos?.length === 2)
+
+// 6c. A familia respondendo volta aos celulares (18/10/2026).
+{
+  const c = cenario({ alertas: [alerta({ respondido_em: haMinutos(3), respondido_por: MEDICO })] })
+  const repassou = await repassarRespostaDaFamilia(c.amb, { conversaWhatsApp: 'conv-1', quem: 'Helena', texto: 'Ele vomitou de novo agora' })
+  confere('repasse: vai aos dois numeros', repassou && c.para(MEDICO).length === 1 && c.para(EQUIPE).length === 1, JSON.stringify(c.enviados.map((e) => e.para)))
+  confere('repasse: o texto da familia', c.para(MEDICO)[0]?.includes('Helena respondeu') && c.para(MEDICO)[0].includes('"Ele vomitou de novo agora"'), c.para(MEDICO)[0])
+  confere('repasse: o id entra no aviso, para a resposta em cima voltar', c.banco.db.alertas_de_urgencia[0].mensagens.length === 3, JSON.stringify(c.banco.db.alertas_de_urgencia[0].mensagens))
+  await tratarRespostaDaEquipe(c.amb, EQUIPE, texto('Pode dar o soro aos poucos', c.banco.db.alertas_de_urgencia[0].mensagens[2]))
+  confere('repasse: responder em cima volta para a mesma familia', c.textoDe(c.enviados.at(-1)).includes('Vou mandar para Helena'), c.textoDe(c.enviados.at(-1)))
+}
+{
+  // Numero fora da janela de 24 h: o texto livre falha e vai o modelo.
+  const c = cenario({ alertas: [alerta({ respondido_em: haMinutos(3), respondido_por: MEDICO })] })
+  const enviados = []
+  c.amb.enviarWhatsApp = async (para, conteudo) => {
+    enviados.push({ para, conteudo })
+    if (para === EQUIPE && conteudo.type !== 'template') return { ok: false, erro: 'Re-engagement message' }
+    return { ok: true, id: `w${enviados.length}` }
+  }
+  await repassarRespostaDaFamilia(c.amb, { conversaWhatsApp: 'conv-1', quem: 'Helena', texto: '[image]' })
+  const modelo = enviados.find((e) => e.para === EQUIPE && e.conteudo.type === 'template')
+  confere('repasse fora da janela: modelo pedido_equipe com o botao do aviso', modelo?.conteudo.template.name === 'pedido_equipe' && modelo.conteudo.template.components[1].parameters[0].payload === `URG:${A1}:responde`, JSON.stringify(modelo?.conteudo))
+  confere('repasse: foto vira aviso para ver na Central', JSON.stringify(enviados[0].conteudo).includes('Mandou uma foto'), JSON.stringify(enviados[0].conteudo))
+}
+{
+  const c = cenario({ alertas: [alerta()] })
+  confere('sem resposta pelo WhatsApp: nao repassa', (await repassarRespostaDaFamilia(c.amb, { conversaWhatsApp: 'conv-1', quem: 'Helena', texto: 'oi' })) === false && c.enviados.length === 0)
+  const velho = cenario({ alertas: [alerta({ respondido_em: haMinutos(7 * 60), respondido_por: MEDICO })] })
+  confere('resposta de mais de 6 h: nao repassa', (await repassarRespostaDaFamilia(velho.amb, { conversaWhatsApp: 'conv-1', quem: 'Helena', texto: 'oi' })) === false)
+  const outra = cenario({ alertas: [alerta({ respondido_em: haMinutos(3), respondido_por: MEDICO })] })
+  confere('outra conversa: nao repassa', (await repassarRespostaDaFamilia(outra.amb, { conversaWhatsApp: 'conv-2', quem: 'Joana', texto: 'oi' })) === false)
 }
 {
   const c = cenario({ alertas: [alerta({ criado_em: haMinutos(10 * 60) })] })

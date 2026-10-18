@@ -46,7 +46,8 @@ export function bancoFalso(tabelas = {}, { semTabela = [] } = {}) {
       neq(k, v) { filtros.push((r) => r[k] !== v); return q },
       is(k, v) { filtros.push((r) => (r[k] ?? null) === v); return q },
       in(k, vs) { filtros.push((r) => vs.includes(r[k])); return q },
-      gte(k, v) { filtros.push((r) => String(r[k]) >= String(v)); return q },
+      // Como no Postgres: campo vazio nao passa em comparacao.
+      gte(k, v) { filtros.push((r) => r[k] != null && String(r[k]) >= String(v)); return q },
       order(k, o = {}) { ordem = [k, o.ascending !== false]; return q },
       limit(n) { limite = n; return q },
       insert(v) { acao = 'insert'; valores = v; return q },

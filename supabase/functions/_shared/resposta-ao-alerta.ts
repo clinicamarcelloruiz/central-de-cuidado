@@ -1,4 +1,4 @@
-import { BOTOES_DO_ALERTA, type Veredito } from './alerta-de-urgencia.ts'
+import { BOTOES_DO_ALERTA, MODELO_DO_PEDIDO, parametrosDoPedido, payloadDoVeredito, type Veredito } from './alerta-de-urgencia.ts'
 import { montarConteudo } from './conteudo.ts'
 import { linkDoWhatsApp, semFormatacaoDoWhatsApp } from './instagram.ts'
 import { textoDoModelo } from './modelos.ts'
@@ -61,7 +61,13 @@ const MIDIA = ['image', 'audio', 'voice', 'video', 'document', 'sticker']
 
 export function lerRespostaDaEquipe(m: MensagemRecebida): RespostaDaEquipe | null {
   const citado = m.context?.id ? String(m.context.id) : null
-  const toque = m.type === 'button' ? String(m.button?.payload ?? '') : m.type === 'interactive' ? String(m.interactive?.button_reply?.id ?? '') : ''
+  // A lista (18/10/2026, escolha da familia com mais de 2 avisos) volta em list_reply.
+  const toque =
+    m.type === 'button'
+      ? String(m.button?.payload ?? '')
+      : m.type === 'interactive'
+        ? String(m.interactive?.button_reply?.id ?? m.interactive?.list_reply?.id ?? '')
+        : ''
   const veredito = /^URG:([0-9a-f-]{36}):(urgente|aguardar|responde)$/.exec(toque)
   if (veredito) return { tipo: 'veredito', alertaId: veredito[1], veredito: veredito[2] as Veredito }
   const confirmacao = /^URGTXT:([0-9a-f-]{36}):(enviar|cancelar)$/.exec(toque)
@@ -124,14 +130,22 @@ export type Alerta = {
   criado_em: string
 }
 
+/** A ultima resposta deste numero: a que aviso e quando (ver ultimaResposta). */
+export type UltimaResposta = { id: string; em: string } | null
+
 /**
  * De qual familia e o texto. Em cima de um alerta: aquele. Sem citar: o
- * alerta das ultimas 6 horas, se for um so; com mais de um, pergunta.
+ * alerta das ultimas 6 horas, se for um so. Com mais de um, o da ultima
+ * resposta deste numero, enquanto nao chegar aviso novo depois dela
+ * (18/10/2026: o Edu tocou "Eu respondo" no aviso do Heitor e cada mensagem
+ * seguinte voltava "Ha 2 alertas recentes"). Aviso novo depois da ultima
+ * resposta: pergunta, porque a mensagem pode ser para a familia nova.
  */
 export function escolherAlerta(
   recentes: Alerta[],
   citado: string | null,
   agora: Date,
+  ultima: UltimaResposta = null,
 ): { alerta: Alerta } | { ambiguos: Alerta[] } | null {
   if (citado) {
     const exato = recentes.find((a) => (a.mensagens ?? []).includes(citado))
@@ -139,7 +153,12 @@ export function escolherAlerta(
   }
   const candidatos = recentes.filter((a) => agora.getTime() - Date.parse(a.criado_em) <= JANELA_DO_ALERTA_MS)
   if (candidatos.length === 1) return { alerta: candidatos[0] }
-  if (candidatos.length > 1) return { ambiguos: candidatos }
+  if (candidatos.length > 1) {
+    const daConversa = ultima ? candidatos.find((a) => a.id === ultima.id) : undefined
+    const chegouOutro = candidatos.some((a) => a.id !== ultima?.id && Date.parse(a.criado_em) > Date.parse(ultima?.em ?? ''))
+    if (daConversa && !chegouOutro) return { alerta: daConversa }
+    return { ambiguos: candidatos }
+  }
   return null
 }
 
@@ -193,6 +212,59 @@ async function alertasRecentes(amb: AmbienteDaResposta): Promise<Alerta[] | null
     console.error('Resposta ao alerta: nao li alertas_de_urgencia', erro)
     return null
   }
+}
+
+/**
+ * Colunas de 18/10/2026 (migration 20261018180000), lidas e gravadas a parte:
+ * sem elas, so volta a pergunta de qual familia, nada mais quebra.
+ */
+async function ultimaResposta(amb: AmbienteDaResposta, numero: string): Promise<UltimaResposta> {
+  try {
+    const { data, error } = await amb.admin
+      .from('alertas_de_urgencia')
+      .select('id,respondido_em')
+      .eq('clinic_id', amb.clinicId)
+      .eq('respondido_por', numero)
+      .gte('respondido_em', new Date(amb.agora.getTime() - JANELA_DO_ALERTA_MS).toISOString())
+      .order('respondido_em', { ascending: false })
+      .limit(1)
+    if (error) throw error
+    const linha = (data as { id: string; respondido_em: string }[] | null)?.[0]
+    return linha ? { id: linha.id, em: linha.respondido_em } : null
+  } catch (erro) {
+    console.warn('Resposta ao alerta: sem respondido_em; a conversa ativa nao vale', erro)
+    return null
+  }
+}
+
+async function marcarRespondido(amb: AmbienteDaResposta, id: string, numero: string) {
+  try {
+    const { error } = await amb.admin
+      .from('alertas_de_urgencia')
+      .update({ respondido_em: amb.agora.toISOString(), respondido_por: numero })
+      .eq('id', id)
+    if (error) throw error
+  } catch (erro) {
+    console.warn('Resposta ao alerta: respondido_em nao gravado', erro)
+  }
+}
+
+/** Apaga o texto esperando confirmacao em todos os avisos deste numero. */
+async function apagarRascunhos(amb: AmbienteDaResposta, numero: string) {
+  await amb.admin
+    .from('alertas_de_urgencia')
+    .update({ rascunho: null, rascunho_de: null, rascunho_em: null })
+    .eq('clinic_id', amb.clinicId)
+    .eq('rascunho_de', numero)
+}
+
+/** Nome curto para botao (20 letras) ou linha de lista (24). */
+function nomeCurto(nome: string, limite: number): string {
+  const n = nome.trim() || 'Família'
+  if (n.length <= limite) return n
+  const partes = n.split(/\s+/)
+  const doisNomes = partes.length > 1 ? `${partes[0]} ${partes[partes.length - 1]}` : n
+  return doisNomes.length <= limite ? doisNomes : `${n.slice(0, limite - 1)}…`
 }
 
 async function alertaPorId(amb: AmbienteDaResposta, id: string): Promise<Alerta | null> {
@@ -418,6 +490,7 @@ export async function tratarRespostaDaEquipe(amb: AmbienteDaResposta, numero: st
         return true
       }
       const envio = await enviarParaAFamilia(amb, alerta, r.veredito, papel, undefined)
+      if (envio.ok) await marcarRespondido(amb, alerta.id, numero)
       await registrarResposta(amb, alerta, papel, r.veredito, envio)
       await responder(envio.ok ? `✅ Enviado para ${nomeDaFamilia(alerta)}.` : `⚠️ Não consegui enviar para ${nomeDaFamilia(alerta)}: ${envio.erro}. Responda pela Central.`)
       return true
@@ -425,6 +498,8 @@ export async function tratarRespostaDaEquipe(amb: AmbienteDaResposta, numero: st
 
     // Confirmacao do texto.
     if (r.acao === 'cancelar') {
+      // Na escolha da familia o mesmo texto fica em varios avisos: apaga todos.
+      await apagarRascunhos(amb, numero)
       await amb.admin.from('alertas_de_urgencia').update({ rascunho: null, rascunho_de: null, rascunho_em: null }).eq('id', alerta.id)
       await responder('Cancelado: nada foi enviado à família.')
       return true
@@ -440,8 +515,11 @@ export async function tratarRespostaDaEquipe(amb: AmbienteDaResposta, numero: st
       return true
     }
     const envio = await enviarParaAFamilia(amb, atual, 'texto', papel, atual.rascunho)
+    // O mesmo texto pode estar nos outros avisos (escolha da familia): sai de todos.
+    await apagarRascunhos(amb, numero)
     await amb.admin.from('alertas_de_urgencia').update({ rascunho: null, rascunho_de: null, rascunho_em: null }).eq('id', alerta.id)
     if (envio.ok) {
+      await marcarRespondido(amb, atual.id, numero)
       await amb.admin.from('alertas_de_urgencia').update({ veredito: 'texto', veredito_por: numero, veredito_em: amb.agora.toISOString() }).eq('id', alerta.id).is('veredito', null)
     }
     await registrarResposta(amb, atual, papel, 'texto', envio)
@@ -450,11 +528,36 @@ export async function tratarRespostaDaEquipe(amb: AmbienteDaResposta, numero: st
   }
 
   // Texto, "ok" ou arquivo: de qual alerta?
-  const escolha = escolherAlerta(recentes, r.citado, amb.agora)
+  const escolha = escolherAlerta(recentes, r.citado, amb.agora, await ultimaResposta(amb, numero))
   if (!escolha) return false
   if ('ambiguos' in escolha) {
+    // Texto: a familia e escolhida num toque, e o toque ja e o "Enviar"
+    // (18/10/2026). O texto fica guardado em cada aviso; o escolhido manda, e
+    // os outros sao apagados (apagarRascunhos).
+    if (r.tipo === 'texto') {
+      const opcoes = escolha.ambiguos.slice(0, 9)
+      const guardado = r.texto.slice(0, 900)
+      await amb.admin
+        .from('alertas_de_urgencia')
+        .update({ rascunho: guardado, rascunho_de: numero, rascunho_em: amb.agora.toISOString() })
+        .in('id', opcoes.map((a) => a.id))
+      const pergunta = `Para qual família vai esta mensagem?\n\n"${guardado}"\n\nAs próximas seguem para a mesma família, até chegar um aviso novo.`
+      const cancelar = { id: payloadDaConfirmacao(opcoes[0].id, 'cancelar'), titulo: 'Cancelar' }
+      await amb.enviarWhatsApp(
+        numero,
+        opcoes.length <= 2
+          ? montarConteudo(pergunta, { botoes: [...opcoes.map((a) => ({ id: payloadDaConfirmacao(a.id, 'enviar'), titulo: nomeCurto(nomeDaFamilia(a), 20) })), cancelar] })
+          : montarConteudo(pergunta, {
+              lista: {
+                rotulo: 'Escolher família',
+                linhas: [...opcoes.map((a) => ({ id: payloadDaConfirmacao(a.id, 'enviar'), titulo: nomeCurto(nomeDaFamilia(a), 24) })), cancelar],
+              },
+            }),
+      )
+      return true
+    }
     const nomes = escolha.ambiguos.map(nomeDaFamilia).join(', ')
-    await responder(`Há ${escolha.ambiguos.length} alertas recentes (${nomes}). Para eu saber de qual família é, segure a mensagem do alerta certo e toque em Responder.`)
+    await responder(`Há ${escolha.ambiguos.length} avisos recentes (${nomes}). Para eu saber de qual família é, segure a mensagem do aviso certo e toque em Responder.`)
     return true
   }
   const alerta = escolha.alerta
@@ -483,6 +586,93 @@ export async function tratarRespostaDaEquipe(amb: AmbienteDaResposta, numero: st
     { id: payloadDaConfirmacao(alerta.id, 'cancelar'), titulo: 'Cancelar' },
   ])
   return true
+}
+
+/**
+ * A resposta da familia de volta aos celulares (18/10/2026).
+ *
+ * Pedido do Edu, no primeiro dia de uso: "e quando a familia responder, da
+ * para voltar para ele e para mim a mensagem tambem?". Quando alguem respondeu
+ * a um aviso desta conversa pelo WhatsApp nas ultimas 6 horas, a conversa esta
+ * acontecendo por la: cada mensagem da familia vai aos numeros do alerta, e a
+ * mensagem repassada entra nos ids do aviso, para a resposta em cima dela
+ * voltar a mesma familia (escolherAlerta).
+ *
+ * Texto livre chega a quem escreveu para o numero da clinica nas ultimas 24
+ * horas (quem acabou de responder). Para os outros, a Meta recusa, e vai o
+ * modelo pedido_equipe com o botao "Eu respondo" do mesmo aviso.
+ *
+ * Devolve true quando repassou: o webhook nao manda outro pedido a equipe.
+ */
+const MIDIA_DA_FAMILIA: Record<string, string> = {
+  '[image]': '📷 Mandou uma foto (veja na Central)',
+  '[audio]': '🎤 Mandou um áudio (ouça na Central)',
+  '[voice]': '🎤 Mandou um áudio (ouça na Central)',
+  '[video]': '🎥 Mandou um vídeo (veja na Central)',
+  '[document]': '📄 Mandou um documento (veja na Central)',
+  '[sticker]': 'Mandou uma figurinha',
+}
+
+export async function repassarRespostaDaFamilia(
+  amb: Pick<AmbienteDaResposta, 'admin' | 'clinicId' | 'agora' | 'numeros' | 'enviarWhatsApp'>,
+  p: { conversaWhatsApp: string; quem: string; texto: string; idioma?: string },
+): Promise<boolean> {
+  try {
+    if (!amb.numeros.length) return false
+    const { data, error } = await amb.admin
+      .from('alertas_de_urgencia')
+      .select('id,mensagens,quem')
+      .eq('clinic_id', amb.clinicId)
+      .eq('conversa_whatsapp', p.conversaWhatsApp)
+      .gte('respondido_em', new Date(amb.agora.getTime() - JANELA_DO_ALERTA_MS).toISOString())
+      .order('respondido_em', { ascending: false })
+      .limit(1)
+    if (error) throw error
+    const alerta = (data as { id: string; mensagens: string[] | null; quem: string }[] | null)?.[0]
+    if (!alerta) return false
+
+    const quem = p.quem.trim() || alerta.quem || 'A família'
+    const fala = MIDIA_DA_FAMILIA[p.texto.trim()] ?? p.texto.trim()
+    const livre = montarConteudo(
+      `💬 ${quem} respondeu:
+
+"${fala.slice(0, 900)}"
+
+Para responder, escreva aqui: vai para ${quem}.`,
+      { botoes: [{ id: payloadDoVeredito(alerta.id, 'responde'), titulo: 'Eu respondo' }] },
+    )
+    const parametros = parametrosDoPedido({ quem, canal: 'WhatsApp', texto: fala, agora: amb.agora, assunto: 'respondeu à sua mensagem' })
+    const modelo = {
+      type: 'template',
+      template: {
+        name: MODELO_DO_PEDIDO,
+        language: { code: p.idioma || 'pt_BR' },
+        components: [
+          { type: 'body', parameters: parametros.map((text) => ({ type: 'text', text })) },
+          { type: 'button', sub_type: 'quick_reply', index: '0', parameters: [{ type: 'payload', payload: payloadDoVeredito(alerta.id, 'responde') }] },
+        ],
+      },
+    }
+    const ids: string[] = []
+    for (const numero of amb.numeros) {
+      let envio = await amb.enviarWhatsApp(numero, livre)
+      if (!envio.ok) envio = await amb.enviarWhatsApp(numero, modelo)
+      if (envio.ok && envio.id) ids.push(envio.id)
+      if (!envio.ok) console.error('Repasse da familia nao chegou a', numero.slice(-4), envio.erro)
+    }
+    if (ids.length) {
+      const { error: erroDosIds } = await amb.admin
+        .from('alertas_de_urgencia')
+        .update({ mensagens: [...(alerta.mensagens ?? []), ...ids] })
+        .eq('id', alerta.id)
+      if (erroDosIds) console.error('Repasse da familia: ids nao gravados', erroDosIds)
+    }
+    return ids.length > 0
+  } catch (erro) {
+    // Sem as colunas de 18/10 ou sem a tabela: segue o pedido de sempre.
+    console.warn('Repasse da familia: nao consegui ver a conversa no WhatsApp do medico', erro)
+    return false
+  }
 }
 
 // Os titulos dos botoes, para quem monta o modelo na Meta e para os testes.

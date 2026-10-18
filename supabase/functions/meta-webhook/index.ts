@@ -33,7 +33,7 @@ import {
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 import { montarAviso, quemEscreveu } from '../_shared/aviso-da-equipe.ts'
 import { assuntoDoPedido, deveAlertar, deveEncaminhar, enviarAlertaDeUrgencia, lerNumeros as lerNumerosDoAlerta } from '../_shared/alerta-de-urgencia.ts'
-import { tratarRespostaDaEquipe, whatsAppPelaApi } from '../_shared/resposta-ao-alerta.ts'
+import { repassarRespostaDaFamilia, tratarRespostaDaEquipe, whatsAppPelaApi } from '../_shared/resposta-ao-alerta.ts'
 import { enviarDirect } from '../_shared/instagram-api.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
 import {
@@ -893,6 +893,37 @@ Deno.serve(async (req) => {
           }
           if (messageError) throw messageError
 
+          // A familia respondendo a uma conversa que o medico (ou o Edu) esta
+          // levando pelo WhatsApp dele (18/10/2026): a mensagem vai aos
+          // celulares, na mesma conversa. Ver repassarRespostaDaFamilia. Com
+          // repasse, o pedido a equipe desta mensagem nao sai de novo.
+          let repassadoAosCelulares = false
+          try {
+            numerosDoAlerta ??= await lerNumerosDoAlerta(admin, clinicId)
+            if (numerosDoAlerta.length) {
+              repassadoAosCelulares = await repassarRespostaDaFamilia(
+                {
+                  admin,
+                  clinicId,
+                  agora: new Date(),
+                  numeros: numerosDoAlerta,
+                  enviarWhatsApp: whatsAppPelaApi(phoneNumberId, chaveDoWhatsApp(phoneNumberId)),
+                },
+                {
+                  conversaWhatsApp: conversation.id,
+                  quem: quemEscreveu({
+                    pacientes,
+                    nomeDoPerfil: nomeDoPerfil || String(conversaAnterior?.profile_name ?? ''),
+                    telefone: waId,
+                  }),
+                  texto: body,
+                },
+              )
+            }
+          } catch (erro) {
+            console.warn('Repasse da familia aos celulares falhou; segue o pedido de sempre', erro)
+          }
+
           if (patient?.id && optedOut) {
             if (paraTudo) {
               await admin.from('patients').update({ whatsapp_opt_out_at: receivedAt }).eq('id', patient.id)
@@ -977,6 +1008,7 @@ Deno.serve(async (req) => {
            * mesmo dia sem chegar a ninguem.
            */
           const encaminharAosCelulares = async (motivo: string | null, texto: string, motivoDaIA: string | null = null) => {
+            if (repassadoAosCelulares) return
             try {
               const encaminhar = deveEncaminhar({
                 atencaoAntes: Boolean(conversaAnterior?.needs_attention),
