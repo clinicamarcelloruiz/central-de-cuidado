@@ -43,7 +43,10 @@ export const MODELO_COM_BOTOES = 'alerta_urgencia_v2'
  * (resposta-ao-alerta.ts): texto em cima da mensagem, ou o botao "Eu respondo".
  */
 export const MODELO_DO_PEDIDO = 'pedido_equipe'
-export const MOTIVOS_QUE_ENCAMINHAM = ['atendente', 'documento', 'farmacia', 'nao_suportada'] as const
+// 'ajuda' e 'remarcacao' (18/10/2026): os botoes "Preciso de ajuda" do
+// acompanhamento e "remarcar" do lembrete. O Heitor apertou "Preciso de ajuda"
+// no primeiro dia e o pedido nao chegou a ninguem.
+export const MOTIVOS_QUE_ENCAMINHAM = ['atendente', 'documento', 'farmacia', 'nao_suportada', 'ajuda', 'remarcacao'] as const
 export type TipoDoAviso = 'urgencia' | 'pedido'
 
 /**
@@ -77,6 +80,8 @@ export function assuntoDoPedido(motivo: string | null, motivoDaIA: string | null
     documento: '2ª via de receita ou pedido de exame',
     farmacia: 'farmácia pediu correção de receita',
     nao_suportada: 'tentou falar com a clínica (talvez uma ligação)',
+    ajuda: 'pediu ajuda no acompanhamento depois da consulta',
+    remarcacao: 'quer remarcar a consulta (respondeu ao lembrete)',
   }
   return (motivoDaIA && daIA[motivoDaIA]) || (motivo && doRobo[motivo]) || 'pedido para a equipe'
 }

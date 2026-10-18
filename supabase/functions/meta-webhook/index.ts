@@ -967,6 +967,45 @@ Deno.serve(async (req) => {
             return envio.ok
           }
 
+          /**
+           * O pedido para a equipe nos celulares do alerta (18/10/2026). Ver
+           * deveEncaminhar em _shared/alerta-de-urgencia.ts. Um ponto so para
+           * os caminhos que entregam a conversa a equipe: o atendimento, a
+           * mensagem que o WhatsApp nao mostra, o "Preciso de ajuda" do
+           * acompanhamento e o "remarcar" do lembrete - este dois ficaram de
+           * fora na primeira versao, e o Heitor apertou "Preciso de ajuda" no
+           * mesmo dia sem chegar a ninguem.
+           */
+          const encaminharAosCelulares = async (motivo: string | null, texto: string, motivoDaIA: string | null = null) => {
+            try {
+              const encaminhar = deveEncaminhar({
+                atencaoAntes: Boolean(conversaAnterior?.needs_attention),
+                motivoAntes: (conversaAnterior?.attention_reason as string | null) ?? null,
+                motivoAgora: motivo,
+              })
+              if (!encaminhar) return
+              const pedido = enviarAlertaDeUrgencia(admin, {
+                tipo: 'pedido',
+                seguimento: encaminhar === 'seguimento',
+                assunto: assuntoDoPedido(motivo, motivoDaIA, quemAtende(clinicId).o),
+                clinicId,
+                canal: 'WhatsApp',
+                quem: quemEscreveu({
+                  pacientes,
+                  nomeDoPerfil: nomeDoPerfil || String(conversaAnterior?.profile_name ?? ''),
+                  telefone: waId,
+                }),
+                texto,
+                agora: new Date(),
+                conversaWhatsApp: conversation.id,
+              })
+              if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(pedido)
+              else await pedido
+            } catch (erro) {
+              console.warn('Encaminhamento aos celulares falhou', erro)
+            }
+          }
+
           // Mensagem que o WhatsApp nao mostra (16/10/2026, ver
           // destinoDaNaoSuportada). A janela de 24h so conta mensagem que a
           // pessoa escreveu de verdade: "[unsupported]" nao abre a janela, e
@@ -1409,32 +1448,9 @@ Deno.serve(async (req) => {
               // sem secretaria, quem responde e o medico ou o Edu. O trecho e o
               // resumo da IA quando ha um ("a mae pergunta se pode dar
               // dipirona"), que diz mais do que a ultima mensagem ("e ai?").
-              const encaminhar = deveEncaminhar({
-                atencaoAntes: Boolean(conversaAnterior?.needs_attention),
-                motivoAntes: (conversaAnterior?.attention_reason as string | null) ?? null,
-                motivoAgora,
-              })
-              if (encaminhar) {
-                const motivoDaIA = /^equipe:(\w+)/.exec(eventosDaIA.find((e) => e.evento === 'ia_respondeu')?.detalhe ?? '')?.[1] ?? null
-                const resumoDaIA = /Resumo da IA para a equipe: (?!\(sem resumo\))(.+)/s.exec(notaDaIA ?? '')?.[1]
-                const pedido = enviarAlertaDeUrgencia(admin, {
-                  tipo: 'pedido',
-                  seguimento: encaminhar === 'seguimento',
-                  assunto: assuntoDoPedido(motivoAgora, motivoDaIA, quemAtende(clinicId).o),
-                  clinicId,
-                  canal: 'WhatsApp',
-                  quem: quemEscreveu({
-                    pacientes,
-                    nomeDoPerfil: nomeDoPerfil || String(conversaAnterior?.profile_name ?? ''),
-                    telefone: waId,
-                  }),
-                  texto: resumoDaIA || body,
-                  agora: new Date(),
-                  conversaWhatsApp: conversation.id,
-                })
-                if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(pedido)
-                else await pedido
-              }
+              const motivoDaIA = /^equipe:(\w+)/.exec(eventosDaIA.find((e) => e.evento === 'ia_respondeu')?.detalhe ?? '')?.[1] ?? null
+              const resumoDaIA = /Resumo da IA para a equipe: (?!\(sem resumo\))(.+)/s.exec(notaDaIA ?? '')?.[1]
+              await encaminharAosCelulares(motivoAgora, resumoDaIA || body, motivoDaIA)
             } catch (erro) {
               console.warn('Notificacao no celular: nao consegui montar o aviso', erro)
             }
@@ -1481,30 +1497,7 @@ Deno.serve(async (req) => {
                   else await envio
                 }
                 // Tambem nos celulares (18/10/2026): so a equipe responde isto.
-                const encaminhar = deveEncaminhar({
-                  atencaoAntes: Boolean(conversaAnterior?.needs_attention),
-                  motivoAntes: (conversaAnterior?.attention_reason as string | null) ?? null,
-                  motivoAgora: motivo,
-                })
-                if (encaminhar) {
-                  const pedido = enviarAlertaDeUrgencia(admin, {
-                    tipo: 'pedido',
-                    seguimento: encaminhar === 'seguimento',
-                    assunto: assuntoDoPedido(motivo, null),
-                    clinicId,
-                    canal: 'WhatsApp',
-                    quem: quemEscreveu({
-                      pacientes,
-                      nomeDoPerfil: nomeDoPerfil || String(conversaAnterior?.profile_name ?? ''),
-                      telefone: waId,
-                    }),
-                    texto: 'Tentou falar (talvez uma ligação pelo WhatsApp)',
-                    agora: new Date(),
-                    conversaWhatsApp: conversation.id,
-                  })
-                  if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(pedido)
-                  else await pedido
-                }
+                await encaminharAosCelulares(motivo, 'Tentou falar (talvez uma ligação pelo WhatsApp)')
               }
               const { error: erroDoEvento } = await admin.from('whatsapp_bot_events').insert({
                 clinic_id: clinicId,
@@ -1592,6 +1585,7 @@ Deno.serve(async (req) => {
                 'Recebi sua resposta, mas essa consulta não aparece mais como marcada na nossa agenda. ' +
                   'Já avisei a equipe, que confirma com você por aqui.',
               )
+              await encaminharAosCelulares('atendente', body)
               continue
             }
 
@@ -1681,6 +1675,13 @@ Deno.serve(async (req) => {
                   .eq('id', conversation.id)
               }
             }
+          }
+
+          // "Preciso de ajuda" e "remarcar" pelo lembrete esperam alguem da
+          // equipe (ver o encaminhamento acima). O cancelamento so libera a
+          // vaga e o robo ja oferece outra data: fica so na tela.
+          if (motivoAtencao === 'ajuda' || motivoAtencao === 'remarcacao') {
+            await encaminharAosCelulares(motivoAtencao, body)
           }
 
           // "Nao quero receber" apertado no acompanhamento: confirma de volta.
