@@ -25,9 +25,11 @@ import {
   List as ListIcon,
   Lock,
   MoreVertical,
+  Smartphone,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { criarNota, listarNotas, type NotaDaConversa } from '@/lib/notas-da-conversa'
+import { mandarParaOCelular } from '@/lib/notificacoes'
 import { linhaDoTempo } from '@/lib/linha-do-tempo'
 import { CHAVE_DO_VISUAL, EVENTO_MODO_WHATSAPP } from '@/lib/modo-whatsapp'
 import { VisualizadorDeArquivo, type ArquivoAberto } from '@/components/VisualizadorDeArquivo'
@@ -554,6 +556,10 @@ export default function Conversations({
   const [escrevendoNota, setEscrevendoNota] = useState(false)
   const [textoDaNota, setTextoDaNota] = useState('')
   const [salvandoNota, setSalvandoNota] = useState(false)
+  // "Mandar para o celular" (18/10/2026): a conversa vai como pedido para o
+  // WhatsApp do medico e do Edu, e a resposta de la volta para a familia.
+  const [mandandoAoCelular, setMandandoAoCelular] = useState(false)
+  const [doCelular, setDoCelular] = useState<{ texto: string; falhou: boolean } | null>(null)
   // Foto ou documento aberto por cima da conversa.
   const [arquivoAberto, setArquivoAberto] = useState<ArquivoAberto | null>(null)
   const fecharArquivo = useCallback(() => setArquivoAberto(null), [])
@@ -814,6 +820,25 @@ export default function Conversations({
     }
   }, [])
 
+  async function mandarAoCelular() {
+    if (!selectedId || !clinicId || mandandoAoCelular) return
+    const conversa = selectedId
+    setMandandoAoCelular(true)
+    setDoCelular(null)
+    try {
+      const r = await mandarParaOCelular(clinicId, conversa)
+      if (selectedIdRef.current === conversa) setDoCelular({ texto: r.nota, falhou: r.falhou })
+      // O resultado tambem fica como nota na conversa.
+      if (selectedIdRef.current === conversa) await carregarNotas(conversa)
+    } catch (causa) {
+      if (selectedIdRef.current === conversa) {
+        setDoCelular({ texto: causa instanceof Error ? causa.message : 'Não consegui mandar para o celular.', falhou: true })
+      }
+    } finally {
+      setMandandoAoCelular(false)
+    }
+  }
+
   async function salvarNota() {
     if (!selectedId || !clinicId || !textoDaNota.trim() || salvandoNota) return
     setSalvandoNota(true)
@@ -936,6 +961,7 @@ export default function Conversations({
     setErroDasNotas('')
     setEscrevendoNota(false)
     setTextoDaNota('')
+    setDoCelular(null)
     void carregarNotas(conversation.id)
     setLoadingMessages(true)
     setResposta('')
@@ -2410,14 +2436,28 @@ export default function Conversations({
                         </div>
                       </div>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => setEscrevendoNota(true)}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-[#e8c96a] bg-[#fffaf0] px-3 py-1.5 text-[10px] font-extrabold text-[#8a6a10] transition hover:bg-[#fff3d6]"
-                        title="Recado para a equipe, dentro desta conversa. A família não recebe."
-                      >
-                        <Lock className="h-3.5 w-3.5" /> Nota interna
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEscrevendoNota(true)}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-[#e8c96a] bg-[#fffaf0] px-3 py-1.5 text-[10px] font-extrabold text-[#8a6a10] transition hover:bg-[#fff3d6]"
+                          title="Recado para a equipe, dentro desta conversa. A família não recebe."
+                        >
+                          <Lock className="h-3.5 w-3.5" /> Nota interna
+                        </button>
+                        <button
+                          type="button"
+                          disabled={mandandoAoCelular}
+                          onClick={() => void mandarAoCelular()}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-[#2f7fc1]/30 bg-[#f0f6fd] px-3 py-1.5 text-[10px] font-extrabold text-[#16456b] transition hover:bg-[#e2eefb] disabled:cursor-wait disabled:opacity-50"
+                          title="Manda esta conversa para o WhatsApp dos números do alerta (Atendente com IA). A resposta de lá volta para a família."
+                        >
+                          <Smartphone className="h-3.5 w-3.5" /> {mandandoAoCelular ? 'Mandando...' : 'Mandar para o celular'}
+                        </button>
+                      </div>
+                    )}
+                    {doCelular && (
+                      <p className={`mt-1.5 text-[10px] font-bold ${doCelular.falhou ? 'text-[#b42318]' : 'text-[#1c6b3a]'}`}>{doCelular.texto}</p>
                     )}
                     {erroDasNotas && (
                       <p className="mt-1.5 text-[10px] font-bold text-[#b42318]">{erroDasNotas}</p>

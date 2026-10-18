@@ -120,6 +120,15 @@ const MODELOS: Record<string, {
       'O robô já orientou a família. Toque num botão ou responda a esta mensagem com a orientação, que eu repasso para a família.',
     botoes: ['É urgente', 'Pode aguardar', 'Eu respondo'],
   },
+  // Pedido que nao e urgencia, encaminhado aos mesmos celulares (18/10/2026):
+  // sem secretaria, quem responde e o medico ou o Edu. Ver alerta-de-urgencia.ts.
+  pedido_equipe: {
+    corpo:
+      '📋 Pedido para a equipe na Central de Cuidado.\n\n' +
+      '{{1}} escreveu pelo {{2}} às {{3}}.\nAssunto: {{4}}\n"{{5}}"\n\n' +
+      'Para responder à família, responda a esta mensagem com o texto, que eu repasso. Ou toque em Eu respondo.',
+    botoes: ['Eu respondo'],
+  },
 }
 
 /**

@@ -68,6 +68,12 @@ const MODELOS = {
   alerta_urgencia_v2: {
     corpo: '\u{1F6A8} Poss\xEDvel urg\xEAncia na Central de Cuidado.\n\n{{1}} escreveu pelo {{2}} \xE0s {{3}}:\n"{{4}}"\n\nO rob\xF4 j\xE1 orientou a fam\xEDlia. Toque num bot\xE3o ou responda a esta mensagem com a orienta\xE7\xE3o, que eu repasso para a fam\xEDlia.',
     botoes: ["\xC9 urgente", "Pode aguardar", "Eu respondo"]
+  },
+  // Pedido que nao e urgencia, encaminhado aos mesmos celulares (18/10/2026):
+  // sem secretaria, quem responde e o medico ou o Edu. Ver alerta-de-urgencia.ts.
+  pedido_equipe: {
+    corpo: '\u{1F4CB} Pedido para a equipe na Central de Cuidado.\n\n{{1}} escreveu pelo {{2}} \xE0s {{3}}.\nAssunto: {{4}}\n"{{5}}"\n\nPara responder \xE0 fam\xEDlia, responda a esta mensagem com o texto, que eu repasso. Ou toque em Eu respondo.',
+    botoes: ["Eu respondo"]
   }
 };
 function parametrosDoAcompanhamento(nomeDoModelo, nomeDoPaciente, data) {

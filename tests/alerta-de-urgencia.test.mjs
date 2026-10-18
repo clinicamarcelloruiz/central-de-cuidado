@@ -1,7 +1,7 @@
 // Alerta de urgencia no WhatsApp pessoal do medico (17/10/2026).
 // Regra em supabase/functions/_shared/alerta-de-urgencia.ts. Sem Meta e sem
 // banco: um fetch de mentira e um admin que guarda o que foi gravado.
-import { deveAlertar, descreverEnvio, enviarAlertaDeUrgencia, MODELO_DO_ALERTA, numerosDoAlerta, parametrosDoAlerta } from './alerta-de-urgencia.build.mjs'
+import { assuntoDoPedido, deveAlertar, deveEncaminhar, descreverEnvio, enviarAlertaDeUrgencia, MODELO_DO_ALERTA, numerosDoAlerta, parametrosDoAlerta, parametrosDoPedido } from './alerta-de-urgencia.build.mjs'
 import { textoDoModelo } from './modelos.build.mjs'
 import { bancoFalso } from './fixtures/banco-falso.mjs'
 
@@ -167,6 +167,84 @@ const ajustesComNumeros = () => bancoFalso({
   const banco = ajustesComNumeros()
   await enviarAlertaDeUrgencia(banco, { ...pedido, conversaWhatsApp: undefined, numeros: ['5513997039614'] }, async () => ({ ok: true, status: 200, json: async () => ({}) }))
   confere('teste da tela: alerta marcado como teste', banco.db.alertas_de_urgencia[0]?.teste === true)
+}
+
+// 7. O pedido que nao e urgencia, nos mesmos celulares (18/10/2026): sem
+// secretaria, quem responde e o medico ou o Edu.
+confere('pedido: conversa entra na fila do atendente', deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'atendente' }) === 'novo')
+confere('pedido: 2a via de receita', deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'documento' }) === 'novo')
+confere('pedido: troca de pedido na fila e novo', deveEncaminhar({ atencaoAntes: true, motivoAntes: 'atendente', motivoAgora: 'documento' }) === 'novo')
+confere('pedido: mae escrevendo de novo na fila e seguimento', deveEncaminhar({ atencaoAntes: true, motivoAntes: 'atendente', motivoAgora: 'atendente' }) === 'seguimento')
+confere('pedido: urgencia tem o alerta proprio', deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'urgencia' }) === null)
+confere('pedido: informativo nao vai', deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'cancelou_sozinho' }) === null && deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: null }) === null)
+confere('pedido: assunto da IA primeiro', assuntoDoPedido('atendente', 'medico', 'o Dr. Marcello') === 'pergunta para o Dr. Marcello', assuntoDoPedido('atendente', 'medico', 'o Dr. Marcello'))
+confere('pedido: assunto do robo', assuntoDoPedido('farmacia', null) === 'farmácia pediu correção de receita')
+confere('pedido: assunto desconhecido', assuntoDoPedido('outro', 'outro') === 'pedido para a equipe')
+{
+  const p = parametrosDoPedido({ quem: 'Helena', canal: 'WhatsApp', texto: 'pode dar\ndipirona?', agora: new Date('2026-10-18T14:05:00Z'), assunto: 'pergunta para o Dr. Marcello' })
+  confere('pedido: cinco parametros, assunto antes do trecho', p.length === 5 && p[3] === 'pergunta para o Dr. Marcello' && p[4] === 'pode dar dipirona?' && p[2] === '11:05', JSON.stringify(p))
+  confere('pedido: texto do modelo para o registro', (textoDoModelo('pedido_equipe', p) ?? '').includes('Assunto: pergunta para o Dr. Marcello') && (textoDoModelo('pedido_equipe', p) ?? '').endsWith('[Eu respondo]'))
+  const certo = descreverEnvio([{ numero: '5513997039614', ok: true }], 'pedido')
+  confere('pedido: nota propria', certo.nota.startsWith('📲') && !certo.nota.includes('urgência'), certo.nota)
+  const semModelo = descreverEnvio([{ numero: '5513997039614', ok: false, erro: '(#132001) Template name does not exist in the translation' }], 'pedido')
+  confere('pedido: falha grita sem mandar ligar', semModelo.falhou && semModelo.nota.includes('pedido_equipe ainda não foi aprovado') && semModelo.nota.includes('Responda a família por aqui') && !semModelo.nota.includes('telefone'), semModelo.nota)
+}
+const pedidoDaFamilia = { ...pedido, tipo: 'pedido', assunto: 'pergunta para o Dr. Marcello', texto: 'pode dar dipirona?' }
+{
+  const banco = ajustesComNumeros()
+  const enviados = []
+  const meta = async (url, init) => {
+    enviados.push(JSON.parse(init.body))
+    return { ok: true, status: 200, json: async () => ({ messages: [{ id: `wamid.${enviados.length}` }] }) }
+  }
+  const r = await enviarAlertaDeUrgencia(banco, pedidoDaFamilia, meta)
+  const registrado = banco.db.alertas_de_urgencia[0]
+  confere('pedido: sai para os dois', r.length === 2 && r.every((e) => e.ok))
+  confere('pedido: modelo pedido_equipe', enviados[0]?.template?.name === 'pedido_equipe' && enviados[0].template.components[0].parameters.length === 5, JSON.stringify(enviados[0]))
+  const botoes = (enviados[0]?.template?.components ?? []).filter((c) => c.type === 'button')
+  confere('pedido: botao Eu respondo com o id', botoes.length === 1 && botoes[0].parameters[0].payload === `URG:${registrado?.id}:responde`, JSON.stringify(botoes))
+  confere('pedido: nota e evento proprios', banco.db.conversation_notes?.[0]?.texto.startsWith('📲') && banco.db.whatsapp_bot_events?.[0]?.evento === 'pedido_equipe', JSON.stringify(banco.db.whatsapp_bot_events))
+}
+{
+  // Modelo ainda em analise: vai como texto com o mesmo botao.
+  const banco = ajustesComNumeros()
+  const enviados = []
+  const meta = async (url, init) => {
+    const corpo = JSON.parse(init.body)
+    enviados.push(corpo)
+    if (corpo.type === 'template') return { ok: false, status: 404, json: async () => ({ error: { code: 132001, message: 'Template name does not exist in the translation' } }) }
+    return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'wamid.t' }] }) }
+  }
+  const r = await enviarAlertaDeUrgencia(banco, pedidoDaFamilia, meta)
+  const id = banco.db.alertas_de_urgencia[0]?.id
+  confere('pedido sem modelo: cai no texto e o resto vai direto', JSON.stringify(enviados.map((e) => e.type)) === JSON.stringify(['template', 'interactive', 'interactive']) && r.every((e) => e.ok), JSON.stringify(enviados.map((e) => e.type)))
+  const texto = enviados[1]?.interactive?.body?.text ?? ''
+  confere('pedido sem modelo: o texto do modelo, sem a linha do botao', texto.includes('Assunto: pergunta para o Dr. Marcello') && !texto.includes('[Eu respondo]'), texto)
+  confere('pedido sem modelo: botao Eu respondo', enviados[1]?.interactive?.action?.buttons?.[0]?.reply?.id === `URG:${id}:responde`, JSON.stringify(enviados[1]?.interactive?.action))
+}
+{
+  // Seguimento: so sai se o pedido anterior ja teve resposta.
+  const agora = pedido.agora
+  const comPendente = (veredito) => {
+    const banco = ajustesComNumeros()
+    banco.db.alertas_de_urgencia.push({ id: 'a-1', clinic_id: 'c1', conversa_whatsapp: 'conv-1', veredito, criado_em: new Date(agora.getTime() - 3600e3).toISOString(), mensagens: [] })
+    return banco
+  }
+  let chamadas = 0
+  const meta = async () => { chamadas++; return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'w' }] }) } }
+  const r1 = await enviarAlertaDeUrgencia(comPendente(null), { ...pedidoDaFamilia, seguimento: true }, meta)
+  confere('seguimento: pedido sem resposta segura', r1.length === 0 && chamadas === 0, String(chamadas))
+  const r2 = await enviarAlertaDeUrgencia(comPendente('responde'), { ...pedidoDaFamilia, seguimento: true }, meta)
+  confere('seguimento: depois da resposta, a mensagem seguinte vai', r2.length === 2, String(r2.length))
+  chamadas = 0
+  const r3 = await enviarAlertaDeUrgencia(comPendente(null), pedidoDaFamilia, meta)
+  confere('seguimento: pedido novo vai mesmo com outro aberto', r3.length === 2 && chamadas === 2)
+  const velho = ajustesComNumeros()
+  velho.db.alertas_de_urgencia.push({ id: 'a-2', clinic_id: 'c1', conversa_whatsapp: 'conv-1', veredito: null, criado_em: new Date(agora.getTime() - 7 * 3600e3).toISOString(), mensagens: [] })
+  const r4 = await enviarAlertaDeUrgencia(velho, { ...pedidoDaFamilia, seguimento: true }, meta)
+  confere('seguimento: pedido de mais de 6 h nao segura', r4.length === 2)
+  const r5 = await enviarAlertaDeUrgencia(bancoFalso({ clinic_settings: ajustesComNumeros().db.clinic_settings }, { semTabela: ['alertas_de_urgencia'] }), { ...pedidoDaFamilia, seguimento: true }, meta)
+  confere('seguimento: sem a tabela nao manda (seria uma por mensagem)', r5.length === 0)
 }
 
 console.log(`alerta de urgencia: ${ok} verificacoes ok`)

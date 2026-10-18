@@ -287,7 +287,9 @@ export default function AtendenteComIA({ clinicId }: { clinicId: string | null }
             </div>
             <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
               Usa o modelo <strong>alerta_urgencia</strong>, que precisa estar aprovado na Meta. Se o alerta não sair, a
-              conversa mostra um aviso para ligar para o médico.
+              conversa mostra um aviso para ligar para o médico. Os mesmos números recebem os pedidos para a equipe
+              (receita, exame, pergunta para o médico) pelo modelo <strong>pedido_equipe</strong>, e o botão{' '}
+              <strong>Mandar para o celular</strong> de cada conversa. A resposta de lá volta para a família.
             </p>
           </div>
         ) : (

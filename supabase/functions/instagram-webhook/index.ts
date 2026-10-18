@@ -47,7 +47,7 @@ import { atenderComAssistente, claudePelaApi, lerModo, type ModoDoAssistente, ty
 import { quemAtende } from '../_shared/quem-atende.ts'
 import { EXPEDIENTE } from '../_shared/expediente.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
-import { deveAlertar, enviarAlertaDeUrgencia } from '../_shared/alerta-de-urgencia.ts'
+import { assuntoDoPedido, deveAlertar, deveEncaminhar, enviarAlertaDeUrgencia } from '../_shared/alerta-de-urgencia.ts'
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined
 
@@ -407,6 +407,25 @@ async function tratarMensagem(admin: Admin, conta: Conta, ev: Record<string, any
             canal: 'Instagram',
             quem: conversa!.username ? `@${conversa!.username}` : 'Alguém no direct',
             texto: texto || 'Mensagem no direct',
+            agora: new Date(),
+            conversaInstagram: conversaId,
+          }),
+        )
+      }
+      // O pedido que nao e urgencia, nos mesmos celulares (18/10/2026). Ver
+      // deveEncaminhar em _shared/alerta-de-urgencia.ts.
+      const encaminhar = deveEncaminhar({ atencaoAntes: conversa!.precisa_equipe, motivoAntes: conversa!.motivo ?? null, motivoAgora: resposta.atencao })
+      if (encaminhar) {
+        const resumoDaIA = /Resumo da IA para a equipe: (?!\(sem resumo\))(.+)/s.exec(nota ?? '')?.[1]
+        emSegundoPlano(
+          enviarAlertaDeUrgencia(admin, {
+            tipo: 'pedido',
+            seguimento: encaminhar === 'seguimento',
+            assunto: assuntoDoPedido(resposta.atencao, null),
+            clinicId: conta.clinic_id,
+            canal: 'Instagram',
+            quem: conversa!.username ? `@${conversa!.username}` : 'Alguém no direct',
+            texto: resumoDaIA || texto || 'Mensagem no direct',
             agora: new Date(),
             conversaInstagram: conversaId,
           }),

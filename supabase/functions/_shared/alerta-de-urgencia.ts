@@ -1,4 +1,6 @@
 import { semDadosPessoais } from './assistente.ts'
+import { montarConteudo } from './conteudo.ts'
+import { textoDoModelo } from './modelos.ts'
 import { paraEnvio } from './telefone-br.ts'
 import { chaveDoWhatsApp } from './whatsapp-teste.ts'
 
@@ -30,6 +32,54 @@ export const MODELO_DO_ALERTA = 'alerta_urgencia'
 // Com os botoes de resposta (17/10/2026, ver resposta-ao-alerta.ts). Enquanto a
 // Meta nao aprova, o envio cai sozinho no modelo sem botoes.
 export const MODELO_COM_BOTOES = 'alerta_urgencia_v2'
+
+/**
+ * Pedido que nao e urgencia, nos mesmos celulares (18/10/2026).
+ *
+ * Pedido do Edu: "quando for algo que precisa ele ou eu, ja pode ir para o
+ * wpp, pq nao vamos estar com secretaria agora". Os casos sao os mesmos que
+ * ja tocavam o app (aviso-da-equipe.ts), menos a urgencia, que tem o alerta
+ * proprio. A resposta volta para a familia pelo mesmo caminho do alerta
+ * (resposta-ao-alerta.ts): texto em cima da mensagem, ou o botao "Eu respondo".
+ */
+export const MODELO_DO_PEDIDO = 'pedido_equipe'
+export const MOTIVOS_QUE_ENCAMINHAM = ['atendente', 'documento', 'farmacia', 'nao_suportada'] as const
+export type TipoDoAviso = 'urgencia' | 'pedido'
+
+/**
+ * Encaminhar agora? 'novo' quando a conversa entra na fila (ou troca de
+ * pedido); 'seguimento' quando ela ja estava na fila e a familia escreveu de
+ * novo. O seguimento so sai se nao houver encaminhamento sem resposta nas
+ * ultimas 6 horas (ver pedidoEmAberto): assim o medico recebe a mensagem
+ * seguinte depois de responder, e nao uma por mensagem enquanto nao olhou.
+ */
+export function deveEncaminhar(e: { atencaoAntes: boolean; motivoAntes: string | null; motivoAgora: string | null }): 'novo' | 'seguimento' | null {
+  if (!e.motivoAgora || !(MOTIVOS_QUE_ENCAMINHAM as readonly string[]).includes(e.motivoAgora)) return null
+  return e.atencaoAntes && e.motivoAntes === e.motivoAgora ? 'seguimento' : 'novo'
+}
+
+/**
+ * O assunto, numa linha. O motivo que a IA deu ao chamar a equipe diz mais do
+ * que a etiqueta da conversa ("pergunta para o Dr." e nao "quer falar com a
+ * equipe"), entao vem primeiro.
+ */
+export function assuntoDoPedido(motivo: string | null, motivoDaIA: string | null, quemAtende = 'o médico'): string {
+  const daIA: Record<string, string> = {
+    medico: `pergunta para ${quemAtende}`,
+    documento: 'receita ou pedido de exame',
+    financeiro: 'valores ou pagamento',
+    excecao: 'pedido fora do padrão',
+    sem_informacao: 'pergunta que o robô não soube responder',
+    pessoa: 'quer falar com alguém da equipe',
+  }
+  const doRobo: Record<string, string> = {
+    atendente: 'quer falar com a equipe',
+    documento: '2ª via de receita ou pedido de exame',
+    farmacia: 'farmácia pediu correção de receita',
+    nao_suportada: 'tentou falar com a clínica (talvez uma ligação)',
+  }
+  return (motivoDaIA && daIA[motivoDaIA]) || (motivo && doRobo[motivo]) || 'pedido para a equipe'
+}
 
 export type Veredito = 'urgente' | 'aguardar' | 'responde'
 
@@ -98,6 +148,12 @@ export function parametrosDoAlerta(e: { quem: string; canal: 'WhatsApp' | 'Insta
   return [parametro(e.quem, 60), e.canal, hora, parametro(semDadosPessoais(e.texto), 300)]
 }
 
+/** Os cinco do pedido: os quatro do alerta, com o assunto antes do trecho. */
+export function parametrosDoPedido(e: { quem: string; canal: 'WhatsApp' | 'Instagram'; texto: string; agora: Date; assunto?: string }): string[] {
+  const [quem, canal, hora, trecho] = parametrosDoAlerta(e)
+  return [quem, canal, hora, parametro(e.assunto ?? 'pedido para a equipe', 80), trecho]
+}
+
 export type EnvioDoAlerta = { numero: string; ok: boolean; erro?: string }
 
 const final = (numero: string) => `final ${numero.slice(-4)}`
@@ -106,24 +162,31 @@ const final = (numero: string) => `final ${numero.slice(-4)}`
  * O que fica registrado: o detalhe curto do evento (ate 120 caracteres) e a
  * nota que a equipe le na conversa.
  */
-export function descreverEnvio(envios: EnvioDoAlerta[]): { detalhe: string; nota: string; falhou: boolean } {
+export function descreverEnvio(envios: EnvioDoAlerta[], tipo: TipoDoAviso = 'urgencia'): { detalhe: string; nota: string; falhou: boolean } {
   const certos = envios.filter((e) => e.ok)
   const errados = envios.filter((e) => !e.ok)
+  const pedido = tipo === 'pedido'
   if (!errados.length) {
+    const quantos = envios.length === 1 ? '1 número' : `${envios.length} números`
+    const finais = certos.map((e) => final(e.numero)).join(', ')
     return {
       detalhe: `enviado ${certos.length}/${envios.length}`,
-      nota: `🚨 Alerta de urgência enviado no WhatsApp para ${envios.length === 1 ? '1 número' : `${envios.length} números`} (${certos.map((e) => final(e.numero)).join(', ')}).`,
+      nota: pedido
+        ? `📲 Pedido encaminhado no WhatsApp para ${quantos} (${finais}). A resposta de lá volta para a família.`
+        : `🚨 Alerta de urgência enviado no WhatsApp para ${quantos} (${finais}).`,
       falhou: false,
     }
   }
   const motivo = errados[0].erro ?? 'sem detalhe'
   const naoAprovado = /132001|template name does not exist|does not exist in/i.test(motivo)
-  const explicacao = naoAprovado ? 'o modelo alerta_urgencia ainda não foi aprovado na Meta' : motivo
+  // Pedido que nao e urgencia: a fila da Central continua sendo o caminho, e
+  // nao precisa de telefonema.
+  const explicacao = naoAprovado ? `o modelo ${pedido ? MODELO_DO_PEDIDO : 'alerta_urgencia'} ainda não foi aprovado na Meta` : motivo
   return {
     detalhe: `falhou ${errados.length}/${envios.length}: ${motivo}`.slice(0, 120),
     nota:
-      `⚠️ O alerta de urgência no WhatsApp NÃO chegou a ${errados.map((e) => final(e.numero)).join(', ')}: ${explicacao}. ` +
-      'Avise o Dr. Marcello por telefone.' +
+      `⚠️ ${pedido ? 'O encaminhamento' : 'O alerta de urgência'} no WhatsApp NÃO chegou a ${errados.map((e) => final(e.numero)).join(', ')}: ${explicacao}. ` +
+      (pedido ? 'Responda a família por aqui.' : 'Avise o Dr. Marcello por telefone.') +
       (certos.length ? ` Chegou a ${certos.map((e) => final(e.numero)).join(', ')}.` : ''),
     falhou: true,
   }
@@ -179,6 +242,40 @@ export type PedidoDeAlerta = {
   conversaInstagram?: string
   /** Para o teste da tela: manda mesmo sem conversa. */
   numeros?: string[]
+  /** 'pedido' (18/10/2026): o que nao e urgencia, pelo modelo pedido_equipe. */
+  tipo?: TipoDoAviso
+  /** A linha "Assunto" do pedido (ver assuntoDoPedido). */
+  assunto?: string
+  /** Mensagem seguinte na mesma fila: so sai se nao houver pedido sem resposta. */
+  seguimento?: boolean
+}
+
+const JANELA_DO_PEDIDO_MS = 6 * 3600 * 1000
+
+/**
+ * Ha encaminhamento (ou alerta) desta conversa sem resposta nas ultimas 6
+ * horas? Na duvida (tabela fora, erro), diz que sim: o seguimento e so o
+ * reforco, e o erro de leitura viraria uma mensagem por mensagem da familia.
+ */
+export async function pedidoEmAberto(admin: Admin, p: Pick<PedidoDeAlerta, 'clinicId' | 'conversaWhatsApp' | 'conversaInstagram' | 'agora'>): Promise<boolean> {
+  try {
+    const coluna = p.conversaWhatsApp ? 'conversa_whatsapp' : 'conversa_instagram'
+    const conversa = p.conversaWhatsApp ?? p.conversaInstagram
+    if (!conversa) return true
+    const { data, error } = await admin
+      .from('alertas_de_urgencia')
+      .select('id')
+      .eq('clinic_id', p.clinicId)
+      .eq(coluna, conversa)
+      .is('veredito', null)
+      .gte('criado_em', new Date(p.agora.getTime() - JANELA_DO_PEDIDO_MS).toISOString())
+      .limit(1)
+    if (error) throw error
+    return Boolean(data?.length)
+  } catch (erro) {
+    console.error('Encaminhamento: nao li alertas_de_urgencia; seguimento nao vai', erro)
+    return true
+  }
 }
 
 /**
@@ -187,11 +284,13 @@ export type PedidoDeAlerta = {
  */
 export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, buscar: typeof fetch = fetch): Promise<EnvioDoAlerta[]> {
   try {
+    const pedido = p.tipo === 'pedido'
     const numeros = p.numeros ?? (await lerNumeros(admin, p.clinicId))
     if (!numeros.length) {
       console.info('Alerta de urgencia: nenhum numero cadastrado nesta clinica')
       return []
     }
+    if (pedido && p.seguimento && (await pedidoEmAberto(admin, p))) return []
 
     const { data: ajustes, error: erroDosAjustes } = await admin
       .from('clinic_settings')
@@ -203,7 +302,7 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
     const token = chaveDoWhatsApp(numeroDoRobo)
     const versao = (typeof Deno !== 'undefined' ? Deno.env.get('META_GRAPH_VERSION')?.trim() : '') || 'v25.0'
     const idioma = (ajustes as { whatsapp_template_language?: string } | null)?.whatsapp_template_language || 'pt_BR'
-    const parametros = parametrosDoAlerta(p)
+    const parametros = pedido ? parametrosDoPedido(p) : parametrosDoAlerta(p)
     const corpoDoModelo = { type: 'body', parameters: parametros.map((text) => ({ type: 'text', text })) }
 
     // O alerta fica registrado antes de sair: e o id dele que vai nos botoes.
@@ -211,7 +310,8 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
     const alertaId = await registrarAlerta(admin, p)
     // Com botoes so quando ha alerta registrado; se a Meta disser que o modelo
     // com botoes nao existe (ainda em analise), o resto vai pelo sem botoes.
-    let comBotoes = Boolean(alertaId)
+    // No pedido, "com botoes" e o modelo; sem ele, o texto (ver textoDoPedido).
+    let comBotoes = pedido || Boolean(alertaId)
 
     const envios: EnvioDoAlerta[] = []
     const mensagens: string[] = []
@@ -220,6 +320,47 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
         envios.push({ numero, ok: false, erro: 'WhatsApp da clínica sem número ou token no servidor' })
         continue
       }
+      // O pedido sem o modelo aprovado vai como texto, com o mesmo botao: chega
+      // a quem escreveu para o numero da clinica nas ultimas 24 horas (o medico
+      // que acabou de responder um alerta, o Edu testando). Fora disso, a Meta
+      // recusa e a nota diz que nao chegou.
+      const textoDoPedido = () =>
+        montarConteudo(
+          // Sem a linha "[Eu respondo]" do registro: o botao vai de verdade.
+          (textoDoModelo(MODELO_DO_PEDIDO, parametros) ?? parametros.join(' · ')).replace(/\n\[[^\]\n]*\]$/, ''),
+          alertaId ? { botoes: [{ id: payloadDoVeredito(alertaId, 'responde'), titulo: 'Eu respondo' }] } : undefined,
+        )
+      const doPedido = () => ({
+        type: 'template',
+        template: {
+          name: MODELO_DO_PEDIDO,
+          language: { code: idioma },
+          components: [
+            corpoDoModelo,
+            ...(alertaId
+              ? [{ type: 'button', sub_type: 'quick_reply', index: '0', parameters: [{ type: 'payload', payload: payloadDoVeredito(alertaId, 'responde') }] }]
+              : []),
+          ],
+        },
+      })
+      const doAlerta = (botoes: boolean) => ({
+        type: 'template',
+        template: botoes
+          ? {
+              name: MODELO_COM_BOTOES,
+              language: { code: idioma },
+              components: [
+                corpoDoModelo,
+                ...BOTOES_DO_ALERTA.map((b, i) => ({
+                  type: 'button',
+                  sub_type: 'quick_reply',
+                  index: String(i),
+                  parameters: [{ type: 'payload', payload: payloadDoVeredito(alertaId!, b.veredito) }],
+                })),
+              ],
+            }
+          : { name: MODELO_DO_ALERTA, language: { code: idioma }, components: [corpoDoModelo] },
+      })
       const enviar = async (botoes: boolean) => {
         const resposta = await buscar(`https://graph.facebook.com/${versao}/${numeroDoRobo}/messages`, {
           method: 'POST',
@@ -228,22 +369,7 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
             to: numero,
-            type: 'template',
-            template: botoes
-              ? {
-                  name: MODELO_COM_BOTOES,
-                  language: { code: idioma },
-                  components: [
-                    corpoDoModelo,
-                    ...BOTOES_DO_ALERTA.map((b, i) => ({
-                      type: 'button',
-                      sub_type: 'quick_reply',
-                      index: String(i),
-                      parameters: [{ type: 'payload', payload: payloadDoVeredito(alertaId!, b.veredito) }],
-                    })),
-                  ],
-                }
-              : { name: MODELO_DO_ALERTA, language: { code: idioma }, components: [corpoDoModelo] },
+            ...(pedido ? (botoes ? doPedido() : textoDoPedido()) : doAlerta(botoes)),
           }),
         })
         return { ok: resposta.ok, status: resposta.status, corpo: await resposta.json().catch(() => ({})) }
@@ -251,7 +377,7 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
       try {
         let r = await enviar(comBotoes)
         if (!r.ok && comBotoes && modeloInexistente(r.corpo)) {
-          console.warn(`Alerta de urgencia: ${MODELO_COM_BOTOES} ainda nao aprovado; vai o modelo sem botoes`)
+          console.warn(pedido ? `Encaminhamento: ${MODELO_DO_PEDIDO} ainda nao aprovado; vai como texto` : `Alerta de urgencia: ${MODELO_COM_BOTOES} ainda nao aprovado; vai o modelo sem botoes`)
           comBotoes = false
           r = await enviar(false)
         }
@@ -276,7 +402,7 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
       }
     }
 
-    const { detalhe, nota, falhou } = descreverEnvio(envios)
+    const { detalhe, nota, falhou } = descreverEnvio(envios, pedido ? 'pedido' : 'urgencia')
     if (falhou) console.error('Alerta de urgencia nao saiu para todos', detalhe)
 
     // Registro: cada parte no seu try, porque perder a nota nao pode custar o
@@ -293,7 +419,7 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
       try {
         const { error } = await admin
           .from('whatsapp_bot_events')
-          .insert({ clinic_id: p.clinicId, conversation_id: p.conversaWhatsApp, evento: 'alerta_urgencia', detalhe })
+          .insert({ clinic_id: p.clinicId, conversation_id: p.conversaWhatsApp, evento: pedido ? 'pedido_equipe' : 'alerta_urgencia', detalhe })
         if (error) console.error('Alerta de urgencia: evento nao gravado', error)
       } catch (erro) {
         console.error('Alerta de urgencia: evento nao gravado', erro)

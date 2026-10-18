@@ -32,7 +32,7 @@ import {
 } from '../_shared/mensagem-recebida.ts'
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 import { montarAviso, quemEscreveu } from '../_shared/aviso-da-equipe.ts'
-import { deveAlertar, enviarAlertaDeUrgencia, lerNumeros as lerNumerosDoAlerta } from '../_shared/alerta-de-urgencia.ts'
+import { assuntoDoPedido, deveAlertar, deveEncaminhar, enviarAlertaDeUrgencia, lerNumeros as lerNumerosDoAlerta } from '../_shared/alerta-de-urgencia.ts'
 import { tratarRespostaDaEquipe, whatsAppPelaApi } from '../_shared/resposta-ao-alerta.ts'
 import { enviarDirect } from '../_shared/instagram-api.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
@@ -1129,6 +1129,7 @@ Deno.serve(async (req) => {
             let resultado: Resultado | null
             let daIA = false
             let eventosDaIA: { evento: string; detalhe?: string }[] = []
+            let notaDaIA: string | undefined
             if (modoIA === 'ligado') {
               const desfecho = await atenderComAssistente({
                 modo: 'ligado',
@@ -1141,6 +1142,7 @@ Deno.serve(async (req) => {
               resultado = desfecho.resultado
               daIA = desfecho.origem === 'ia'
               eventosDaIA = desfecho.eventos
+              notaDaIA = desfecho.nota
               // O resumo que a IA deixa ao chamar a equipe vai como nota interna
               // (16/10/2026): ate aqui ele ia no texto da familia. Falhar aqui
               // custa a nota, nunca a resposta - mas grita no log.
@@ -1403,6 +1405,36 @@ Deno.serve(async (req) => {
                 if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(alerta)
                 else await alerta
               }
+              // O pedido que nao e urgencia, nos mesmos celulares (18/10/2026):
+              // sem secretaria, quem responde e o medico ou o Edu. O trecho e o
+              // resumo da IA quando ha um ("a mae pergunta se pode dar
+              // dipirona"), que diz mais do que a ultima mensagem ("e ai?").
+              const encaminhar = deveEncaminhar({
+                atencaoAntes: Boolean(conversaAnterior?.needs_attention),
+                motivoAntes: (conversaAnterior?.attention_reason as string | null) ?? null,
+                motivoAgora,
+              })
+              if (encaminhar) {
+                const motivoDaIA = /^equipe:(\w+)/.exec(eventosDaIA.find((e) => e.evento === 'ia_respondeu')?.detalhe ?? '')?.[1] ?? null
+                const resumoDaIA = /Resumo da IA para a equipe: (?!\(sem resumo\))(.+)/s.exec(notaDaIA ?? '')?.[1]
+                const pedido = enviarAlertaDeUrgencia(admin, {
+                  tipo: 'pedido',
+                  seguimento: encaminhar === 'seguimento',
+                  assunto: assuntoDoPedido(motivoAgora, motivoDaIA, quemAtende(clinicId).o),
+                  clinicId,
+                  canal: 'WhatsApp',
+                  quem: quemEscreveu({
+                    pacientes,
+                    nomeDoPerfil: nomeDoPerfil || String(conversaAnterior?.profile_name ?? ''),
+                    telefone: waId,
+                  }),
+                  texto: resumoDaIA || body,
+                  agora: new Date(),
+                  conversaWhatsApp: conversation.id,
+                })
+                if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(pedido)
+                else await pedido
+              }
             } catch (erro) {
               console.warn('Notificacao no celular: nao consegui montar o aviso', erro)
             }
@@ -1447,6 +1479,31 @@ Deno.serve(async (req) => {
                   const envio = avisarEquipe(admin, clinicId, aviso)
                   if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(envio)
                   else await envio
+                }
+                // Tambem nos celulares (18/10/2026): so a equipe responde isto.
+                const encaminhar = deveEncaminhar({
+                  atencaoAntes: Boolean(conversaAnterior?.needs_attention),
+                  motivoAntes: (conversaAnterior?.attention_reason as string | null) ?? null,
+                  motivoAgora: motivo,
+                })
+                if (encaminhar) {
+                  const pedido = enviarAlertaDeUrgencia(admin, {
+                    tipo: 'pedido',
+                    seguimento: encaminhar === 'seguimento',
+                    assunto: assuntoDoPedido(motivo, null),
+                    clinicId,
+                    canal: 'WhatsApp',
+                    quem: quemEscreveu({
+                      pacientes,
+                      nomeDoPerfil: nomeDoPerfil || String(conversaAnterior?.profile_name ?? ''),
+                      telefone: waId,
+                    }),
+                    texto: 'Tentou falar (talvez uma ligação pelo WhatsApp)',
+                    agora: new Date(),
+                    conversaWhatsApp: conversation.id,
+                  })
+                  if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(pedido)
+                  else await pedido
                 }
               }
               const { error: erroDoEvento } = await admin.from('whatsapp_bot_events').insert({

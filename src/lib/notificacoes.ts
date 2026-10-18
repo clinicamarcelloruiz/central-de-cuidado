@@ -191,6 +191,17 @@ export async function testarAlertaUrgencia(clinicId: string): Promise<{ nota: st
   return { nota: r?.nota ?? 'Sem resposta do servidor.', falhou: Boolean(r?.falhou) }
 }
 
+/**
+ * A conversa, como pedido, no WhatsApp dos numeros do alerta (18/10/2026). A
+ * resposta de la volta para a familia; o resultado vira nota na conversa.
+ */
+export async function mandarParaOCelular(clinicId: string, conversaId: string): Promise<{ nota: string; falhou: boolean }> {
+  const { data, error } = await supabase.functions.invoke('notificar-equipe', { body: { acao: 'encaminhar', clinicId, conversaId } })
+  if (error) throw new Error(await erroDaFuncao(error))
+  const r = data as { nota?: string; falhou?: boolean }
+  return { nota: r?.nota ?? 'Sem resposta do servidor.', falhou: Boolean(r?.falhou) }
+}
+
 export async function testarNotificacao(clinicId: string): Promise<{ enviados: number; falhas: string[] }> {
   const { data, error } = await supabase.functions.invoke('notificar-equipe', { body: { acao: 'teste', clinicId } })
   if (error) throw new Error(await erroDaFuncao(error))
