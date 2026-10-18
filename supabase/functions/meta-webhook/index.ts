@@ -3,6 +3,7 @@ import { adminClient, digits, sha256HmacHex, safeEqual } from '../_shared/whatsa
 import {
   colherEventos,
   entregarParaEquipe,
+  etiquetaQueFica,
   type Estado,
   horariosEmTexto,
   type Resultado,
@@ -1240,7 +1241,11 @@ Deno.serve(async (req) => {
                 // trocou urgencia por atendente com a crianca ainda vomitando, e
                 // a conversa desceu na lista da recepcao. Quem baixa e a equipe.
                 const antes = conversaAnterior as unknown as { needs_attention?: boolean | null; attention_reason?: string | null } | null
-                const etiqueta = antes?.needs_attention && antes.attention_reason === 'urgencia' ? 'urgencia' : resultado.atencao
+                // Pendencia com a equipe tambem nao desce para etiqueta so
+                // informativa (rodada 10 do painel, IA14: o pedido do irmao estava
+                // com a equipe, a mae confirmou o cancelamento e a etiqueta virou
+                // "cancelou sozinho" - o pedido sumiu da fila). Ver etiquetaQueFica.
+                const etiqueta = etiquetaQueFica(antes, resultado.atencao)
                 const { error: erroDaBandeira } = await admin
                   .from('whatsapp_conversations')
                   .update({ needs_attention: true, attention_reason: etiqueta })

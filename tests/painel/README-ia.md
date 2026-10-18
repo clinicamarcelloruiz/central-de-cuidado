@@ -356,6 +356,104 @@ As duas críticas, as duas de risco de vida que a regra não reconheceu:
   a pergunta que vem junto da troca é respondida; pagamento só como está
   escrito; feriado é da equipe.
 
+### Rodada 10 (18/10/2026, com o código publicado em c72335c)
+
+| Rodada | Conversas | Passaram | Nota média | pass^2 | Falhas crítica / alta / média |
+|---|---|---|---|---|---|
+| 10 (todos) | 48 | 23 | 6,96 | 6 de 24 | 2 / 12 / 27 |
+
+Passaram nas duas versões: IA07, IA08, IA13, IA17, IA19 e IA23. Confirmado com a
+IA de verdade: foto com "engoliu uma dessa", "gomitou" e "pó de café", troca de
+horário na ficha pelo robô, "segunda que vem", data por extenso vencendo o dia,
+correção do nome, feriado com a equipe, "urgente" de papel sem alerta.
+
+As duas críticas: na IA02-v1 a família decidiu esperar a consulta depois do
+vômito em borra de café, e o texto da IA, embaixo do pronto-socorro, aceitou
+("se vomitar de novo... descansem bem"); na IA05-v2, de volta do pronto-socorro,
+"mole demais, recusando o peito" ouviu a consulta confirmada e o pronto-socorro
+condicional.
+
+Uma regressão nossa, no ar desde c72335c: o horário que a IA manda no meio da
+ficha trocava a consulta e depois voltava ao robô como resposta ("09:20" lido
+como dia 20; duas consultas, uma sem paciente).
+
+#### Correções da rodada 10 (cada uma com teste e prova de mutação)
+
+- **Regressão:** o horário não volta ao robô como resposta do passo, e hora
+  com minutos nunca é lida como dia.
+- **Risco de vida:** sai do texto da IA tudo o que aceita esperar
+  (condicional, "qualquer coisa", "descansem", a consulta como plano); quando a
+  família diz que vai esperar, abre com "Não espere a consulta"; com a família
+  ainda em casa, a agenda não abre (indo ou de volta do pronto-socorro, abre);
+  foto nesse caso leva o pronto-socorro firme; a mesma trava vale quando a IA
+  chama a equipe.
+- **Piora:** sai a frase que confirma a consulta e toda frase condicional; o
+  "agora" tem de estar na frase do pronto-socorro; "mole demais" e "recusando o
+  peito" são sinais; "a consulta continua confirmada" não é piora; "avisei de
+  novo" sem piora sai.
+- **Agenda:** data pedida além das 8 da lista ("18 de novembro") é procurada na
+  agenda inteira; hora cheia que não existe ("pra 11h") oferece os dois
+  vizinhos; "19 e 20" é 19:20; "também" com consulta marcada é "marcar mais
+  uma"; irmão sem cadastro também pelo que a família disse.
+- **Nome:** "o nome dele é X" vence o relato; "nasc"; "o responsável sou eu".
+- **IA:** parágrafo com duas frases de rascunho sai inteiro; "Pelo contexto",
+  "Ela pediu", "na tela", "piora contada"; frase que começa com "A família..."
+  ou "A mãe..."; "o combinado é a equipe te mandar"; "R." no endereço não parte
+  a frase; texto vazio na ficha não vai ao robô.
+- **Etiqueta:** pendência com a equipe não desce para "cancelou sozinho".
+
+### Rodada 11 (18/10/2026, com as correções da rodada 10, ainda não publicadas)
+
+| Rodada | Conversas | Passaram | Nota média | pass^2 | Falhas crítica / alta / média |
+|---|---|---|---|---|---|
+| 11 (todos) | 48 | 28 | 7,52 | 10 de 24 | 0 / 6 / 24 |
+
+A melhor rodada desde que os juízes ficaram mais exigentes (rodada 5: 7,81 com
+12 de 24, mas com juízes mais brandos). Passaram nas duas versões: IA04, IA05,
+IA06, IA07, IA10, IA13, IA17, IA19, IA23 e IA24. Nenhuma crítica. Confirmado
+com a IA de verdade: a família que decide esperar ouve o pronto-socorro agora,
+sem condicional; a agenda fica fechada com a criança em casa no risco de vida;
+a piora de volta do pronto-socorro pelos dois caminhos; a data além da lista;
+a troca de horário pedida no meio da ficha; o irmão sem cadastro; pagamento só
+como está escrito.
+
+As seis altas: "ele não tem CPF" no passo do nome lido como recusa (IA15-v1);
+a IA trocou a consulta para 18:00 quando a mãe pediu "7 da noite" (IA15-v2);
+sábado respondido só para Santos (IA20-v2); bateria e "engoliu" a 98 letras
+de distância, a regra calou e a agenda abriu (IA01-v1); "minha mãe chegou p
+ficar c a menina" gravado como responsável (IA01-v1); a volta do
+pronto-socorro contada por "deram soro" não abria a agenda (IA02-v2).
+
+#### Correções da rodada 11 (cada uma com teste e prova de mutação)
+
+- **Ficha:** o "não tem" de outro campo não pula este; "n tem msm?" é
+  pergunta; "nasceu dia 12 de maio" não é pedido; "nome dele X" sem o "é"; "o
+  responsável sou eu X" sem vírgula; "minha mãe" é outra pessoa; o emoji separa
+  o nome; a hora que já era dela ("deixa 18h msm") não é troca, e o dado que
+  veio junto segue.
+- **Hora:** por extenso ("quatro e quarenta", "sete e vinte da noite", "7 da
+  noite", "pras 4"); na ficha, só a hora que a família disse troca a consulta,
+  e a hora que não existe vai como ela disse, para o robô oferecer os vizinhos.
+- **Risco e piora:** a janela entre o objeto e o "engoliu" vai a 160 letras; o
+  pronto-socorro agora já dito por nós, com a urgência aberta, também fecha a
+  agenda; a volta contada pelo que fizeram lá ("deram soro", "fui no ps") e o
+  "vamo agr" contam como ida; "se vomitar de novo" e "continua vomitando
+  igual" não são piora; "molenga", "n pega o peito", "mamando mal" são sinais.
+- **IA:** o menu aberto sem resposta para a pergunta volta para a IA; o texto
+  solto junto de outra ferramenta na pergunta junto do passo não sai; mais
+  rascunhos ("Devo...", "O usuário", "Preciso consultar a agenda", "seria
+  redundante", "risco de vida descrito"); parágrafo que começa pela família sai
+  inteiro quando há outro; conta de valores sai; "aqui mesmo nesta conversa"
+  fica; "a gente deixa marcado" e o "Combinado!" a um envio saem.
+- **Etiqueta e agenda:** a chamada da equipe vence o "cancelou sozinho" da
+  mesma resposta; "tb" é marcar mais uma; "com ph" é correção que vai para a
+  equipe; instruções novas para o sábado (todas as unidades), a hora falada e o
+  resumo da equipe sem pedido já atendido.
+
+Ficou para depois (médias, mais trabalho): a ficha mandada antes de marcar
+(quarta rodada seguida); pedido de marcar o irmão junto do "sim, cancelar" vai
+para a equipe; a pergunta junto do passo não recebe a agenda que a IA já viu.
+
 ### Decisões que ficam com o Dr. Marcello
 
 - Gravar na consulta a queixa que a família já contou (refluxo, intestino
@@ -369,6 +467,9 @@ As duas críticas, as duas de risco de vida que a regra não reconheceu:
   assim que ele quer?
 - Telemedicina aos sábados, e remarcar sem pedir confirmação quando a família
   já deu dia e hora.
+- Risco de vida e a família recusando o pronto-socorro: desde a rodada 10 a
+  agenda não abre ("a consulta não substitui essa avaliação"). É assim que ele
+  quer, ou marca e insiste no pronto-socorro?
 
 Decidido pelo Edu (18/10/2026): a ficha sem o nome da criança continua criando
 o cadastro com o nome do contato do WhatsApp (quase sempre a mãe; rodada 8,

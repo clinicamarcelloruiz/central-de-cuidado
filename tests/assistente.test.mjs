@@ -703,10 +703,18 @@ function roboDoAgendamento() {
 confere('assunto de pergunta sem "?" junto do nome', perguntaLateral('pedro henrique lima. tem estacionamento la'))
 confere('nome sozinho nao e pergunta', !perguntaLateral('Pedro Henrique Alves Costa'))
 {
-  // "tem sabado em sp?" e a IA mandou so o menu: a resposta vai na frente dele.
+  // "tem sabado em sp?" e a IA mandou so o menu. Rodada 11 (IA09-v2, IA20-v2):
+  // o menu sem resposta volta para a IA, que responde a pergunta.
   const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'menu' }), texto('Tem sim: aos sábados ele atende em São Paulo, à tarde.')])
   const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'tem sabado em sp? meu filho 8a vive c intestino preso' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
-  confere('menu com pergunta: a resposta vai na frente', d.resultado.resposta.startsWith('Tem sim: aos sábados') && d.resultado.resposta.endsWith('ROBO(menu)'), d.resultado.resposta)
+  confere('menu com pergunta: a resposta vem da IA', d.resultado.resposta === 'Tem sim: aos sábados ele atende em São Paulo, à tarde.', d.resultado.resposta)
+  confere('menu com pergunta: a IA ouviu o erro', JSON.stringify(c.chamadas[1] ?? '').includes('Menu não aberto'), '')
+}
+{
+  // Sem pergunta, o menu abre como antes.
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'menu' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'oi bom dia' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('menu sem pergunta abre', d.resultado.resposta.endsWith('ROBO(menu)'), d.resultado.resposta)
 }
 {
   // O mesmo recado no passo e na equipe sai uma vez so.
@@ -1135,7 +1143,7 @@ for (const [nome, historico, temLembrete] of [
     ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn,
   })
   confere('risco de vida: sem oferta de marcar', !d.resultado.resposta.includes('Quer que eu veja'), d.resultado.resposta)
-  confere('risco de vida: pronto-socorro firme', d.resultado.resposta.includes('Procure agora o pronto-socorro'), d.resultado.resposta)
+  confere('risco de vida: pronto-socorro firme', /^🚨.*agora.*pronto-socorro mais próximo ou ligue 192/s.test(d.resultado.resposta), d.resultado.resposta)
 }
 
 // ---------------------------------------------------------------
@@ -1320,7 +1328,7 @@ const DA_PILHA = [{ de: 'familia', texto: 'acho que ele engoliu uma pilha' }, { 
     modo: 'ligado', situacao: situacao({ texto: 'ele ta bem agora, posso esperar a consulta?', historico: DA_PILHA }),
     ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn,
   })
-  confere('risco de vida sem ferramenta: pronto-socorro agora', d.resultado.resposta.startsWith('🚨 Pelo que você contou'), d.resultado.resposta)
+  confere('risco de vida sem ferramenta: pronto-socorro agora', /^🚨.*agora.*pronto-socorro mais próximo ou ligue 192/s.test(d.resultado.resposta), d.resultado.resposta)
   confere('risco de vida sem ferramenta: sem oferta', !/14:00|Quer que eu marque/.test(d.resultado.resposta), d.resultado.resposta)
 }
 {
@@ -1329,7 +1337,8 @@ const DA_PILHA = [{ de: 'familia', texto: 'acho que ele engoliu uma pilha' }, { 
     modo: 'ligado', situacao: situacao({ texto: 'ela ta ok agr, n quero leva no ps. marca amanha c o dr?', historico: DA_PILHA }),
     ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn,
   })
-  confere('risco de vida no agendamento: pronto-socorro na frente', d.resultado.resposta.startsWith('🚨 Pelo que você contou') && d.resultado.resposta.includes('ROBO('), d.resultado.resposta)
+  // Rodada 10 (IA02, alta): com a familia ainda em casa, a agenda nao abre.
+  confere('risco de vida no agendamento: pronto-socorro e sem agenda', /^🚨.*agora.*pronto-socorro mais próximo ou ligue 192/s.test(d.resultado.resposta) && !d.resultado.resposta.includes('ROBO(') && d.resultado.resposta.includes('A consulta não substitui'), d.resultado.resposta)
 }
 {
   const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', para_familia: 'Que bom! Vamos marcar o retorno.' })])
@@ -1401,6 +1410,238 @@ for (const frase of ['Isso depende do seu contrato, então não consigo dizer um
   const c = claudeFalso([texto(frase)])
   await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'a unimed devolve quanto?' }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
   confere(`"${frase.slice(0, 30)}" nao chama a equipe`, !f.feito.some(([q]) => q === 'equipe'), JSON.stringify(f.feito))
+}
+
+// ---------------------------------------------------------------
+// Rodada 10 do painel com IA (18/10/2026)
+// ---------------------------------------------------------------
+
+// Regressao da rodada 9 (IA21, IA24): o horario nao volta ao robo como resposta.
+{
+  const feito = []
+  const f = {
+    ...ferramentasFalsas(),
+    robo: async (t, etapa) => {
+      feito.push([t, etapa])
+      return t.startsWith('trocar para') ? { resposta: '🔄 Horário trocado: agora é *sexta, 23/10 às 09:20*.\n\n👶 Qual é o nome completo do paciente?' } : { resposta: `ROBO(${t})` }
+    },
+  }
+  const c = claudeFalso([usa('responder_etapa', { texto: '09:20', horario: '09:20', dia: 'sexta' })])
+  const d = await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ texto: 'Antes da data: da pra passar para as nove e vinte?', etapa: 'dados_nascimento' }),
+    ferramentas: f, chamar: c.chamar, roboDireto: roboDireto({ resposta: 'Não entendi isso como resposta.' }).fn,
+  })
+  confere('troca pela IA: o horario nao volta ao robo', !feito.some(([t]) => t === '09:20') && d.resultado.resposta.includes('Horário trocado'), JSON.stringify(feito))
+}
+// Paragrafo de rascunho sai inteiro; endereco com "R."; promessa do documento.
+confere('rascunho em paragrafo sai inteiro', semNarracao('Pelo contexto, a consulta é às 18:20. Preciso responder a pergunta e retomar o passo em aberto. Ela pediu o último horário.\nFicou às 18:20!') === 'Ficou às 18:20!', semNarracao('Pelo contexto, a consulta é às 18:20. Preciso responder a pergunta e retomar o passo em aberto. Ela pediu o último horário.\nFicou às 18:20!'))
+{
+  const r = semRepetir('O consultório do Dr. Marcello em São Paulo fica na R. Agostinho Rodrigues Filho, 550. Tem estacionamento.', 'O consultório do Dr. Marcello em São Paulo fica na R. Outra Rua, 10.')
+  confere('"R." nao parte a frase', r.startsWith('O consultório do Dr. Marcello em São Paulo fica na R. Agostinho'), r)
+}
+// Paragrafo com duas frases de rascunho: a terceira, que a lista nao conhece, sai junto.
+{
+  const rascunho = 'Pelo contexto, a consulta é às 18:20. A situação da conversa mudou bastante. Preciso responder a pergunta.\nFicou às 18:20!'
+  confere('paragrafo de rascunho leva a frase desconhecida', semNarracao(rascunho) === 'Ficou às 18:20!', semNarracao(rascunho))
+}
+{
+  const c = claudeFalso([texto('Assim que a declaração ficar pronta, o combinado é a equipe te mandar por aqui. Atendemos sábado.')])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'atende sabado?' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('promessa do documento sai', d.resultado.resposta === 'Atendemos sábado.', d.resultado.resposta)
+}
+// Critica (IA02-v1): a familia vai esperar; sai o que aceita esperar.
+{
+  const c = claudeFalso([texto('Entendo. Se ela vomitar de novo durante a noite, não espere. Descansem bem.')])
+  const d = await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ texto: 'Obrigada! Então amanhã às 14:30 a gente vê com ele. Ela já tá dormindo, vou deixar ela descansar.', historico: DA_PILHA }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn,
+  })
+  confere('risco de vida, vai esperar: "nao espere a consulta" na frente', d.resultado.resposta.startsWith('🚨 Não espere a consulta'), d.resultado.resposta)
+  confere('risco de vida, vai esperar: sem "se vomitar" e sem "descansem"', !/Se ela vomitar|Descansem/.test(d.resultado.resposta), d.resultado.resposta)
+}
+// Foto no risco de vida, a familia em casa (IA01-v2, IA02-v1).
+{
+  const d = await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ anexo: true, texto: 'tirei foto do vomito pro dr ver amanha', historico: DA_PILHA }),
+    ferramentas: ferramentasFalsas(), chamar: claudeFalso([texto('nao devia')]).chamar,
+    roboDireto: roboDireto({ resposta: '📎 Recebi o que você enviou.\n\nSe piorar, não espere a nossa resposta nem a consulta: procure o pronto-socorro mais próximo ou ligue 192.' }).fn,
+  })
+  confere('foto no risco de vida: pronto-socorro firme', d.resultado.resposta.startsWith('🚨') && !d.resultado.resposta.includes('Se piorar') && d.resultado.atencao === 'urgencia', JSON.stringify(d.resultado))
+}
+// "Vou levar agora" e ir ao pronto-socorro: a consulta pode ser marcada.
+{
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', para_familia: 'Combinado.' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'ta bom, vou levar agora. deixa marcado amanha?', historico: DA_PILHA }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('indo ao pronto-socorro: marca', d.resultado.resposta.includes('ROBO('), d.resultado.resposta)
+}
+// "Avisei de novo" sem piora sai (IA02-v2).
+{
+  const c = claudeFalso([usa('chamar_equipe', { motivo: 'urgencia', para_familia: 'Avisei o Dr. Marcello de novo. Leve agora ao pronto-socorro.', resumo_para_equipe: 'Pilha.' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'e agora?', historico: DA_PILHA }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('sem piora: sem "avisei de novo"', !/de novo/.test(d.resultado.resposta), d.resultado.resposta)
+}
+// Irmao dito na conversa, sem o nome no campo (IA14).
+{
+  const f = ferramentasFalsas()
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar' })])
+  await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'o irmão dela, o Lucas, dá pra marcar sexta?' }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('irmao dito: abre para outra crianca', f.feito.some(([q, t]) => q === 'robo' && /outra criança/.test(t)), JSON.stringify(f.feito))
+}
+// "Tambem" com consulta ja marcada: marcar mais uma (IA12-v1).
+{
+  const f = roboComEtapas({ inicio: 'ja_tem_consulta' })
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', unidade: 'São Paulo', dia: 'sábado' })])
+  await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'pode marcar a helena tambem, sabado em sp' }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('"tambem" com consulta marcada: marcar mais uma', f.chamadas.some(([t]) => t === '2'), JSON.stringify(f.chamadas))
+}
+// "19 e 20" e uma hora so (IA11-v2).
+{
+  const f = roboDoAgendamento()
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', paciente: 'Helena', unidade: 'Santos', dia: 'hoje' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'qro hj a noite msm, 19 e 20' }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('"19 e 20": segue com 19:20', d.resultado.resposta.includes('(19:20)'), d.resultado.resposta)
+}
+// Critica (IA05-v2): na piora, sai a consulta confirmada e o condicional; e o
+// "agora" tem de estar na mesma frase do pronto-socorro.
+for (const [nome, paraFamilia, proibido] of [
+  ['piora: sem "esta confirmada" e sem o condicional', 'A consulta do Miguel de hoje às 15:10 está confirmada. Se ele ficar ainda mais molinho, procure o pronto-socorro agora. Avisei o Dr. Marcello agora.', /confirmada|Se ele ficar/],
+  ['piora: "agora" fora da frase do pronto-socorro nao vale', 'Avisei o Dr. Marcello agora. O pronto-socorro mais próximo é o da Ana Costa.', null],
+]) {
+  const c = claudeFalso([usa('chamar_equipe', { motivo: 'urgencia', para_familia: paraFamilia, resumo_para_equipe: 'Febre voltou.' })])
+  const d = await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ texto: 'cheguei do ps e a febre voltou', historico: [{ de: 'familia', texto: 'é urgente, ele ta com 39 de febre' }], urgenciaAberta: true }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn,
+  })
+  confere(nome, d.resultado.resposta.startsWith('🚨 Se piorou') && !(proibido && proibido.test(d.resultado.resposta)), d.resultado.resposta)
+}
+// Rascunho com "na tela", "piora contada", "familia concordou".
+confere('narracao rodada 10', semNarracao('A família concordou em ir. Leve agora ao pronto-socorro.') === 'Leve agora ao pronto-socorro.' && semNarracao('É só escolher o horário na tela a seguir. Combinado!') === 'Combinado!', semNarracao('É só escolher o horário na tela a seguir. Combinado!'))
+
+// Rodada 11 do painel com IA.
+// IA15-v2 (alta): "tipo 7 da noite" e a IA mandou 18:00 no meio da ficha. Vai a
+// hora da familia, e o robo oferece os vizinhos.
+{
+  const feito = []
+  const f = { ...ferramentasFalsas(), robo: async (t, etapa) => (feito.push([t, etapa]), { resposta: `ROBO(${t})` }) }
+  const c = claudeFalso([usa('responder_etapa', { texto: '', horario: '18:00', para_familia: 'Às 19h não tem; o mais perto é 18:00.' })])
+  await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ texto: 'pera, tem como ser mais tarde? tipo 7 da noite', etapa: 'dados_nascimento' }),
+    ferramentas: f, chamar: c.chamar, roboDireto: roboDireto({ resposta: 'Não entendi isso como resposta.' }).fn,
+  })
+  confere('ficha: hora da IA que a familia nao disse nao troca', !feito.some(([t]) => /18:00/.test(t)), JSON.stringify(feito))
+  confere('ficha: vai a hora da familia', feito.some(([t]) => t === 'trocar para 19h'), JSON.stringify(feito))
+}
+{
+  // Com minutos: "sete e vinte da noite" vai como 19:20, nao 07:20.
+  const feito = []
+  const f = { ...ferramentasFalsas(), robo: async (t, etapa) => (feito.push([t, etapa]), { resposta: `ROBO(${t})` }) }
+  const c = claudeFalso([usa('responder_etapa', { texto: '', horario: '19:00' })])
+  await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ texto: 'da p ser sete e vinte da noite?', etapa: 'dados_nascimento' }),
+    ferramentas: f, chamar: c.chamar, roboDireto: roboDireto({ resposta: 'Não entendi isso como resposta.' }).fn,
+  })
+  confere('ficha: "sete e vinte da noite" vai como 19:20', feito.some(([t]) => t === 'trocar para 19:20'), JSON.stringify(feito))
+}
+// IA11-v1: "sete e vinte da noite" e 19:20.
+{
+  const f = roboDoAgendamento()
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', paciente: 'Helena', unidade: 'Santos', dia: 'segunda', horario: '19:20' })])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'pode ser na segunda que vem, às sete e vinte da noite?' }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('"sete e vinte da noite" vale 19:20', d.resultado.resposta.includes('(19:20)'), d.resultado.resposta)
+}
+// IA12-v2: "tb" e marcar mais uma.
+{
+  const f = roboComEtapas({ inicio: 'ja_tem_consulta' })
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', unidade: 'Santos', dia: 'hoje' })])
+  await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'marca a helena tb hj, 17 e 20' }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('"tb" com consulta marcada: marcar mais uma', f.chamadas.some(([t]) => t === '2'), JSON.stringify(f.chamadas))
+}
+// IA02-v2 (alta): a volta do pronto-socorro contada pelo que fizeram la.
+{
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', unidade: 'São Paulo', para_familia: 'Que bom que já foram avaliados.' })])
+  const d = await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ texto: 'voltamo, deram soro e pediram p ver c o gastro. tem horario semana q vem em sp?', historico: DA_PILHA }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn,
+  })
+  confere('volta do ps pelo soro: a agenda abre', !/não substitui|🚨/.test(d.resultado.resposta), d.resultado.resposta)
+}
+// IA01-v1 (alta): a regra calou, mas nos ja mandamos ao pronto-socorro agora.
+{
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', unidade: 'Santos', dia: 'sexta', para_familia: 'Combinado.' })])
+  const d = await atenderComAssistente({
+    modo: 'ligado',
+    situacao: situacao({
+      texto: 'deixa marcado pra sexta de manha em santos, se ele ficar estranho eu corro pro hospital',
+      historico: [{ de: 'familia', texto: 'ele ta esquisito desde que mexeu no controle' }, { de: 'consultorio', texto: '🚨 Leve agora ao pronto-socorro mais próximo ou ligue 192.' }],
+      urgenciaAberta: true,
+    }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn,
+  })
+  confere('pronto-socorro agora ja dito: agenda fechada', /não substitui/.test(d.resultado.resposta), d.resultado.resposta)
+}
+// IA01-v2: "a gente deixa marcado" e promessa; IA22-v2: "Combinado!" a um envio.
+{
+  const c = claudeFalso([texto('Podem ir agora ao pronto-socorro. O horário a gente deixa marcado para quarta.')])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'ta bom, meu marido ta tirando o carro, vamo agr', historico: DA_PILHA }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('"a gente deixa marcado" sai', d.resultado.resposta === 'Podem ir agora ao pronto-socorro.', d.resultado.resposta)
+}
+{
+  const c = claudeFalso([texto('Combinado! Pode mandar a foto do pedido por aqui mesmo.')])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'manda aqui quando tiver pronto' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('"Combinado!" na frente sai', d.resultado.resposta === 'Pode mandar a foto do pedido por aqui mesmo.', d.resultado.resposta)
+}
+// IA01-v2: "vamo agr" e ida ao pronto-socorro, e a agenda abre.
+{
+  const c = claudeFalso([usa('abrir_fluxo', { fluxo: 'agendar', unidade: 'Santos', dia: 'quarta', para_familia: 'Vão com calma.' })])
+  const d = await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ texto: 'ta bom, vamo agr. marca p ele quarta a tarde em santos p dps', historico: DA_PILHA }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn,
+  })
+  confere('"vamo agr": a agenda abre', !/não substitui/.test(d.resultado.resposta), d.resultado.resposta)
+}
+// Rascunhos da rodada 11.
+confere('narracao: paragrafo da IA08-v1 sai inteiro',
+  semNarracao('A família pede um parecer. Devo acolher, explicar que a avaliação é do Dr. Marcello. Chamar a equipe seria redundante.\n\nEntendo a preocupação. Quem avalia é o Dr. Marcello, na consulta de hoje.') === 'Entendo a preocupação. Quem avalia é o Dr. Marcello, na consulta de hoje.',
+  semNarracao('A família pede um parecer. Devo acolher, explicar que a avaliação é do Dr. Marcello. Chamar a equipe seria redundante.\n\nEntendo a preocupação. Quem avalia é o Dr. Marcello, na consulta de hoje.'))
+confere('narracao: "O usuario... Preciso consultar a agenda" sai',
+  semNarracao('O usuário perguntou se há horário no sábado. Preciso consultar a agenda.\n\nTem sim, aos sábados em São Paulo.') === 'Tem sim, aos sábados em São Paulo.',
+  semNarracao('O usuário perguntou se há horário no sábado. Preciso consultar a agenda.\n\nTem sim, aos sábados em São Paulo.'))
+confere('narracao: IA03-v1 sai',
+  semNarracao('Não há risco de vida descrito, mas é uma criança abatida; vou confirmar a consulta que ela tem, sem oferecer outra. A consulta das 15h está confirmada.') === 'A consulta das 15h está confirmada.',
+  semNarracao('Não há risco de vida descrito, mas é uma criança abatida; vou confirmar a consulta que ela tem, sem oferecer outra. A consulta das 15h está confirmada.'))
+confere('narracao: conta de valores sai',
+  semNarracao('Em São Paulo fica R$ 450,00 + R$ 150,00 = R$ 600,00. A consulta em São Paulo é R$ 600,00.') === 'A consulta em São Paulo é R$ 600,00.',
+  semNarracao('Em São Paulo fica R$ 450,00 + R$ 150,00 = R$ 600,00. A consulta em São Paulo é R$ 600,00.'))
+confere('narracao: "aqui mesmo nesta conversa" fica',
+  semNarracao('Pode mandar aqui mesmo nesta conversa. A equipe confere.') === 'Pode mandar aqui mesmo nesta conversa. A equipe confere.',
+  semNarracao('Pode mandar aqui mesmo nesta conversa. A equipe confere.'))
+confere('narracao: paragrafo que comeca pela familia sai com a frase que a lista nao conhece',
+  semNarracao('A família está preocupada com o cocô. Ela quer uma resposta hoje.\n\nEntendo. Quem avalia é o Dr. Marcello.') === 'Entendo. Quem avalia é o Dr. Marcello.',
+  semNarracao('A família está preocupada com o cocô. Ela quer uma resposta hoje.\n\nEntendo. Quem avalia é o Dr. Marcello.'))
+confere('narracao: "Preciso consultar a agenda" e "Devo acolher" saem',
+  semNarracao('Preciso consultar a agenda. Aos sábados ele atende em São Paulo.') === 'Aos sábados ele atende em São Paulo.' &&
+    semNarracao('Devo acolher e explicar. Quem avalia é o Dr. Marcello.') === 'Quem avalia é o Dr. Marcello.',
+  semNarracao('Devo acolher e explicar. Quem avalia é o Dr. Marcello.'))
+confere('narracao: so um paragrafo de terceiros nao some inteiro', semNarracao('A mãe quer saber o valor. O valor é R$ 450,00.') === 'O valor é R$ 450,00.', semNarracao('A mãe quer saber o valor. O valor é R$ 450,00.'))
+// IA16-v2: "com ph" e correcao, que vai para a IA.
+confere('"sophia com ph" e pergunta junto do passo', perguntaLateral('3 2 2024 ah eh sophia com ph'))
+// IA09-v2: o texto solto junto de ver_horarios, na pergunta junto do passo, nao sai.
+{
+  const c = claudeFalso([usa('ver_horarios', { unidade: 'todas' }, 'O usuário perguntou se aceita cartão. Vou ver.')])
+  const d = await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ texto: '12/05/2021. e aceita cartao?', etapa: 'dados_nascimento' }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto({ resposta: 'Anotado! Qual é o nome do responsável?' }).fn,
+  })
+  confere('lateral: rascunho junto de ver_horarios nao sai', d.resultado.resposta === 'Anotado! Qual é o nome do responsável?', d.resultado.resposta)
+}
+// IA14-v1: "cancelou sozinho" nao vence a equipe chamada na mesma resposta.
+{
+  const c = claudeFalso([usa('chamar_equipe', { motivo: 'sem_informacao', para_familia: 'O pedido do Pedro passei para a equipe.', resumo_para_equipe: 'Irmão Pedro, 2 anos.' })])
+  const d = await atenderComAssistente({
+    modo: 'ligado', situacao: situacao({ texto: 'pode sim. e da pra deixar esse horario pro irmao dela?', etapa: 'confirmar_cancelamento' }),
+    ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto({ resposta: 'Consulta cancelada.', atencao: 'cancelou_sozinho' }).fn,
+  })
+  confere('etiqueta: a equipe vence o "cancelou sozinho"', d.resultado.atencao === 'atendente', JSON.stringify(d.resultado))
 }
 
 console.log(`assistente: ${ok} verificacoes ok`)
