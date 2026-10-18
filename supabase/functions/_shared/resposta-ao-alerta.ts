@@ -130,6 +130,29 @@ export type Alerta = {
   criado_em: string
 }
 
+const LIGACAO = new Set(['do', 'da', 'de', 'dos', 'das', 'o', 'a', 'e', 'para', 'pra', 'pro', 'familia', 'mae', 'pai', 'paciente', 'conversa'])
+const palavrasDoNome = (t: string) =>
+  t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean)
+
+/**
+ * O texto e so o nome de uma das familias ("Heitor", "do Heitor Santos")?
+ * Entao e a escolha da conversa, e nao mensagem para a familia (18/10/2026: o
+ * Dr. Marcello escreveu "Heitor" para dizer de quem era a resposta, tocou no
+ * nome na pergunta seguinte, e o Heitor recebeu "Mensagem do Dr. Marcello:
+ * Heitor").
+ */
+export function familiaPeloNome(texto: string, candidatos: Alerta[]): Alerta | null {
+  const palavras = palavrasDoNome(texto).filter((p) => !LIGACAO.has(p))
+  // Frase de verdade sempre tem palavra que nao e do nome ("Heitor, pode dar
+  // soro"): nao precisa de limite de tamanho.
+  if (!palavras.length) return null
+  const achados = candidatos.filter((a) => {
+    const nome = new Set(palavrasDoNome(a.quem ?? ''))
+    return palavras.every((p) => nome.has(p))
+  })
+  return achados.length === 1 ? achados[0] : null
+}
+
 /** A ultima resposta deste numero: a que aviso e quando (ver ultimaResposta). */
 export type UltimaResposta = { id: string; em: string } | null
 
@@ -530,6 +553,13 @@ export async function tratarRespostaDaEquipe(amb: AmbienteDaResposta, numero: st
   // Texto, "ok" ou arquivo: de qual alerta?
   const escolha = escolherAlerta(recentes, r.citado, amb.agora, await ultimaResposta(amb, numero))
   if (!escolha) return false
+  // So o nome da familia: escolhe a conversa e nada vai para ela (ver familiaPeloNome).
+  const pelaFala = r.tipo === 'texto' ? familiaPeloNome(r.texto, 'ambiguos' in escolha ? escolha.ambiguos : [escolha.alerta]) : null
+  if (pelaFala && !pelaFala.teste) {
+    await marcarRespondido(amb, pelaFala.id, numero)
+    await responder(`Certo: as próximas mensagens vão para ${nomeDaFamilia(pelaFala)}. Escreva o que quer mandar.`)
+    return true
+  }
   if ('ambiguos' in escolha) {
     // Texto: a familia e escolhida num toque, e o toque ja e o "Enviar"
     // (18/10/2026). O texto fica guardado em cada aviso; o escolhido manda, e
@@ -541,7 +571,7 @@ export async function tratarRespostaDaEquipe(amb: AmbienteDaResposta, numero: st
         .from('alertas_de_urgencia')
         .update({ rascunho: guardado, rascunho_de: numero, rascunho_em: amb.agora.toISOString() })
         .in('id', opcoes.map((a) => a.id))
-      const pergunta = `Para qual família vai esta mensagem?\n\n"${guardado}"\n\nAs próximas seguem para a mesma família, até chegar um aviso novo.`
+      const pergunta = `Para qual família vai esta mensagem?\n\n"${guardado}"\n\nTocar no nome já envia o texto acima. As próximas seguem para a mesma família, até chegar um aviso novo.`
       const cancelar = { id: payloadDaConfirmacao(opcoes[0].id, 'cancelar'), titulo: 'Cancelar' }
       await amb.enviarWhatsApp(
         numero,

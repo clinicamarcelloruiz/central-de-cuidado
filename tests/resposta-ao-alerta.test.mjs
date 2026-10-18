@@ -1,7 +1,7 @@
 // A resposta do medico ao alerta de urgencia, pelo WhatsApp dele (17/10/2026).
 // Regra em supabase/functions/_shared/resposta-ao-alerta.ts. Banco e Meta de
 // mentira: o que se testa e o que chega a familia, ao medico e ao registro.
-import { escolherAlerta, lerRespostaDaEquipe, papelDoNumero, repassarRespostaDaFamilia, textoParaAFamilia, tratarRespostaDaEquipe } from './resposta-ao-alerta.build.mjs'
+import { escolherAlerta, familiaPeloNome, lerRespostaDaEquipe, papelDoNumero, repassarRespostaDaFamilia, textoParaAFamilia, tratarRespostaDaEquipe } from './resposta-ao-alerta.build.mjs'
 import { bancoFalso } from './fixtures/banco-falso.mjs'
 
 let ok = 0
@@ -204,6 +204,21 @@ const A3 = '33333333-3333-4333-8333-333333333333'
   await tratarRespostaDaEquipe(c.amb, MEDICO, texto('ok'))
   confere('"ok" com dois avisos: nao pergunta a familia', c.para(MEDICO).at(-1)?.includes('segure a mensagem do aviso certo'), c.para(MEDICO).at(-1))
 }
+{
+  // So o nome da familia escolhe a conversa (18/10/2026: o Dr. Marcello escreveu
+  // "Heitor", tocou no nome, e o Heitor recebeu "Mensagem do Dr. Marcello: Heitor").
+  const c = cenario({ alertas: dois() })
+  await tratarRespostaDaEquipe(c.amb, MEDICO, texto('João'))
+  confere('so o nome: escolhe a familia e nada sai', c.para(MEDICO).at(-1) === 'Certo: as próximas mensagens vão para João Pedro Lima de Souza. Escreva o que quer mandar.' && c.para(FAMILIA).length === 0 && c.para(FAMILIA2).length === 0, c.para(MEDICO).at(-1))
+  confere('so o nome: nenhum texto guardado', c.banco.db.alertas_de_urgencia.every((a) => a.rascunho === null))
+  await tratarRespostaDaEquipe(c.amb, MEDICO, texto('Boa tarde, como podemos ajudar?'))
+  confere('so o nome: a mensagem seguinte ja vai para ela', c.textoDe(c.enviados.at(-1)).includes('Vou mandar para João Pedro Lima de Souza'), c.textoDe(c.enviados.at(-1)))
+}
+confere('nome: com "do" e sobrenome', familiaPeloNome('do joao souza', dois())?.id === A2)
+confere('nome: sem acento e maiusculas', familiaPeloNome('HELENA', dois())?.id === A1)
+confere('nome: frase nao e nome', familiaPeloNome('Pode dar soro', dois()) === null && familiaPeloNome('Helena pode dar soro aos poucos', dois()) === null)
+confere('nome: nome que nao e de ninguem', familiaPeloNome('Paula', dois()) === null)
+confere('nome: nome de duas familias nao escolhe', familiaPeloNome('Lima', [...dois(), alerta({ id: A3, quem: 'Paula Lima' })]) === null)
 confere('escolherAlerta: ultima resposta decide', escolherAlerta(dois(), null, AGORA, { id: A1, em: haMinutos(1) })?.alerta?.id === A1)
 confere('escolherAlerta: aviso mais novo que a resposta pergunta', escolherAlerta(dois(), null, AGORA, { id: A1, em: haMinutos(10) })?.ambiguos?.length === 2)
 
