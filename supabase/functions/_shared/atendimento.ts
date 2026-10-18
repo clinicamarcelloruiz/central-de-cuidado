@@ -769,7 +769,7 @@ export function horaEmNumeros(t: string): string {
 }
 
 function horaEscrita(texto: string): { hora: number; minuto: number | null } | null {
-  const t = horaEmNumeros(normalizar(semHoraDeLimite(texto)))
+  const t = semHoraDeLimite(horaEmNumeros(normalizar(texto)))
   // "9 e 20", "10 e meia", "8 em ponto" (painel, 14/10/2026): sem "h" nem ":"
   // nada disso era lido como hora.
   // "sete e vinte da noite" e 19:20 (rodada 11, IA11-v1: lido como 7:20).
@@ -789,7 +789,10 @@ function horaEscrita(texto: string): { hora: number; minuto: number | null } | n
     const hora = Number(doPeriodo[1])
     return { hora: doPeriodo[2] === 'manha' || hora === 12 ? hora : hora + 12, minuto: 0 }
   }
-  if (!/[h:]/.test(t)) return null
+  // "sexta 23 as 8" (rodada 12, IA12-v2): sem "h", a hora era jogada fora e a
+  // mae repetiu tres vezes. So depois de "as" e sem coisa contada depois.
+  const soAs = t.match(/\b(?:as|pras|para as)\s+(\d{1,2})\b(?!\s*(?:[:h/.-]\s*\d|e\s+(?:\d|meia)))(?!\s+(?:criancas|meninas|meninos|filhas|filhos|consultas|vezes|pessoas|anos|meses|dias|semanas)\b)/)
+  if (!/[h:]/.test(t)) return soAs && Number(soAs[1]) <= 23 ? { hora: Number(soAs[1]), minuto: null } : null
   const m = t.match(/(\d{1,2})\s*[:h]\s*(\d{2})?/)
   if (!m) return null
   const hora = Number(m[1])
@@ -2788,7 +2791,7 @@ async function trocarHorarioDaFicha(
     // para 11:20 sem perguntar, com o 10:40 a mesma distancia). So a hora cheia
     // vale; sem ela, os dois vizinhos para a familia escolher.
     const pedida = horaEscrita(hora)
-    if (pedida && pedida.minuto === null) {
+    if (pedida && (pedida.minuto === null || pedida.minuto === 0)) {
       const doDia = horarios.filter((h) => chaveDoDia(h.inicio, timezone) === chave)
       const minutos = (h: Horario) => {
         const [hh, mm] = formatarHora(h.inicio, timezone).split(':').map(Number)
@@ -2841,9 +2844,12 @@ async function outraUnidadeCitada(admin: Admin, clinicId: string, texto: string,
   // Com hora, so com a troca dita com todas as letras (rodada 9, IA13-v2:
   // "pensando bem prefiro sp. segunda 26 as 19h da?" ouviu duas vezes que o
   // horario nao estava livre - na lista de Santos).
-  const trocaFirme = /\b(prefiro|preferia|trocar|troca|mudar|muda|na verdade|na vdd|pensando bem|em vez|ao inves)\b/.test(t)
+  // "mais facil", "mais pratico", "melhor" tambem (rodada 12, IA16-v1: "pra mim e
+  // mais facil levar em Sao Paulo? Voces tem segunda depois das seis da tarde?"
+  // ouviu, na lista de Santos, que o horario nao estava livre).
+  const trocaFirme = /\b(prefiro|preferia|trocar|troca|mudar|muda|na verdade|na vdd|pensando bem|em vez|ao inves|mais facil|mais pratico|melhor)\b/.test(t)
   if (horaEscrita(texto) && !trocaFirme) return null
-  const pedeTroca = /\b(prefiro|preferia|melhor|quero|queria|trocar|troca|mudar|muda|na verdade|na vdd|pensando bem|em vez|ao inves|tem em|tem no|tem na|pode ser em|e em)\b/.test(t)
+  const pedeTroca = /\b(prefiro|preferia|melhor|quero|queria|trocar|troca|mudar|muda|na verdade|na vdd|pensando bem|em vez|ao inves|tem em|tem no|tem na|pode ser em|e em|mais facil|mais pratico)\b/.test(t)
   if (!pedeTroca && t.split(' ').length > 4) return null
   const citada = unidadeCitada(await opcoesDeAtendimento(admin, clinicId), texto)
   return citada && citada.id !== atual ? citada : null
@@ -5957,6 +5963,12 @@ async function tratarConversaPorDentro(opcoes: {
       await guardarDado(admin, consulta, pergunta, achado, pacienteDaConsulta)
       seguintes = seguintes.filter((c) => c !== chave)
     }
+    // "ele nao tem CPF" dito em outro passo vale como o PULAR do CPF do paciente
+    // (rodada 12, IA15 v1 e v2: o responsavel foi gravado e o CPF perguntado de
+    // novo; "ja falei q ele n tem"). "Eu nao tenho" e da mae, e nao conta.
+    if (perguntaAtual.chave !== 'cpf' && seguintes.includes('cpf') && /\b(nao|n)\s+(tem|possui)\s+(o\s+)?cpf\b|\bsem\s+cpf\b/.test(normalizar(texto))) {
+      seguintes = seguintes.filter((c) => c !== 'cpf')
+    }
     return seguintes.length
       ? await perguntarDados(admin, conversationId, consulta, seguintes, '', manual)
       : await terminarDados(admin, conversationId, clinicId, consulta, manual)
@@ -6999,6 +7011,29 @@ async function tratarConversaPorDentro(opcoes: {
         }
       }
 
+      // Hora que nao existe: os dois mais perto, como na troca da ficha (rodada
+      // 12, IA13-v2 e IA16-v1: "n tem as 7 msm?" e "umas 7 da noite" ouviam a
+      // lista inteira de novo, sem uma palavra sobre as 19h).
+      if (lista.length >= 2) {
+        const minutosDe = (h: Horario) => {
+          const [hh, mm] = formatarHora(h.inicio, timezone).split(':').map(Number)
+          return hh * 60 + mm
+        }
+        const distancia = (alvo: number) => Math.min(...lista.map((h) => Math.abs(minutosDe(h) - alvo)))
+        const alvos = [pedida.hora * 60 + (pedida.minuto ?? 0), ...(pedida.hora < 12 ? [(pedida.hora + 12) * 60 + (pedida.minuto ?? 0)] : [])]
+        const alvo = alvos.reduce((melhor, a) => (distancia(a) < distancia(melhor) ? a : melhor))
+        const vizinhos = [...lista]
+          .sort((a, b) => Math.abs(minutosDe(a) - alvo) - Math.abs(minutosDe(b) - alvo))
+          .slice(0, 2)
+          .sort((a, b) => minutosDe(a) - minutosDe(b))
+          .map((h) => formatarHora(h.inicio, timezone))
+        const dita = `${Math.floor(alvo / 60)}${alvo % 60 ? `:${String(alvo % 60).padStart(2, '0')}` : 'h'}`
+        return {
+          resposta:
+            `Às ${dita} não tem horário livre nesse dia. Os mais perto são ${vizinhos.join(' e ')}.\n\n` +
+            'Responda com o horário, ou com o número da lista acima.',
+        }
+      }
       const linhas = lista
         .map((h, i) => `${i + 1} - ${formatarHora(h.inicio, timezone)}`)
         .join('\n')

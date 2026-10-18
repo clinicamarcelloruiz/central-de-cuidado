@@ -5182,12 +5182,49 @@ await caso('Rodada 11: "Ele não tem CPF" no passo do nome grava o nome e a data
   ...ATE_A_FICHA,
   ['Já mandei ali em cima 😅 Bernardo Teixeira Moura, nasceu 15/09/2020. Ele não tem CPF.', 'nome do responsável'],
 ], { verificar: fichaGravada('cpf de outro campo', { intake_patient_name: 'Bernardo Teixeira Moura', intake_birth_date: '15/09/2020' }) })
-await caso('Rodada 11: "não tem CPF" no passo do responsável grava o responsável', [
+// Rodada 12 (IA15): o "nao tem CPF" dito ali vale como o PULAR do CPF.
+await caso('Rodada 11: "não tem CPF" no passo do responsável grava o responsável e pula o CPF', [
   ...ATE_A_FICHA,
   ['Bernardo Teixeira Moura', 'data de nascimento'],
   ['15/09/2020', 'nome do responsável'],
-  ['Aline Teixeira Moura, a mãe. E ele não tem CPF, já avisei.', 'CPF'],
+  ['Aline Teixeira Moura, a mãe. E ele não tem CPF, já avisei.', 'e-mail'],
 ], { verificar: fichaGravada('cpf no responsavel', { intake_guardian: 'Aline Teixeira Moura' }) })
+// IA13-v2 e IA16-v1: hora que nao existe na lista, "as 3" sem "h", e a troca de
+// unidade com hora ou limite na frase.
+const ATE_OS_HORARIOS = [['quero marcar', 'Em qual unidade'], ['1', 'Datas disponíveis'], ['1', 'Horários de']]
+const SLOTS_TARDE_E_SP = { ...SLOTS_TROCA_TARDE, 'u-vila': [{ slot_start: '2026-10-19T21:00:00Z', slot_end: '2026-10-19T21:40:00Z' }] }
+await caso('Rodada 12: "tem as 7?" na lista oferece os dois mais perto', [
+  ...ATE_OS_HORARIOS,
+  ['tem as 7?', ['Às 19h não tem horário livre', 'Os mais perto são 15:00 e 16:00']],
+], { slots: SLOTS_TROCA_TARDE })
+await caso('Rodada 12: "pode ser as 3" na lista marca as 15:00', [
+  ...ATE_OS_HORARIOS,
+  ['pode ser as 3', 'nome completo do paciente'],
+], {
+  slots: SLOTS_TROCA_TARDE,
+  verificar: ({ marcadas, titulo }) => {
+    if (marcadas[0]?.starts_at === '2026-10-14T18:00:00Z') passou++
+    else falhas.push(`${titulo} | marcou ${marcadas.map((m) => m.starts_at).join(', ')}`)
+  },
+})
+await caso('Rodada 12: "da pra trocar pra 15:00?" na ficha, sem 15:00, oferece os vizinhos', [
+  ...ATE_A_FICHA,
+  ['da pra trocar pra 15:00?', 'Os mais perto são 14:00 e 15:20'],
+], { slots: SLOTS_TROCA, daConsulta: CONSULTA_GUARDADA })
+await caso('Rodada 12: "mais fácil levar em São Paulo, segunda às 18h" troca a unidade', [
+  ...ATE_OS_HORARIOS,
+  ['pra mim é mais fácil levar em São Paulo, segunda às 18h', 'São Paulo'],
+], { slots: SLOTS_TARDE_E_SP })
+await caso('Rodada 12: "tem em São Paulo depois das seis da tarde?" é limite, não hora', [
+  ...ATE_OS_HORARIOS,
+  ['tem em São Paulo depois das seis da tarde?', 'São Paulo'],
+], { slots: SLOTS_TARDE_E_SP })
+await caso('Rodada 12: "eu não tenho CPF" é da mãe, e o CPF do paciente continua', [
+  ...ATE_A_FICHA,
+  ['Bernardo Teixeira Moura', 'data de nascimento'],
+  ['15/09/2020', 'nome do responsável'],
+  ['Aline Teixeira Moura, a mãe. Eu não tenho CPF aqui comigo', 'CPF'],
+])
 await caso('Rodada 11: "não tem CPF" no passo do CPF continua pulando', [
   ...ATE_A_FICHA,
   ['Bernardo Teixeira Moura', 'data de nascimento'],
