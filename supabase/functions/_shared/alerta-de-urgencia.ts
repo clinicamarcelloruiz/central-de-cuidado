@@ -86,6 +86,37 @@ export function assuntoDoPedido(motivo: string | null, motivoDaIA: string | null
   return (motivoDaIA && daIA[motivoDaIA]) || (motivo && doRobo[motivo]) || 'pedido para a equipe'
 }
 
+/**
+ * So o que depende do medico vai ao celular dele (19/10/2026).
+ *
+ * Desde 18/10 todo pedido a equipe ia aos dois celulares, o do Dr. Marcello e
+ * o do Edu. O Edu reclamou no dia seguinte: "as vezes eles colocam falar com a
+ * equipe e e para perguntar valor" - e era o combinado so subir ao medico o
+ * que precisa de decisao dele. Ficam com ele: conduta sobre a crianca, receita
+ * ou exame novo (a assinatura e dele), excecao as regras (encaixe, desconto,
+ * retorno fora do prazo), a farmacia pedindo correcao de receita e o "Preciso
+ * de ajuda" depois da consulta. O resto (falar com alguem, valor, pagamento,
+ * 2a via, nota fiscal, remarcar, o que o robo nao soube) vai so a equipe.
+ * Urgencia nao passa por aqui: o alerta sempre vai ao medico.
+ */
+const DA_IA_PARA_O_MEDICO = ['medico', 'documento', 'excecao']
+const DO_ROBO_PARA_O_MEDICO = ['farmacia', 'ajuda']
+
+export function pedidoParaOMedico(motivo: string | null, motivoDaIA: string | null): boolean {
+  if (motivoDaIA) return DA_IA_PARA_O_MEDICO.includes(motivoDaIA)
+  return DO_ROBO_PARA_O_MEDICO.includes(motivo ?? '')
+}
+
+/**
+ * Para quem vai o pedido. O primeiro numero da lista e o do medico (ver
+ * papelDoNumero em resposta-ao-alerta.ts). Sem ninguem alem dele, vai a ele:
+ * pedido que nao chega a ninguem e o defeito que esta regra nao pode criar.
+ */
+export function numerosDoPedido(numeros: string[], paraOMedico: boolean): string[] {
+  if (paraOMedico || numeros.length < 2) return numeros
+  return numeros.slice(1)
+}
+
 export type Veredito = 'urgente' | 'aguardar' | 'responde'
 
 /** Os botoes do modelo, na ordem cadastrada na Meta. */
@@ -253,6 +284,8 @@ export type PedidoDeAlerta = {
   assunto?: string
   /** Mensagem seguinte na mesma fila: so sai se nao houver pedido sem resposta. */
   seguimento?: boolean
+  /** Pedido que precisa do medico (ver pedidoParaOMedico). Sem o campo, vai a todos. */
+  paraOMedico?: boolean
 }
 
 const JANELA_DO_PEDIDO_MS = 6 * 3600 * 1000
@@ -290,7 +323,8 @@ export async function pedidoEmAberto(admin: Admin, p: Pick<PedidoDeAlerta, 'clin
 export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, buscar: typeof fetch = fetch): Promise<EnvioDoAlerta[]> {
   try {
     const pedido = p.tipo === 'pedido'
-    const numeros = p.numeros ?? (await lerNumeros(admin, p.clinicId))
+    const todos = p.numeros ?? (await lerNumeros(admin, p.clinicId))
+    const numeros = pedido ? numerosDoPedido(todos, p.paraOMedico !== false) : todos
     if (!numeros.length) {
       console.info('Alerta de urgencia: nenhum numero cadastrado nesta clinica')
       return []

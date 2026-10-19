@@ -1,4 +1,4 @@
-import { BOTOES_DO_ALERTA, MODELO_DO_PEDIDO, parametrosDoPedido, payloadDoVeredito, type Veredito } from './alerta-de-urgencia.ts'
+import { BOTOES_DO_ALERTA, MODELO_DO_PEDIDO, numerosDoPedido, parametrosDoPedido, payloadDoVeredito, type Veredito } from './alerta-de-urgencia.ts'
 import { montarConteudo } from './conteudo.ts'
 import { linkDoWhatsApp, semFormatacaoDoWhatsApp } from './instagram.ts'
 import { textoDoModelo } from './modelos.ts'
@@ -651,15 +651,21 @@ export async function repassarRespostaDaFamilia(
     if (!amb.numeros.length) return false
     const { data, error } = await amb.admin
       .from('alertas_de_urgencia')
-      .select('id,mensagens,quem')
+      .select('id,mensagens,quem,respondido_por')
       .eq('clinic_id', amb.clinicId)
       .eq('conversa_whatsapp', p.conversaWhatsApp)
       .gte('respondido_em', new Date(amb.agora.getTime() - JANELA_DO_ALERTA_MS).toISOString())
       .order('respondido_em', { ascending: false })
       .limit(1)
     if (error) throw error
-    const alerta = (data as { id: string; mensagens: string[] | null; quem: string }[] | null)?.[0]
+    const alerta = (data as { id: string; mensagens: string[] | null; quem: string; respondido_por?: string | null }[] | null)?.[0]
     if (!alerta) return false
+    // Quem da equipe assumiu a conversa segue com ela (19/10/2026): a familia
+    // respondendo ao Edu nao vai ao celular do medico. Se quem respondeu foi o
+    // medico, vai aos dois, como antes. Ver pedidoParaOMedico.
+    const destinos = papelDoNumero(String(alerta.respondido_por ?? ''), amb.numeros) === 'equipe'
+      ? numerosDoPedido(amb.numeros, false)
+      : amb.numeros
 
     const quem = p.quem.trim() || alerta.quem || 'A família'
     const fala = MIDIA_DA_FAMILIA[p.texto.trim()] ?? p.texto.trim()
@@ -684,7 +690,7 @@ Para responder, escreva aqui: vai para ${quem}.`,
       },
     }
     const ids: string[] = []
-    for (const numero of amb.numeros) {
+    for (const numero of destinos) {
       let envio = await amb.enviarWhatsApp(numero, livre)
       if (!envio.ok) envio = await amb.enviarWhatsApp(numero, modelo)
       if (envio.ok && envio.id) ids.push(envio.id)

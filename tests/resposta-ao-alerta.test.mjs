@@ -233,6 +233,12 @@ confere('escolherAlerta: aviso mais novo que a resposta pergunta', escolherAlert
   confere('repasse: responder em cima volta para a mesma familia', c.textoDe(c.enviados.at(-1)).includes('Vou mandar para Helena'), c.textoDe(c.enviados.at(-1)))
 }
 {
+  // 19/10/2026: o Edu respondeu; a familia respondendo nao vai ao medico.
+  const c = cenario({ alertas: [alerta({ respondido_em: haMinutos(3), respondido_por: EQUIPE })] })
+  const repassou = await repassarRespostaDaFamilia(c.amb, { conversaWhatsApp: 'conv-1', quem: 'Helena', texto: 'Quanto fica a consulta?' })
+  confere('repasse: quem da equipe assumiu segue sozinho', repassou && c.para(EQUIPE).length === 1 && c.para(MEDICO).length === 0, JSON.stringify(c.enviados.map((e) => e.para)))
+}
+{
   // Numero fora da janela de 24 h: o texto livre falha e vai o modelo.
   const c = cenario({ alertas: [alerta({ respondido_em: haMinutos(3), respondido_por: MEDICO })] })
   const enviados = []

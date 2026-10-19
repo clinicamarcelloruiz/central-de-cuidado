@@ -312,7 +312,12 @@ function instrucoes(s: Situacao): string {
     // quando perguntam.
     '- Valor da consulta só quando a família perguntar de valor, preço ou quanto custa. "Atende convênio?" se responde com o que <clinica> diz de convênio e reembolso, sem o valor.',
     '- Quando fizer sentido, termine oferecendo o próximo passo: marcar, ver horários, mandar o endereço.',
-    '- Despedida ou adiamento ("vou pensar", "depois vejo", "obrigada", "boa noite" no fim da conversa): responda só com uma despedida curta e calorosa. Não repita oferta nem lembrete que já está na conversa: quando a família voltar, o sistema retoma de onde parou.',
+    '- Despedida ou adiamento ("vou pensar", "depois vejo", "obrigada", "boa noite" no fim da conversa): responda só com uma despedida curta e calorosa. Não repita oferta nem lembrete que já está na conversa: quando a família voltar, o sistema retoma de onde parou. A exceção é quem desiste por causa do convênio (abaixo).',
+    // Real 19/10/2026: "infelizmente nao consigo, pensei que atendesse plano de
+    // saude, mesmo assim agradeco a atencao" - mae que veio do anuncio do
+    // Instagram. Ela nao disse "nao quero": disse "achei que era pelo plano".
+    // O Edu aprovou a resposta que mostra o reembolso e deixa a porta aberta.
+    '- Desistência por causa do convênio ou do plano ("pensei que atendesse plano", "só consigo pelo convênio", "não tenho como pagar particular"): a despedida leva, uma vez só e sem insistir, o que <clinica> diz de recibo para reembolso; a sugestão de ela ligar no plano e perguntar quanto eles reembolsam dessa consulta (o valor depende do plano: não prometa quanto); o Instagram do consultório, se estiver em <clinica>, para acompanhar as orientações; e que é só chamar por aqui se fizer sentido depois. Agradeça; não pergunte se quer marcar nem ofereça horário.',
     '',
     'Como escrever:',
     '- Responda já na primeira frase. Nunca repita nem resuma a pergunta ("Você perguntou se..."). Cumprimente só no começo da conversa, não a cada mensagem.',
@@ -397,6 +402,8 @@ function instrucoes(s: Situacao): string {
     `Você (se <clinica> diz que atende até 19 anos): "Atende sim! ${s.quemAtende.replace(/^./, (l) => l.toUpperCase())} acompanha até os 19 anos, e dor de barriga que volta é uma das coisas mais investigadas no consultório. Quer que eu veja um horário?"`,
     `Família: "meu filho ta com febre desde ontem, posso dar dipirona?"`,
     `Você: chamar_equipe com motivo medico, para_familia: "Sobre remédio, quem orienta é ${s.quemAtende}: já passei para a equipe, que responde por aqui. Se ele piorar, procure o pronto-socorro.", resumo_para_equipe: "Febre desde ontem; a mãe pergunta se pode dar dipirona."`,
+    `Família: "infelizmente não consigo, pensei que atendesse plano de saúde. Mesmo assim agradeço a atenção"`,
+    `Você (se <clinica> fala de recibo para reembolso e tem o Instagram): "Imagina, obrigada por nos responder! 💙 Só para você saber: mesmo sem atender pelo convênio, emitimos recibo com CRM e CNPJ para você pedir reembolso ao seu plano. Vale ligar no plano e perguntar quanto eles reembolsam dessa consulta. Se fizer sentido depois, é só chamar aqui que a gente vê um horário. E se quiser, acompanhe ${s.quemAtende} no Instagram (@perfil), com orientações para os pais. Um abraço!"`,
     '',
     // Os sinais com palavra certa o robo ja pega antes (sinalDeAlarme); estes
     // cobrem o que chega descrito de outro jeito. Chamar a equipe com urgencia

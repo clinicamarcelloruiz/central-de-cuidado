@@ -2232,6 +2232,11 @@ confere('narracao: "voce recebe nesta conversa" fica', semNarracao('Quando o rel
   const c = claudeFalso([texto('oi')])
   await atenderComAssistente({ modo: 'ligado', situacao: situacao(), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
   confere('regra geral: valor so quando perguntam', textoDoSistema(c.chamadas[0]).includes('Valor da consulta só quando a família perguntar'))
+  // Real 19/10/2026: "infelizmente nao consigo, pensei que atendesse plano".
+  const sistema = textoDoSistema(c.chamadas[0])
+  confere('desistencia pelo convenio: reembolso, plano, Instagram e porta aberta', sistema.includes('Desistência por causa do convênio ou do plano') && sistema.includes('perguntar quanto eles reembolsam') && sistema.includes('o Instagram do consultório, se estiver em <clinica>') && sistema.includes('não pergunte se quer marcar'))
+  confere('desistencia pelo convenio: a despedida curta abre a excecao', sistema.includes('A exceção é quem desiste por causa do convênio'))
+  confere('desistencia pelo convenio: exemplo sem prometer quanto reembolsa', sistema.includes('pensei que atendesse plano de saúde') && sistema.includes('perguntar quanto eles reembolsam dessa consulta') && !/reembolsa(m)? (o valor )?(total|tudo)/.test(sistema))
 }
 
 console.log(`assistente: ${ok} verificacoes ok`)

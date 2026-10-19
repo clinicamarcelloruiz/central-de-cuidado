@@ -1,7 +1,7 @@
 // Alerta de urgencia no WhatsApp pessoal do medico (17/10/2026).
 // Regra em supabase/functions/_shared/alerta-de-urgencia.ts. Sem Meta e sem
 // banco: um fetch de mentira e um admin que guarda o que foi gravado.
-import { assuntoDoPedido, deveAlertar, deveEncaminhar, descreverEnvio, enviarAlertaDeUrgencia, MODELO_DO_ALERTA, numerosDoAlerta, parametrosDoAlerta, parametrosDoPedido } from './alerta-de-urgencia.build.mjs'
+import { assuntoDoPedido, deveAlertar, deveEncaminhar, descreverEnvio, enviarAlertaDeUrgencia, MODELO_DO_ALERTA, numerosDoAlerta, numerosDoPedido, parametrosDoAlerta, parametrosDoPedido, pedidoParaOMedico } from './alerta-de-urgencia.build.mjs'
 import { textoDoModelo } from './modelos.build.mjs'
 import { bancoFalso } from './fixtures/banco-falso.mjs'
 
@@ -249,6 +249,39 @@ const pedidoDaFamilia = { ...pedido, tipo: 'pedido', assunto: 'pergunta para o D
   confere('seguimento: pedido de mais de 6 h nao segura', r4.length === 2)
   const r5 = await enviarAlertaDeUrgencia(bancoFalso({ clinic_settings: ajustesComNumeros().db.clinic_settings }, { semTabela: ['alertas_de_urgencia'] }), { ...pedidoDaFamilia, seguimento: true }, meta)
   confere('seguimento: sem a tabela nao manda (seria uma por mensagem)', r5.length === 0)
+}
+
+// So o que depende do medico vai ao celular dele (19/10/2026): "as vezes eles
+// colocam falar com a equipe e e para perguntar valor".
+confere('medico: conduta da IA vai a ele', pedidoParaOMedico('atendente', 'medico'))
+confere('medico: receita ou exame novo da IA vai a ele', pedidoParaOMedico('atendente', 'documento'))
+confere('medico: excecao (encaixe, desconto) vai a ele', pedidoParaOMedico('atendente', 'excecao'))
+confere('medico: farmacia pedindo correcao vai a ele', pedidoParaOMedico('farmacia', null))
+confere('medico: "Preciso de ajuda" do acompanhamento vai a ele', pedidoParaOMedico('ajuda', null))
+confere('equipe: "falar com a equipe" do menu nao vai a ele', !pedidoParaOMedico('atendente', null))
+confere('equipe: valor e pagamento nao vao a ele', !pedidoParaOMedico('atendente', 'financeiro'))
+confere('equipe: pedir uma pessoa nao vai a ele', !pedidoParaOMedico('atendente', 'pessoa'))
+confere('equipe: o que o robo nao soube nao vai a ele', !pedidoParaOMedico('atendente', 'sem_informacao'))
+confere('equipe: 2a via e nota fiscal nao vao a ele', !pedidoParaOMedico('documento', null))
+confere('equipe: remarcar e ligacao nao vao a ele', !pedidoParaOMedico('remarcacao', null) && !pedidoParaOMedico('nao_suportada', null))
+confere('numeros: para o medico vai a todos', JSON.stringify(numerosDoPedido(['m', 'e'], true)) === '["m","e"]')
+confere('numeros: so equipe tira o primeiro', JSON.stringify(numerosDoPedido(['m', 'e1', 'e2'], false)) === '["e1","e2"]')
+confere('numeros: sem equipe cadastrada vai ao medico mesmo assim', JSON.stringify(numerosDoPedido(['m'], false)) === '["m"]')
+{
+  const banco = ajustesComNumeros()
+  const para = []
+  const meta = async (url, init) => {
+    para.push(JSON.parse(init.body).to)
+    return { ok: true, status: 200, json: async () => ({ messages: [{ id: `wamid.${para.length}` }] }) }
+  }
+  const r = await enviarAlertaDeUrgencia(banco, { ...pedidoDaFamilia, paraOMedico: false }, meta)
+  confere('pedido so da equipe: sai so para o segundo numero', r.length === 1 && JSON.stringify(para) === '["5511988887777"]', JSON.stringify(para))
+  const urgencia = []
+  await enviarAlertaDeUrgencia(ajustesComNumeros(), { ...pedido, paraOMedico: false }, async (url, init) => {
+    urgencia.push(JSON.parse(init.body).to)
+    return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'w' }] }) }
+  })
+  confere('urgencia ignora o campo: vai aos dois', urgencia.length === 2, JSON.stringify(urgencia))
 }
 
 console.log(`alerta de urgencia: ${ok} verificacoes ok`)

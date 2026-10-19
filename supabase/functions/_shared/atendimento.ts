@@ -1419,7 +1419,7 @@ async function lugaresComValor(admin: Admin, clinicId: string): Promise<Lugar[]>
  * atendimento.
  */
 async function sobreOConsultorio(admin: Admin, clinicId: string) {
-  const sobre = { texto: '', descricao: '', horizonte: 0, antecedencia: 0 }
+  const sobre = { texto: '', descricao: '', horizonte: 0, antecedencia: 0, instagram: '' }
   try {
     const { data, error } = await admin
       .from('clinic_settings')
@@ -1440,6 +1440,16 @@ async function sobreOConsultorio(admin: Admin, clinicId: string) {
     sobre.texto = ((data as { assistente_ia_conhecimento?: string | null } | null)?.assistente_ia_conhecimento ?? '').trim()
   } catch (erro) {
     console.warn('Sem clinic_settings.assistente_ia_conhecimento; a IA responde sem o texto do consultorio', erro)
+  }
+  // O Instagram do consultorio (19/10/2026): a IA convida a acompanhar quem
+  // desiste por causa do convenio (ver assistente.ts). Tabela do Instagram,
+  // lida a parte: sem ela, so o convite fica de fora.
+  try {
+    const { data, error } = await admin.from('instagram_contas').select('username').eq('clinic_id', clinicId).maybeSingle()
+    if (error) throw error
+    sobre.instagram = String((data as { username?: string | null } | null)?.username ?? '').trim().replace(/^@/, '')
+  } catch (erro) {
+    console.warn('Atendente com IA: nao li o Instagram do consultorio', erro)
   }
   return sobre
 }
@@ -1489,6 +1499,7 @@ export async function conhecimentoDaClinica(admin: Admin, clinicId: string): Pro
     `- Foto ou arquivo (exame, laudo, receita) pode ser mandado por aqui: chega para a equipe, que olha e responde.`,
     `- Na véspera da consulta, a família recebe um lembrete por aqui.`,
     tele.ativa ? '- Também há consulta online (telemedicina).' : '',
+    sobre.instagram ? `- Instagram do consultório: @${sobre.instagram} (orientações para os pais).` : '',
   ].filter(Boolean)
 
   // Rotulos de proposito (15/10/2026): sem eles o Claude tratava a resposta

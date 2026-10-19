@@ -40,6 +40,8 @@ function fazerAdmin({
   slotsAlemDaAgenda = {},
   // O que o cartao "Atendente com IA" e o perfil do WhatsApp dizem (16/10/2026).
   sobre = {},
+  // A conta do Instagram ligada (19/10/2026). Sem ela, a tabela nao existe aqui.
+  instagram = null,
 }) {
   const conversa = {
     booking_state: null,
@@ -220,6 +222,9 @@ function fazerAdmin({
             }),
           }),
         }
+      }
+      if (tabela === 'instagram_contas' && instagram) {
+        return { select: () => chain({ single: instagram }) }
       }
       throw new Error('tabela nao prevista: ' + tabela)
     },
@@ -4236,6 +4241,13 @@ await caso('Campos: texto sem campo continua exatamente igual', [
   const k2 = await conhecimentoDaClinica(semColuna.admin, 'clinica-1')
   confere('IA sem a coluna nova: unidades seguem', k2.includes('Livance · Santos') && k2.includes('Convênio: Trasmontano') && !k2.includes('Trata refluxo'), k2)
   confere('IA sem a coluna nova: descricao segue', k2.includes('Consultório de gastroenterologia pediátrica.'))
+
+  // O Instagram do consultorio (19/10/2026): a IA convida a acompanhar quem
+  // desiste por causa do convenio. Sem a conta ligada (k, acima), nada entra.
+  const comInstagram = fazerAdmin({ unidades: unidadesDaIA, slotsPorUnidade: {}, sobre, instagram: { username: '@drmarcelloruizgastroped' } })
+  const k3 = await conhecimentoDaClinica(comInstagram.admin, 'clinica-1')
+  confere('IA: Instagram do consultorio entra, com um @ so', k3.includes('Instagram do consultório: @drmarcelloruizgastroped (orientações para os pais).'), k3)
+  confere('IA: sem conta ligada, sem linha do Instagram', !k.includes('Instagram do consultório'))
 }
 
 // ---------------------------------------------------------------------------
