@@ -1857,7 +1857,11 @@ export interface Conversation {
    * mensagem humana (automatic = false), que o banco separa desde 30/08/2026.
    */
   respondidaPelaEquipe: boolean
+  /** De qual anuncio a conversa veio (19/10/2026). Nulo quando nao veio de anuncio. */
+  origemAnuncio?: OrigemDoAnuncio | null
 }
+
+export type OrigemDoAnuncio = 'instagram' | 'facebook' | 'meta' | 'google'
 
 export interface ConversationMessage {
   id: string
@@ -1928,6 +1932,22 @@ export async function listConversations(clinicId: string): Promise<Conversation[
         console.warn('Sem patients.followup_opt_out_at; a etiqueta "Sem acompanhamento" fica de fora', erro)
       }
     }
+    // De qual anuncio veio (19/10/2026): coluna nova, lida a parte - sem ela,
+    // so o selo do Instagram some.
+    const origemPorConversa = new Map<string, OrigemDoAnuncio>()
+    try {
+      const { data: comOrigem, error } = await semTipo
+        .from('whatsapp_conversations')
+        .select('id,origem_anuncio')
+        .eq('clinic_id', clinicId)
+        .not('origem_anuncio', 'is', null)
+      if (error) throw error
+      for (const c of (comOrigem ?? []) as { id: string; origem_anuncio: OrigemDoAnuncio }[]) {
+        origemPorConversa.set(c.id, c.origem_anuncio)
+      }
+    } catch (erro) {
+      console.warn('Sem whatsapp_conversations.origem_anuncio; o selo do anuncio fica de fora', erro)
+    }
     return linhas.map((row) => ({
       id: row.id,
       patientId: row.patient_id,
@@ -1946,6 +1966,7 @@ export async function listConversations(clinicId: string): Promise<Conversation[
       // A busca no texto agora e feita no banco (buscarNasConversas).
       textoBusca: '',
       respondidaPelaEquipe: row.respondida,
+      origemAnuncio: origemPorConversa.get(row.id) ?? null,
     })) as Conversation[]
   } catch (causa) {
     console.warn('Resumo das conversas indisponível; usando o caminho antigo (baixa todas as mensagens)', causa)
@@ -3783,6 +3804,110 @@ export async function numerosDoWhatsApp(
     eventos: contagens(bruto.eventos),
     chamouEquipePorMotivo: contagens(bruto.chamou_equipe_por_motivo),
     desistiram: inteiro(bruto.desistiram),
+  }
+}
+
+/**
+ * Quem chegou pelos anuncios (19/10/2026, aba Instagram da Visao geral).
+ *
+ * A campanha do Instagram leva direto ao WhatsApp do robo; o webhook grava em
+ * whatsapp_conversations.origem_anuncio de onde a conversa veio. Daqui sai a
+ * lista e quantas dessas conversas viraram consulta (appointments.conversation_id,
+ * marcada depois da chegada pelo anuncio).
+ *
+ * `disponivel: false` quando a coluna ainda nao existe no banco (a tela sobe
+ * antes da migration): a aba mostra o aviso em vez de um zero que parece real.
+ */
+export interface ChegadaPorAnuncio {
+  conversaId: string
+  nome: string
+  telefone: string
+  origem: OrigemDoAnuncio
+  chegouEm: string
+  tituloDoAnuncio: string | null
+  /** Inicio da consulta marcada depois da chegada (a mais proxima), se houver. */
+  consultaEm: string | null
+  consultaCancelada: boolean
+}
+
+export interface NumerosDosAnuncios {
+  disponivel: boolean
+  chegadas: ChegadaPorAnuncio[]
+}
+
+export async function numerosDosAnuncios(clinicId: string, de: Date, ate: Date): Promise<NumerosDosAnuncios> {
+  type Linha = {
+    id: string
+    patient_id: string | null
+    profile_name: string | null
+    display_phone: string | null
+    wa_id: string | null
+    origem_anuncio: OrigemDoAnuncio
+    origem_anuncio_em: string
+    origem_anuncio_titulo: string | null
+  }
+  let linhas: Linha[] = []
+  try {
+    const { data, error } = await semTipo
+      .from('whatsapp_conversations')
+      .select('id,patient_id,profile_name,display_phone,wa_id,origem_anuncio,origem_anuncio_em,origem_anuncio_titulo')
+      .eq('clinic_id', clinicId)
+      .not('origem_anuncio', 'is', null)
+      .gte('origem_anuncio_em', de.toISOString())
+      .lte('origem_anuncio_em', ate.toISOString())
+      .order('origem_anuncio_em', { ascending: false })
+    if (error) throw error
+    linhas = (data ?? []) as Linha[]
+  } catch (erro) {
+    console.warn('Sem whatsapp_conversations.origem_anuncio; a aba Instagram fica sem dados', erro)
+    return { disponivel: false, chegadas: [] }
+  }
+  if (!linhas.length) return { disponivel: true, chegadas: [] }
+
+  const ids = linhas.map((l) => l.id)
+  const patientIds = [...new Set(linhas.map((l) => l.patient_id).filter(Boolean))] as string[]
+  const [consultas, pacientes] = await Promise.all([
+    semTipo
+      .from('appointments')
+      .select('conversation_id,starts_at,status,created_at')
+      .eq('clinic_id', clinicId)
+      .in('conversation_id', ids)
+      .order('starts_at'),
+    patientIds.length
+      ? supabase.from('patients').select('id,name').in('id', patientIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[], error: null }),
+  ])
+  // Consulta e nome sao complemento: se falharem, a lista de chegadas continua.
+  if (consultas.error) console.warn('Nao li as consultas das conversas do anuncio', consultas.error)
+  const nomePorId = new Map(((pacientes.data ?? []) as { id: string; name: string }[]).map((p) => [p.id, p.name]))
+  type Consulta = { conversation_id: string; starts_at: string; status: string; created_at: string }
+  const consultasPorConversa = new Map<string, Consulta[]>()
+  for (const c of ((consultas.data ?? []) as Consulta[])) {
+    const lista = consultasPorConversa.get(c.conversation_id) ?? []
+    lista.push(c)
+    consultasPorConversa.set(c.conversation_id, lista)
+  }
+
+  return {
+    disponivel: true,
+    chegadas: linhas.map((l) => {
+      // So conta a consulta marcada depois que a familia chegou pelo anuncio:
+      // paciente antigo que clicou no anuncio nao vira conversao por causa de
+      // uma consulta de setembro.
+      const depois = (consultasPorConversa.get(l.id) ?? []).filter((c) => c.created_at >= l.origem_anuncio_em)
+      const valendo = depois.find((c) => c.status !== 'cancelled')
+      const escolhida = valendo ?? depois[0] ?? null
+      return {
+        conversaId: l.id,
+        nome: (l.patient_id && nomePorId.get(l.patient_id)) || l.profile_name || 'Contato sem cadastro',
+        telefone: formatarTelefone(l.display_phone || l.wa_id || ''),
+        origem: l.origem_anuncio,
+        chegouEm: l.origem_anuncio_em,
+        tituloDoAnuncio: l.origem_anuncio_titulo,
+        consultaEm: escolhida?.starts_at ?? null,
+        consultaCancelada: Boolean(escolhida && !valendo),
+      }
+    }),
   }
 }
 

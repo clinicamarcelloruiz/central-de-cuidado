@@ -36,6 +36,7 @@ import { assuntoDoPedido, deveAlertar, deveEncaminhar, enviarAlertaDeUrgencia, l
 import { repassarRespostaDaFamilia, tratarRespostaDaEquipe, whatsAppPelaApi } from '../_shared/resposta-ao-alerta.ts'
 import { enviarDirect } from '../_shared/instagram-api.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
+import { origemDoAnuncio } from '../_shared/origem-do-anuncio.ts'
 import {
   ESPERA_MAXIMA_MS,
   complementoDaRajada,
@@ -892,6 +893,27 @@ Deno.serve(async (req) => {
             continue
           }
           if (messageError) throw messageError
+
+          // De qual anuncio veio (19/10/2026, ver origem-do-anuncio.ts). Coluna
+          // nova, gravada a parte: sem ela o atendimento segue igual, so a aba
+          // Instagram da Visao geral fica sem esta conversa - e o aviso grita.
+          const origem = origemDoAnuncio(message.referral, body)
+          if (origem) {
+            try {
+              const { error: erroOrigem } = await admin
+                .from('whatsapp_conversations')
+                .update({
+                  origem_anuncio: origem.origem,
+                  origem_anuncio_em: receivedAt,
+                  origem_anuncio_titulo: origem.titulo,
+                  origem_anuncio_url: origem.url,
+                })
+                .eq('id', conversation.id)
+              if (erroOrigem) throw erroOrigem
+            } catch (erro) {
+              console.warn('Nao gravei de qual anuncio a conversa veio', origem.origem, erro)
+            }
+          }
 
           // A familia respondendo a uma conversa que o medico (ou o Edu) esta
           // levando pelo WhatsApp dele (18/10/2026): a mensagem vai aos

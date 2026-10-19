@@ -28,6 +28,7 @@ import {
   Smartphone,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { SeloDaOrigem } from '@/sections/NumerosDoInstagram'
 import { criarNota, listarNotas, type NotaDaConversa } from '@/lib/notas-da-conversa'
 import { mandarParaOCelular } from '@/lib/notificacoes'
 import { linhaDoTempo } from '@/lib/linha-do-tempo'
@@ -263,6 +264,7 @@ type Recorte =
   | 'novas'
   | 'sem_cadastro'
   | 'robo_parado'
+  | 'anuncio'
   | `motivo:${NonNullable<Conversation['attentionReason']>}`
 
 function passaNoRecorte(conversa: Conversation, recorte: Recorte): boolean {
@@ -270,6 +272,7 @@ function passaNoRecorte(conversa: Conversation, recorte: Recorte): boolean {
   if (recorte === 'atencao') return Boolean(conversa.needsAttention && conversa.attentionReason)
   if (recorte === 'novas') return conversa.unreadCount > 0
   if (recorte === 'sem_cadastro') return !conversa.patientId
+  if (recorte === 'anuncio') return Boolean(conversa.origemAnuncio)
   if (recorte === 'robo_parado') {
     // Mesma regra do estaConcluida: "menu" e "atendente" sao descanso, nao
     // etapa. Parado e quem esta no meio de escolher dia, horario, cadastro.
@@ -1743,6 +1746,7 @@ export default function Conversations({
               <option value="novas">Com mensagens novas</option>
               <option value="sem_cadastro">Sem cadastro</option>
               <option value="robo_parado">Robô parado numa etapa</option>
+              <option value="anuncio">Vieram de anúncio (Instagram ou Google)</option>
             </select>
           )}
           {onAlternarCompacto && (
@@ -1985,6 +1989,8 @@ export default function Conversations({
                     )
                   })()}
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {/* Veio de anuncio (19/10/2026): ver a aba Instagram da Visao geral. */}
+                    {conversation.origemAnuncio && <SeloDaOrigem origem={conversation.origemAnuncio} />}
                     {semCadastro && (
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-extrabold text-slate-500">
                         {conversation.profileName ? 'Nome do WhatsApp' : 'Sem cadastro'}

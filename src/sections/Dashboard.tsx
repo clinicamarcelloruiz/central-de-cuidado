@@ -9,7 +9,9 @@ import {
   MapPinned,
   Stethoscope,
   Building2,
+  Instagram,
   MessageCircle,
+  Search,
   UsersRound,
 } from 'lucide-react'
 import type { Patient } from '@/types/patient'
@@ -17,6 +19,7 @@ import type { PendingRequest } from '@/lib/repository'
 import { dueCount, idadeAnos, pendingFollowups } from '@/lib/followup'
 import { nomeDoCid } from '@/lib/cid'
 import NumerosDoWhatsApp from '@/sections/NumerosDoWhatsApp'
+import NumerosDoInstagram from '@/sections/NumerosDoInstagram'
 
 const NAVY = '#081b2c'
 // Azul de destaque do sistema (proposta 3, aprovada em 08/09/2026). O nome
@@ -37,6 +40,10 @@ const cardClass = 'surface-card rounded-[24px]'
 const ABAS = [
   { chave: 'clinica' as const, rotulo: 'Base clínica', icone: Stethoscope },
   { chave: 'whatsapp' as const, rotulo: 'WhatsApp', icone: MessageCircle },
+  // Quem chegou pelos anuncios (19/10/2026): pedido do Edu um dia depois de a
+  // campanha do Instagram entrar no ar levando direto ao robo.
+  { chave: 'instagram' as const, rotulo: 'Instagram', icone: Instagram },
+  { chave: 'google' as const, rotulo: 'Google', icone: Search },
 ]
 type Aba = (typeof ABAS)[number]['chave']
 
@@ -393,7 +400,9 @@ export default function Dashboard({
         ))}
       </div>
 
-      {aba === 'whatsapp' ? (
+      {aba === 'instagram' || aba === 'google' ? (
+        <NumerosDoInstagram key={aba} canal={aba} />
+      ) : aba === 'whatsapp' ? (
         <NumerosDoWhatsApp />
       ) : (
         <>
