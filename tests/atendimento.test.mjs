@@ -4564,12 +4564,19 @@ await caso('Painel IA: dia e hora na mesma frase marcam direto', [
   ['1', 'Datas disponíveis'],
   ['sexta dia 9 as 15:10', ['às 15:10*', 'está guardado']],
 ], { slots: SLOTS_TARDE })
-await caso('Painel IA: troca de unidade direto nos horários mostra o valor', [
+await caso('Real 19/10: troca de unidade direto nos horários, sem o valor', [
   ['quero marcar', 'Em qual unidade'],
   ['1', 'Datas disponíveis'],
   ['1', 'Horários de'],
-  ['pensando bem melhor são paulo, tem segunda?', ['Em Livance Ibirapuera - São Paulo, a consulta é R$ 600,00', 'Horários de segunda']],
-], { slots: SLOTS_DUAS_UNIDADES, unidades: [TRES_UNIDADES[0], TRES_UNIDADES[1], { ...TRES_UNIDADES[2], price_cents: 60000 }] })
+  ['pensando bem melhor são paulo, tem segunda?', 'Horários de segunda'],
+], {
+  slots: SLOTS_DUAS_UNIDADES,
+  unidades: [TRES_UNIDADES[0], TRES_UNIDADES[1], { ...TRES_UNIDADES[2], price_cents: 60000 }],
+  verificar: ({ ultimoToque, titulo }) => {
+    if (!/💰|R\$/.test(ultimoToque.resposta ?? '')) passou++
+    else falhas.push(`${titulo} | valor sem pergunta: ${ultimoToque.resposta}`)
+  },
+})
 await caso('Painel IA: urgência com pergunta de remédio responde o remédio', [
   ['a barriga da Helena está durinha, posso dar buscopan?', ['Já avisei o Dr. Marcello', 'Sobre remédio e dose, quem orienta é o Dr. Marcello']],
 ], { pacientes: [ANA] })
@@ -4637,11 +4644,17 @@ await caso('Painel IA: consulta de sexta continua com o lembrete', [
   ['1', 'Consulta marcada!'],
 ], { pacientes: [ANA], slots: SLOTS_SEXTA, verificar: semLembrete(true) })
 
-// O valor na tela das datas (rodada 2: familia nova marcava sem saber o preco).
-await caso('Painel IA: as datas mostram o valor da unidade', [
+// Real 19/10: a tela das datas mostrava "💰 Consulta: R$ 450,00" para quem so
+// tinha escolhido a unidade. O agendamento nao fala de valor sem pergunta,
+// mesmo com o valor cadastrado (entrou na rodada 2 do painel e saiu a pedido).
+const semValor = ({ ultimoToque, titulo }) => {
+  if (!/💰|R\$/.test(ultimoToque.resposta ?? '')) passou++
+  else falhas.push(`${titulo} | valor sem pergunta: ${ultimoToque.resposta}`)
+}
+await caso('Real 19/10: as datas não mostram o valor sem pergunta', [
   ['quero marcar', 'Em qual unidade'],
-  ['1', ['Datas disponíveis em Liferty', '💰 Consulta: R$ 450,00']],
-], { unidades: [{ ...TRES_UNIDADES[0], price_cents: 45000 }, TRES_UNIDADES[1], TRES_UNIDADES[2]] })
+  ['1', 'Datas disponíveis em Liferty'],
+], { unidades: [{ ...TRES_UNIDADES[0], price_cents: 45000 }, TRES_UNIDADES[1], TRES_UNIDADES[2]], verificar: semValor })
 await caso('Painel IA: sem valor cadastrado, sem a linha', [
   ['quero marcar', 'Em qual unidade'],
   ['1', 'Datas disponíveis em Liferty'],

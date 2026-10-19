@@ -2707,16 +2707,11 @@ async function trocarDeUnidade(
       const dias = agruparPorDia(horarios, timezone).map((d) => d.chave)
       const indice = diaPeloNome(texto, dias, agora)
       if (indice >= 0) {
-        // Direto nos horarios, a tela das datas (com o valor) fica para tras:
-        // o valor da unidade nova vai na frente (rodada 5 do painel: a mae viu
-        // R$ 450 de Santos, trocou para Sao Paulo e marcou achando que era o mesmo).
-        const horarios = await perguntarHorario(admin, clinicId, conversationId, unidade.id, dias[indice])
-        const centavos = unidade.id === TELE_ID
-          ? await valorDaTelemedicina(admin, clinicId)
-          : (await valoresDasUnidades(admin, clinicId)).get(unidade.id) ?? null
-        return centavos && horarios
-          ? { ...horarios, resposta: `💰 Em ${unidade.name}, a consulta é ${formatarValor(centavos)}.\n\n${horarios.resposta}` }
-          : horarios
+        // Sem o valor da unidade nova na frente (19/10/2026): ele existia porque
+        // a tela das datas mostrava o preco da primeira unidade (rodada 5 do
+        // painel). Desde que o agendamento nao fala de valor sem pergunta, nao
+        // ha preco antigo para corrigir.
+        return await perguntarHorario(admin, clinicId, conversationId, unidade.id, dias[indice])
       }
     }
   }
@@ -3250,18 +3245,14 @@ async function perguntarDia(
     descricao: `${d.horarios.length} horário${d.horarios.length === 1 ? '' : 's'}`,
   }))
 
-  // O valor antes de escolher o dia (17/10/2026, rodada 2 do painel): familia
-  // nova marcava sem saber quanto custa - a lista de unidades nao mostra, e
-  // quando a IA abre direto nas datas nem a lista aparece. Vem do cadastro da
-  // unidade; sem valor cadastrado, a linha nao entra.
-  const centavos = tele
-    ? await valorDaTelemedicina(admin, clinicId)
-    : (await valoresDasUnidades(admin, clinicId)).get(unidade.id) ?? null
-  const valor = centavos ? `💰 Consulta: ${formatarValor(centavos)}\n\n` : ''
-
+  // Sem o valor na tela das datas (19/10/2026). Entrou em 17/10 pela rodada 2
+  // do painel (familia nova marcava sem saber o preco), mas na conversa real o
+  // "💰 Consulta: R$ 450,00" aparecia para quem so tinha escolhido a unidade, sem
+  // ter perguntado - o Edu pediu para tirar. Quem quer saber pergunta, e a
+  // pergunta de valor no meio do agendamento ja e respondida sem perder o passo.
   return {
     resposta:
-      `🗓️ *Datas disponíveis${tele ? ' para telemedicina' : ` em ${unidade.name}`}:*\n\n${valor}${linhas}\n\n` +
+      `🗓️ *Datas disponíveis${tele ? ' para telemedicina' : ` em ${unidade.name}`}:*\n\n${linhas}\n\n` +
       `Responda com o número do dia.\n${rodape}${urgencia}`,
     lista: {
       rotulo: 'Escolher o dia',
