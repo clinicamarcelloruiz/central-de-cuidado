@@ -164,8 +164,7 @@ export default function AtendenteComIA({ clinicId }: { clinicId: string | null }
             <Bot className="h-5 w-5" />
           </span>
           <div>
-            <p className="text-[9px] font-extrabold uppercase tracking-[0.15em] text-[#1f4f78]">Em teste</p>
-            <h2 className="mt-1 text-base font-extrabold tracking-[-0.03em] text-[#081b2c]">Atendente com IA (Claude)</h2>
+            <h2 className="text-base font-extrabold tracking-[-0.03em] text-[#081b2c]">Atendente com IA</h2>
             <p className="mt-1.5 max-w-2xl text-[11px] leading-relaxed text-slate-400">
               Responde às famílias no WhatsApp usando só o que está nos cartões das unidades e nas respostas prontas.
               Mensagens escritas por ela aparecem com 🤖 na conversa. Se a IA falhar, o robô responde.
