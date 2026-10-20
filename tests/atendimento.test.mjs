@@ -42,6 +42,8 @@ function fazerAdmin({
   sobre = {},
   // A conta do Instagram ligada (19/10/2026). Sem ela, a tabela nao existe aqui.
   instagram = null,
+  // Consultas futuras com pedido de remarcar (20/10/2026, ver remarcacaoPendente).
+  remarcacoesPendentes = [],
 }) {
   const conversa = {
     booking_state: null,
@@ -68,6 +70,8 @@ function fazerAdmin({
     eq: (_col, valor) => chain(resultado._porId ? { ...resultado, single: resultado._porId(valor) } : resultado),
     gte: () => chain(resultado),
     is: () => chain(resultado),
+    not: () => chain(resultado),
+    gt: () => chain(resultado),
     in: () => chain(resultado),
     order: () => chain(resultado),
     limit: () => chain(resultado),
@@ -174,8 +178,9 @@ function fazerAdmin({
           // monta um comprovante. O horario e FUTURO de proposito, para o teste
           // do questionario manual provar que quem segura o comprovante e a
           // regra do "manual", e nao a data.
-          select: () =>
-            chain({
+          select: (colunas = '') => String(colunas).includes('reschedule_requested_at')
+            ? chain({ list: remarcacoesPendentes })
+            : chain({
               // Consultas lidas em lista (cadastro pela metade, 24/09/2026).
               list: consultasComFicha,
               single: {
@@ -325,6 +330,7 @@ async function caso(titulo, passos, opcoes = {}) {
     consultasComFicha: opcoes.fichas ?? [],
     regrasPorUnidade: opcoes.regras ?? {},
     slotsAlemDaAgenda: opcoes.alemDaAgenda ?? {},
+    remarcacoesPendentes: opcoes.remarcacoesPendentes ?? [],
   })
 
   // A conversa começa como se o menu já tivesse aparecido alguma vez.
@@ -4728,6 +4734,35 @@ await caso('Painel IA: remarcar abre nas datas da mesma unidade', [
   if (r === null && !conversa.booking_replaces_id) passou++
   else falhas.push(`Real 20/10 | sem unidade deveria voltar para a equipe: ${JSON.stringify(r)}`)
 }
+// Real 20/10/2026: a Sandryne pediu para remarcar no lembrete e depois marcou
+// pelo menu como consulta nova; a antiga ficou marcada. Agora a nova substitui
+// a consulta com pedido de remarcar, e a antiga so cai depois.
+await caso('Real 20/10: agendar com remarcação pendente substitui a antiga', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['1', 'Consulta remarcada!'],
+], {
+  pacientes: [ANA],
+  remarcacoesPendentes: [{ id: 'a9', starts_at: '2026-10-21T19:00:00Z', reschedule_requested_at: '2026-10-20T12:31:00Z' }],
+  verificar: ({ marcadas, canceladas, titulo }) => {
+    const nova = marcadas[0] ?? {}
+    if (nova.rescheduled_from === 'a9' && canceladas.includes('a9')) passou++
+    else falhas.push(`${titulo} | a antiga ficou: ${JSON.stringify({ de: nova.rescheduled_from, canceladas })}`)
+  },
+})
+await caso('Real 20/10: sem remarcação pendente, consulta nova não cancela nada', [
+  ['quero marcar', 'Em qual unidade'],
+  ['1', 'Datas disponíveis'],
+  ['1', 'Horários de'],
+  ['1', 'Consulta marcada!'],
+], {
+  pacientes: [ANA],
+  verificar: ({ marcadas, canceladas, titulo }) => {
+    if (!(marcadas[0] ?? {}).rescheduled_from && canceladas.length === 0) passou++
+    else falhas.push(`${titulo} | cancelou sem pedido: ${JSON.stringify(canceladas)}`)
+  },
+})
 await caso('Painel IA: cancelar oferece o botão de marcar outra data', [
   ['Oi', 'Como podemos ajudar'],
   ['4', 'Sua consulta'],

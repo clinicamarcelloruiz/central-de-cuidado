@@ -3646,6 +3646,46 @@ async function perguntarHorario(
   }
 }
 
+/**
+ * Pediu para remarcar e depois agendou pelo menu (20/10/2026).
+ *
+ * A Sandryne tocou "Reagendar" no lembrete as 09:31, ouviu "ja avisei a
+ * equipe" (antes de o lembrete abrir as datas) e as 09:36 marcou 11/11 pelo
+ * menu, como consulta nova. A de 21/10 continuou marcada com "pediu para
+ * remarcar": duas consultas, a vespera pedindo para ligar para ela e um horario
+ * que ninguem ia usar. Quem tem consulta futura com pedido de remarcar e agenda
+ * de novo para a MESMA crianca esta remarcando: a nova substitui aquela, e ela
+ * so cai depois que a nova estiver gravada, como no REMARCAR do menu. Sem
+ * cadastro, vale o mesmo telefone e consulta tambem sem paciente - irmao
+ * cadastrado nao entra na conta.
+ */
+async function remarcacaoPendente(
+  admin: Admin,
+  clinicId: string,
+  paciente: Paciente | null,
+  telefone: string,
+  novoInicio: string,
+): Promise<string | null> {
+  try {
+    let busca = admin
+      .from('appointments')
+      .select('id,starts_at,reschedule_requested_at')
+      .eq('clinic_id', clinicId)
+      .eq('status', 'scheduled')
+      .not('reschedule_requested_at', 'is', null)
+      .gt('starts_at', (relogioEmFoco ?? new Date()).toISOString())
+    busca = paciente?.id ? busca.eq('patient_id', paciente.id) : busca.is('patient_id', null).eq('contact_phone', telefone)
+    const { data, error } = await busca.order('starts_at').limit(1)
+    if (error) throw error
+    const alvo = ((data ?? []) as { id: string; starts_at: string }[])[0]
+    if (!alvo || alvo.starts_at === novoInicio) return null
+    return alvo.id
+  } catch (erro) {
+    console.warn('Nao conferi se havia remarcacao pendente; marca como consulta nova', erro)
+    return null
+  }
+}
+
 async function marcar(
   admin: Admin,
   clinicId: string,
@@ -3656,7 +3696,7 @@ async function marcar(
   nomeDoPerfil: string,
   slot: Horario,
   /** Consulta antiga a cancelar assim que a nova entrar (remarcacao). */
-  substitui: string | null = null,
+  substituiPedida: string | null = null,
   /** Convenio escolhido na conversa. Vazio = particular. */
   convenio = '',
   /**
@@ -3679,6 +3719,9 @@ async function marcar(
   }
   const unidade = await unidadePorId(admin, unidadeDoHorario)
   const timezone = await fusoDaClinica(admin, clinicId)
+  // Quem pediu para remarcar e depois agendou pelo menu tambem esta remarcando
+  // (ver remarcacaoPendente).
+  const substitui = substituiPedida ?? (await remarcacaoPendente(admin, clinicId, paciente, telefone, slot.inicio))
 
 
   // Lido antes de inserir, porque a antiga so e cancelada la embaixo - e depois
