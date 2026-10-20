@@ -345,6 +345,10 @@ function instrucoes(s: Situacao): string {
     '- Não suponha o que a família não disse: plano de saúde ("se vocês tiverem plano, damos recibo para reembolso"), idade, quem é a criança. Exame pelo plano é "conforme a cobertura do seu plano", nunca um sim para um exame específico.',
     '- Oferta de marcar uma vez só: se a sua última mensagem já ofereceu e a família seguiu com outra dúvida, responda só a dúvida.',
     '- Paciente adolescente: fale "seu filho", "sua filha" ou o nome, não "a criança".',
+    // Real 20/10/2026: o Edgar respondeu o lembrete com "Confirma", o sistema nao
+    // reconheceu e a IA escreveu "Presenca confirmada!" - a agenda seguiu "sem
+    // resposta". Confirmar presenca e do lembrete, nao da IA.
+    '- Você não confirma presença em consulta: nunca escreva "presença confirmada", "consulta confirmada" nem "confirmei". Se a família disser que vai à consulta, agradeça e peça para tocar em *Confirmar presença* no lembrete que ela recebeu (ou responder CONFIRMAR), que é o que registra na agenda.',
     // Real 19/10/2026: avo de Osasco, neta de 5 anos, veio do Google. A IA
     // escolheu Sao Paulo sozinha e abriu as datas; a telemedicina so apareceu
     // de passagem na segunda resposta. O Edu: quem mora longe e cliente que se

@@ -147,6 +147,24 @@ conferir(
   interpretarResposta('CANCELAR', false).respondeuLembrete === false,
 )
 
+// Real 20/10/2026: o Edgar digitou "Confirma" e a consulta ficou "sem resposta".
+for (const texto of ['Confirma', 'confirma!', 'Confirmada', 'confirmamos sim', 'Confirmei']) {
+  conferir(`"${texto}" depois do lembrete confirma`, interpretarResposta(texto, true, false, true).confirma === true)
+}
+conferir('"Confirma" com lembrete recente (não a última) confirma', interpretarResposta('Confirma', false, true, false).confirma === true)
+// O lembrete pergunta "Podemos confirmar sua presença?": "sim" responde.
+for (const texto of ['Sim', 'sim!', 'Ok', 'ok, obrigada', 'Sim, estaremos lá', 'Vou sim', 'estaremos lá', 'Com certeza 👍', 'Certo']) {
+  conferir(`"${texto}" logo depois do lembrete confirma`, interpretarResposta(texto, true, false, true).confirma === true)
+}
+// ... mas so depois do PROPRIO lembrete: depois do acompanhamento, "sim" e outra conversa.
+conferir('"Sim" depois do acompanhamento não confirma consulta', interpretarResposta('Sim', true, false, false).confirma === false)
+conferir('"ok" sem o lembrete como última mensagem não confirma', interpretarResposta('ok', false, true, false).confirma === false)
+// "nao" na frase e o pedido junto mandam mais que o "sim".
+conferir('"sim, não vou conseguir" não confirma', interpretarResposta('sim, não vou conseguir', true, false, true).confirma === false)
+conferir('"Sim, mas preciso remarcar" é remarcar', (() => { const r = interpretarResposta('Sim, mas preciso remarcar', true, false, true); return r.remarca && !r.confirma })())
+conferir('"Não posso confirmar" continua não confirmando', interpretarResposta('Não posso confirmar', true, false, true).confirma === false)
+conferir('"sim" no meio de outra frase não confirma', interpretarResposta('tem estacionamento sim?', true, false, true).confirma === false)
+
 conferir(
   'Acentos e espaços não atrapalham',
   interpretarResposta('  Confirmar  ', true).confirma === true,

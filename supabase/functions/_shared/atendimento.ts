@@ -4627,6 +4627,61 @@ export async function abrirFichaPeloLembrete(
   return await perguntarDados(admin, conversationId, appointmentId, faltam, aviso)
 }
 
+/**
+ * "Preciso remarcar" no lembrete ja abre as datas (20/10/2026).
+ *
+ * Ate aqui o botao respondia "Ja avisei a nossa equipe para remarcar com
+ * voce" e a familia ficava esperando alguem - a Sandryne tocou "Reagendar" as
+ * 09:31 e a conversa parou ali. O Edu pediu que o robo mande as datas na hora.
+ * E o mesmo caminho do REMARCAR do menu (iniciarRemarcacao): datas da mesma
+ * unidade, a mesma crianca, e a consulta atual so cai quando a nova estiver
+ * marcada (booking_replaces_id).
+ *
+ * null quando nao da para abrir as datas (consulta sem unidade, unidade sem
+ * vaga, leitura que falhou): quem chamou volta ao "avisei a equipe" de antes,
+ * que ainda chega a alguem.
+ */
+export async function remarcarPeloLembrete(
+  admin: Admin,
+  clinicId: string,
+  conversationId: string,
+  appointmentId: string,
+): Promise<Resultado | null> {
+  try {
+    const { data, error } = await admin
+      .from('appointments')
+      .select('starts_at,unit_id,modality,patient_id')
+      .eq('id', appointmentId)
+      .maybeSingle()
+    if (error) throw error
+    const consulta = data as { starts_at?: string | null; unit_id?: string | null; modality?: string | null; patient_id?: string | null } | null
+    const unidade = consulta?.modality === 'telemedicina'
+      ? UNIDADE_TELE
+      : consulta?.unit_id ? await unidadePorId(admin, consulta.unit_id) : null
+    if (!consulta || !unidade) return null
+    await salvarEstado(admin, conversationId, {
+      booking_replaces_id: appointmentId,
+      booking_patient_id: consulta.patient_id ?? null,
+    })
+    const datas = await perguntarConvenioOuDia(admin, clinicId, conversationId, unidade)
+    if (!datas || /^No momento não temos horários/.test(datas.resposta)) {
+      await limparEstado(admin, conversationId)
+      return null
+    }
+    const timezone = await fusoDaClinica(admin, clinicId)
+    const quando = consulta.starts_at ? ` de *${formatarData(consulta.starts_at, timezone)}*` : ''
+    return {
+      ...datas,
+      resposta:
+        `Vamos remarcar a consulta${quando}. A atual só é cancelada depois que a nova estiver marcada.\n\n` +
+        datas.resposta,
+    }
+  } catch (erro) {
+    console.warn('Remarcar pelo lembrete: nao abri as datas; vai para a equipe', erro)
+    return null
+  }
+}
+
 /** Fecha a etapa em andamento da conversa (reserva cancelada). */
 export async function encerrarEtapa(admin: Admin, conversationId: string) {
   await limparEstado(admin, conversationId)

@@ -7,6 +7,7 @@ import {
   type Estado,
   horariosEmTexto,
   type Resultado,
+  remarcarPeloLembrete,
   roboRegistrou,
   type Toque,
   tratarConversa,
@@ -678,11 +679,14 @@ Deno.serve(async (req) => {
           // Lembrete de consulta nas ultimas 48h, ainda que nao seja a ultima
           // mensagem nossa (06/10/2026). Ver lembreteRecente em lembrete.ts.
           let comLembreteRecente = false
+          // A ultima mensagem nossa foi o lembrete em si (20/10/2026): so ai "sim"
+          // e "ok" confirmam. Ver interpretarResposta.
+          let ultimaFoiLembrete = false
           if (conversaAnterior?.id) {
             const [ultimoNossoResult, ultimoHumanoResult, ultimoAcompanhamentoResult, ultimoLembreteResult] = await Promise.all([
               admin
                 .from('whatsapp_messages')
-                .select('followup_id,appointment_id,created_at,external_message_id')
+                .select('followup_id,appointment_id,created_at,external_message_id,template_name')
                 .eq('conversation_id', conversaAnterior.id)
                 .eq('direction', 'outbound')
                 .order('created_at', { ascending: false })
@@ -737,6 +741,10 @@ Deno.serve(async (req) => {
               }
             }
             respondendoEnvioNosso = dentroDaJanelaDeResposta(ultimoNossoResult.data, Date.now(), consultaAindaMarcada)
+            {
+              const u = ultimoNossoResult.data as { appointment_id?: string | null; followup_id?: string | null; template_name?: string | null } | null
+              ultimaFoiLembrete = respondendoEnvioNosso && Boolean(u?.appointment_id && !u.followup_id && u.template_name)
+            }
             // Falha aqui custa so o tratamento especial do pos-consulta: a
             // mensagem segue o caminho de sempre. Mas avisa, para nao virar
             // mais um defeito mudo.
@@ -795,6 +803,7 @@ Deno.serve(async (req) => {
             escolhido,
             respondendoEnvioNosso,
             comLembreteRecente && !equipeFalouRecentemente,
+            ultimaFoiLembrete,
           )
           const { respondeuLembrete, optedOut, paraTudo, isWell, pediuAjuda, motivoAtencao } = resposta
           // A conversa so fica "nao quer receber" quando e para nao receber
@@ -1575,6 +1584,9 @@ Deno.serve(async (req) => {
           // exigir cadastro para LER a resposta fazia a confirmacao sumir em
           // silencio. Foi o que aconteceu em 31/08/2026 - o paciente confirmou
           // as 10:00 e so foi cadastrado depois.
+          // O robo abriu as datas do "Preciso remarcar" (ver remarcarPeloLembrete):
+          // ai o pedido nao vai a equipe nem aos celulares.
+          let remarcouPeloRobo = false
           if (respondeuLembrete) {
             // Irmaos (24/09/2026): a mae recebe um lembrete por filho no mesmo
             // celular. Tocando o botao de um deles, o WhatsApp diz a qual
@@ -1659,9 +1671,28 @@ Deno.serve(async (req) => {
                 })
                 .eq('id', conversation.id)
             }
-            await responder(avisoDaResposta(resposta, ondeConfirmado), null, {
-              botoes: resposta.cancela ? [{ id: '2', titulo: 'Escolher nova data' }] : undefined,
-            })
+            // "Preciso remarcar" ja abre as datas (20/10/2026); sem datas, o
+            // "avisei a equipe" de antes.
+            const remarcacao = resposta.remarca
+              ? await remarcarPeloLembrete(admin, clinicId, conversation.id, String(ultimoLembrete?.appointment_id ?? ''))
+              : null
+            if (remarcacao) {
+              remarcouPeloRobo = true
+              await responder(remarcacao.resposta, null, { botoes: remarcacao.botoes, lista: remarcacao.lista })
+              // A bandeira de remarcacao subiu com esta mensagem; quem esta
+              // cuidando agora e o robo. Pedido que ja estava aceso fica.
+              if (!conversaAnterior?.needs_attention) {
+                const { error: erroDaBandeira } = await admin
+                  .from('whatsapp_conversations')
+                  .update({ needs_attention: false, attention_reason: null })
+                  .eq('id', conversation.id)
+                if (erroDaBandeira) console.warn('Remarcar pelo lembrete: bandeira nao baixou', erroDaBandeira)
+              }
+            } else {
+              await responder(avisoDaResposta(resposta, ondeConfirmado), null, {
+                botoes: resposta.cancela ? [{ id: '2', titulo: 'Escolher nova data' }] : undefined,
+              })
+            }
 
             // Resposta ao lembrete tambem entra nos numeros (22/09/2026). Ate
             // aqui so o menu registrava eventos, e o painel nao sabia quantas
@@ -1736,7 +1767,7 @@ Deno.serve(async (req) => {
           // "Preciso de ajuda" e "remarcar" pelo lembrete esperam alguem da
           // equipe (ver o encaminhamento acima). O cancelamento so libera a
           // vaga e o robo ja oferece outra data: fica so na tela.
-          if (motivoAtencao === 'ajuda' || motivoAtencao === 'remarcacao') {
+          if (motivoAtencao === 'ajuda' || (motivoAtencao === 'remarcacao' && !remarcouPeloRobo)) {
             await encaminharAosCelulares(motivoAtencao, body)
           }
 

@@ -2240,6 +2240,8 @@ confere('narracao: "voce recebe nesta conversa" fica', semNarracao('Quando o rel
   confere('longe das unidades: oferece a telemedicina e deixa escolher', sistema.includes('Família que mora longe das unidades') && sistema.includes('ofereça as duas opções e deixe a família escolher') && sistema.includes('Não escolha por ela nem abra as datas sozinha'))
   confere('longe das unidades: quem mora perto nao e empurrado', sistema.includes('Quem mora perto de uma unidade segue com ela, sem empurrar a telemedicina'))
   confere('longe das unidades: exemplo pergunta presencial ou video', sistema.includes('Prefere presencial em São Paulo ou por vídeo?'))
+  // Real 20/10/2026: a IA escreveu "Presenca confirmada!" sem a agenda registrar.
+  confere('IA nao confirma presenca: manda tocar em Confirmar presenca', sistema.includes('Você não confirma presença em consulta') && sistema.includes('nunca escreva "presença confirmada"') && sistema.includes('*Confirmar presença*'))
   confere('desistencia pelo convenio: exemplo sem prometer quanto reembolsa', sistema.includes('pensei que atendesse plano de saúde') && sistema.includes('perguntar quanto eles reembolsam dessa consulta') && !/reembolsa(m)? (o valor )?(total|tudo)/.test(sistema))
 }
 

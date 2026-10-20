@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica, sinalDeAlarme, pediuUrgencia, desistiuDoAgendamento, contaPiora, etiquetaQueFica, horaEmNumeros, horariosEmTexto } from './atendimento.build.mjs'
+import { tratarConversa, remarcarPeloLembrete, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica, sinalDeAlarme, pediuUrgencia, desistiuDoAgendamento, contaPiora, etiquetaQueFica, horaEmNumeros, horariosEmTexto } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 import { montarMensagens } from './conteudo.build.mjs'
 
@@ -4696,6 +4696,38 @@ await caso('Painel IA: remarcar abre nas datas da mesma unidade', [
     else falhas.push(`${titulo} | remarcação errada: ${JSON.stringify({ paciente: nova.patient_id, de: nova.rescheduled_from, canceladas })}`)
   },
 })
+// Real 20/10/2026: a Sandryne tocou "Reagendar" no lembrete e ouviu "ja avisei
+// a equipe" - a conversa parou ali. Agora o lembrete ja abre as datas da mesma
+// unidade, e a consulta atual so cai quando a nova estiver marcada.
+{
+  let abertura = null
+  await caso('Real 20/10: "Preciso remarcar" no lembrete já abre as datas', [
+    ['1', 'Horários de'],
+    ['1', 'Consulta remarcada!'],
+  ], {
+    consultas: [CONSULTA_ANA],
+    pacientes: [ANA, PEDRO],
+    daConsulta: { unit_id: 'u-santos', patient_id: 'p1' },
+    antes: async ({ admin, conversa }) => {
+      abertura = await remarcarPeloLembrete(admin, 'c1', 'conv1', 'a1')
+      if (!abertura) falhas.push('Real 20/10 | lembrete nao abriu as datas')
+      else if (/Vamos remarcar a consulta de \*.+\*\. A atual só é cancelada/.test(abertura.resposta) && abertura.resposta.includes('Datas disponíveis em Liferty') && conversa.booking_replaces_id === 'a1') passou++
+      else falhas.push(`Real 20/10 | abertura errada: ${JSON.stringify({ resposta: abertura.resposta, substitui: conversa.booking_replaces_id })}`)
+    },
+    verificar: ({ marcadas, canceladas, titulo }) => {
+      const nova = marcadas[0] ?? {}
+      if (nova.patient_id === 'p1' && nova.rescheduled_from === 'a1' && canceladas.includes('a1')) passou++
+      else falhas.push(`${titulo} | remarcação errada: ${JSON.stringify({ paciente: nova.patient_id, de: nova.rescheduled_from, canceladas })}`)
+    },
+  })
+}
+{
+  // Consulta sem unidade: nao abre nada, e o webhook volta ao "avisei a equipe".
+  const { admin, conversa } = fazerAdmin({ unidades: TRES_UNIDADES, slotsPorUnidade: SLOTS_CHEIOS, daConsulta: { unit_id: null, modality: 'presencial' } })
+  const r = await remarcarPeloLembrete(admin, 'c1', 'conv1', 'a1')
+  if (r === null && !conversa.booking_replaces_id) passou++
+  else falhas.push(`Real 20/10 | sem unidade deveria voltar para a equipe: ${JSON.stringify(r)}`)
+}
 await caso('Painel IA: cancelar oferece o botão de marcar outra data', [
   ['Oi', 'Como podemos ajudar'],
   ['4', 'Sua consulta'],
