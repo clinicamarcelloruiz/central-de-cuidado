@@ -36,6 +36,7 @@ import {
   getCurrentMembership,
   getSchedulePreferences,
   confirmAppointment,
+  registrarPresencaConfirmada,
   notifyAppointmentConfirmed,
   listAppointments,
   listAppointmentHistory,
@@ -2419,6 +2420,35 @@ export default function Agenda({
                     Confirmar consulta
                   </button>
                 )}
+                {/* A familia confirmou fora do lembrete (20/10/2026): por ligacao,
+                    ou por uma palavra que o robo nao entendeu. So registra, nao
+                    manda mensagem. Ver registrarPresencaConfirmada. */}
+                {emEdicao.status === 'scheduled' &&
+                  (emEdicao.confirmedAt ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const id = emEdicao.id
+                        setEmEdicao(null)
+                        void acao(() => registrarPresencaConfirmada(id, false), 'Confirmação de presença desfeita.')
+                      }}
+                      className="rounded-xl px-3 py-2.5 text-[11px] font-extrabold text-slate-500 transition hover:bg-slate-100"
+                    >
+                      Desfazer presença confirmada
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const id = emEdicao.id
+                        setEmEdicao(null)
+                        void acao(() => registrarPresencaConfirmada(id, true), 'Presença confirmada registrada.')
+                      }}
+                      className="rounded-xl border border-[#557f75]/30 bg-[#eef3f2] px-4 py-2.5 text-[11px] font-extrabold text-[#456a61] transition hover:bg-[#e5efec]"
+                    >
+                      Paciente confirmou presença
+                    </button>
+                  ))}
                 <button
                   type="button"
                   onClick={() => {

@@ -1541,6 +1541,25 @@ export async function confirmAppointment(appointmentId: string) {
   if (error) fail(error)
 }
 
+/**
+ * A equipe registra que a familia confirmou presenca (20/10/2026).
+ *
+ * Ate aqui so o lembrete gravava confirmed_at. O Edgar respondeu "Confirma" -
+ * palavra que o robo ainda nao reconhecia - e a consulta ficou "lembrete
+ * enviado, sem resposta" na vespera, sem botao nenhum para a equipe corrigir.
+ * Serve tambem para quem confirma por ligacao. Diferente de confirmAppointment,
+ * que e a clinica aceitando a marcacao e avisando a familia: aqui ninguem e
+ * avisado, so fica registrado. So vale para consulta ainda marcada.
+ */
+export async function registrarPresencaConfirmada(appointmentId: string, confirmada: boolean) {
+  const { error } = await semTipo
+    .from('appointments')
+    .update(confirmada ? { confirmed_at: new Date().toISOString(), reschedule_requested_at: null } : { confirmed_at: null })
+    .eq('id', appointmentId)
+    .eq('status', 'scheduled')
+  if (error) fail(error)
+}
+
 export async function createAppointment(
   clinicId: string,
   unitId: string,
