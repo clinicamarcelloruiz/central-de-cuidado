@@ -33,6 +33,8 @@ const COR_DA_ETAPA: Record<FollowupKey, string> = { d15: AZUL, d30: '#6f9d91', m
 
 interface Props {
   patients: Patient[]
+  /** Etapas ligadas em Preferencias (19/10/2026). */
+  etapas?: FollowupKey[]
   templates: Record<FollowupKey, string>
   setFollowup: (id: string, key: FollowupKey, status: FollowupStatus) => Promise<void>
   /** Leva direto para a conversa do paciente, sem passar pelo menu Respostas. */
@@ -134,11 +136,11 @@ function Group({
   )
 }
 
-export default function Followups({ patients, setFollowup, onAbrirConversa }: Props) {
+export default function Followups({ patients, etapas, setFollowup, onAbrirConversa }: Props) {
   const [sending, setSending] = useState<string | null>(null)
   const { avisar, perguntar } = useDialogos()
   const [situacoes, setSituacoes] = useState<Map<string, SituacaoDoEnvio | null>>(new Map())
-  const items = pendingFollowups(patients)
+  const items = pendingFollowups(patients, etapas)
 
   // Ids dos que ja sairam, numa string so: muda quando um novo e enviado, e
   // nao a cada renderizacao (a lista de pacientes e recriada a cada carga).

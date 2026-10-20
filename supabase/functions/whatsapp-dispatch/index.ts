@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
 
     const { data: vencidos, error } = await admin
       .from('followups')
-      .select('id,patient_id,followup_key,due_date,whatsapp_failed_at')
+      .select('id,clinic_id,patient_id,followup_key,due_date,whatsapp_failed_at')
       .lte('due_date', today)
       .gte('due_date', limite.toISOString().slice(0, 10))
       .eq('status', 'pending')
@@ -63,8 +63,31 @@ Deno.serve(async (req) => {
       .order('due_date', { ascending: false })
       .limit(500)
 
+    // Etapa desligada em Preferencias (19/10/2026, o Dr. Marcello tirou a de 15
+    // dias): a migration ja tira o pendente da fila; isto segura o que escapar
+    // (paciente arquivado e restaurado devolve a linha). Coluna nova, lida a
+    // parte: sem ela, as tres etapas, como antes.
+    const etapasPorClinica = new Map<string, string[]>()
+    try {
+      const clinicas = [...new Set((vencidos ?? []).map((f) => f.clinic_id))]
+      if (clinicas.length) {
+        const { data: ajustes, error: erroDasEtapas } = await admin
+          .from('clinic_settings')
+          .select('clinic_id,followup_etapas')
+          .in('clinic_id', clinicas)
+        if (erroDasEtapas) throw erroDasEtapas
+        for (const a of (ajustes ?? []) as { clinic_id: string; followup_etapas?: string[] | null }[]) {
+          if (a.followup_etapas?.length) etapasPorClinica.set(a.clinic_id, a.followup_etapas)
+        }
+      }
+    } catch (erro) {
+      console.warn('whatsapp-dispatch: sem clinic_settings.followup_etapas; todas as etapas valem', erro)
+    }
+    const etapaLigada = (f: { clinic_id: string; followup_key: string }) =>
+      etapasPorClinica.get(f.clinic_id)?.includes(f.followup_key) ?? true
+
     const due = (vencidos ?? []).filter(
-      (f) => !f.whatsapp_failed_at || f.whatsapp_failed_at < tresDiasAtras,
+      (f) => (!f.whatsapp_failed_at || f.whatsapp_failed_at < tresDiasAtras) && etapaLigada(f),
     )
     if ((vencidos ?? []).length === 500) {
       console.warn('whatsapp-dispatch: 500 acompanhamentos vencidos na janela; os excedentes ficam para amanha')

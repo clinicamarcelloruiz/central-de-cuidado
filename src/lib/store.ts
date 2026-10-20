@@ -21,6 +21,7 @@ import {
   getCurrentMembership,
   importPatients,
   listConsultations,
+  saveEtapas,
   saveTemplates,
   vincularContatoAoPaciente,
   type ClinicRole,
@@ -41,6 +42,7 @@ export type PatientDraft = Omit<
 const EMPTY_DB: Db = {
   patients: [],
   templates: { ...DEFAULT_TEMPLATES },
+  etapas: ['d15', 'd30', 'm90'],
 }
 
 function errorMessage(error: unknown) {
@@ -247,11 +249,19 @@ export function useDb() {
     setDb((current) => ({ ...current, templates }))
   }
 
+  async function setEtapas(etapas: FollowupKey[]) {
+    await run(() => saveEtapas(requireClinic(), etapas))
+    // A fila muda no banco (etapa desligada arquivada, ligada recriada):
+    // recarregar mostra o que ele fez, em vez de adivinhar aqui.
+    await load()
+  }
+
   async function importDb(data: unknown) {
     if (!validImport(data)) return false
     const normalized: Db = {
       patients: data.patients,
       templates: { ...DEFAULT_TEMPLATES, ...(data.templates ?? {}) },
+      etapas: db.etapas,
     }
     await run(() => importPatients(requireClinic(), normalized))
     await load()
@@ -281,6 +291,7 @@ export function useDb() {
     updateConsultation,
     setFollowup,
     setTemplates,
+    setEtapas,
     importDb,
     clearAll,
   }

@@ -81,6 +81,11 @@ export interface Consultation extends ConsultationDraft {
 export interface Db {
   patients: Patient[]
   templates: Record<FollowupKey, string>
+  /**
+   * Etapas do acompanhamento que a clinica usa (19/10/2026): o Dr. Marcello
+   * tirou a de 15 dias. A etapa desligada some da fila, do contador e da ficha.
+   */
+  etapas: FollowupKey[]
 }
 
 /**

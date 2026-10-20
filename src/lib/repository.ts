@@ -2715,7 +2715,23 @@ export async function fetchDb(
   }
 
   const settings = settingsResult.data as SettingsRow | null
+  // Etapas ligadas (19/10/2026): coluna nova, lida a parte - sem ela, as tres.
+  let etapas: FollowupKey[] = [...FOLLOWUP_KEYS]
+  try {
+    const { data: ajustes, error: erroDasEtapas } = await semTipo
+      .from('clinic_settings')
+      .select('followup_etapas')
+      .eq('clinic_id', clinicId)
+      .maybeSingle()
+    if (erroDasEtapas) throw erroDasEtapas
+    const lidas = ((ajustes as { followup_etapas?: string[] | null } | null)?.followup_etapas ?? [])
+      .filter((k): k is FollowupKey => (FOLLOWUP_KEYS as string[]).includes(k))
+    if (lidas.length) etapas = lidas
+  } catch (erro) {
+    console.warn('Sem clinic_settings.followup_etapas; as tres etapas valem', erro)
+  }
   return {
+    etapas,
     patients: ((patientsResult.data ?? []) as PatientRow[]).map((patient) =>
       mapPatient(patient, byPatient.get(patient.id) ?? []),
     ),
@@ -3088,6 +3104,19 @@ export async function saveTemplates(
       // Coluna nova; os tipos gerados ainda nao a conhecem.
       ...({ template_d15: templates.d15 } as Record<string, unknown>),
     })
+    .eq('clinic_id', clinicId)
+  if (error) fail(error)
+}
+
+/**
+ * Liga e desliga etapas do acompanhamento (19/10/2026). O banco faz o resto:
+ * a etapa desligada sai da fila, a ligada volta para as consultas futuras
+ * (ver a migration etapas_do_acompanhamento).
+ */
+export async function saveEtapas(clinicId: string, etapas: FollowupKey[]) {
+  const { error } = await semTipo
+    .from('clinic_settings')
+    .update({ followup_etapas: FOLLOWUP_KEYS.filter((k) => etapas.includes(k)) })
     .eq('clinic_id', clinicId)
   if (error) fail(error)
 }

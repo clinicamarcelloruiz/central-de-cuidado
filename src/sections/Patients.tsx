@@ -18,7 +18,7 @@ import {
   ArchiveRestore,
   UsersRound,
 } from 'lucide-react'
-import type { Consultation, ConsultationDraft, Patient } from '@/types/patient'
+import type { Consultation, ConsultationDraft, FollowupKey, Patient } from '@/types/patient'
 import type { PatientDraft } from '@/lib/store'
 import PatientRecord from '@/sections/PatientRecord'
 import { fmtBR, idade } from '@/lib/followup'
@@ -214,6 +214,8 @@ function initials(name: string) {
 
 interface Props {
   patients: Patient[]
+  /** Etapas ligadas em Preferencias (19/10/2026): a ficha mostra so elas. */
+  etapas?: FollowupKey[]
   addPatient: (draft: PatientDraft) => Promise<Patient>
   updatePatient: (id: string, patch: Partial<Patient>) => Promise<void>
   removePatient: (id: string) => Promise<void>
@@ -256,6 +258,7 @@ interface Props {
 
 export default function Patients({
   patients,
+  etapas = ['d15', 'd30', 'm90'],
   addPatient,
   updatePatient,
   removePatient,
@@ -909,7 +912,7 @@ export default function Patients({
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[#081b2c]/[0.06] pt-3">
-                {(['d15', 'd30', 'm90'] as const).map((key) => (
+                {(['d15', 'd30', 'm90'] as const).filter((key) => etapas.includes(key)).map((key) => (
                   <div key={key} className="flex items-center justify-between gap-2 rounded-xl bg-[#faf9f7] px-2.5 py-2">
                     <span className="text-[9px] font-extrabold text-slate-400">{FOLLOWUP_LABEL[key]}</span>
                     <StatusBadge status={patient.followups[key].status} />

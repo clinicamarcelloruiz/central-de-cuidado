@@ -174,6 +174,7 @@ export default function Home() {
     updateConsultation,
     setFollowup,
     setTemplates,
+    setEtapas,
     importDb,
     clearAll,
   } = useDb()
@@ -237,7 +238,7 @@ export default function Home() {
       voltarPara?: Tab
     } | null
   >(null)
-  const pendentes = dueCount(db.patients)
+  const pendentes = dueCount(db.patients, db.etapas)
   const [solicitacoes, setSolicitacoes] = useState<PendingRequest[]>([])
   // Clinica atual, para o logo do menu (ver lib/marca.ts). Comeca pela ultima
   // vista neste navegador para o menu nao piscar a cada recarga.
@@ -936,6 +937,7 @@ export default function Home() {
             {tab === 'dashboard' && (
               <Dashboard
                 patients={db.patients}
+                etapas={db.etapas}
                 solicitacoes={solicitacoes}
                 onAbrirAgenda={() => setTab('agenda')}
               />
@@ -943,6 +945,7 @@ export default function Home() {
             {tab === 'followups' && (
               <Followups
                 patients={db.patients}
+                etapas={db.etapas}
                 templates={db.templates}
                 setFollowup={setFollowup}
                 onAbrirConversa={(patientId) => {
@@ -1000,6 +1003,7 @@ export default function Home() {
             {tab === 'pacientes' && (
               <Patients
                 patients={db.patients}
+                etapas={db.etapas}
                 addPatient={addPatient}
                 updatePatient={updatePatient}
                 removePatient={removePatient}
@@ -1024,7 +1028,7 @@ export default function Home() {
               />
             )}
             {tab === 'config' && role === 'owner' && (
-              <Settings db={db} setTemplates={setTemplates} importDb={importDb} clearAll={clearAll} />
+              <Settings db={db} setTemplates={setTemplates} setEtapas={setEtapas} importDb={importDb} clearAll={clearAll} />
             )}
             {tab === 'admin' && role === 'owner' && <AccessAdmin />}
             </AbaProtegida>
