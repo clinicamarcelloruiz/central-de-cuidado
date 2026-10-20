@@ -385,13 +385,15 @@ export default function Dashboard({
           nenhuma - um é quem já é paciente, o outro é quem está chegando.
           Separar em abas resolve sem esconder nada: cada aba responde uma
           pergunta, e quem está olhando sabe qual. */}
-      <div className="flex items-center gap-1 rounded-2xl bg-slate-100 p-1">
+      {/* No celular, duas por linha (19/10/2026): com Instagram e Google eram
+          quatro numa linha so, mais largas que a tela. */}
+      <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1 sm:flex sm:items-center">
         {ABAS.map((item) => (
           <button
             key={item.chave}
             type="button"
             onClick={() => setAba(item.chave)}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[11px] font-extrabold transition ${
+            className={`flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-2 py-2.5 text-[11px] font-extrabold transition sm:px-4 ${
               aba === item.chave
                 ? 'bg-white text-[#081b2c] shadow-sm'
                 : 'text-slate-500 hover:text-slate-700'
