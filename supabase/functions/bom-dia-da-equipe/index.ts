@@ -1,12 +1,12 @@
 import { adminClient, corsHeaders, json } from '../_shared/whatsapp.ts'
-import { BOM_DIA_DA_EQUIPE, precisaDoBomDia, type MensagemDaFila } from '../_shared/bom-dia-da-equipe.ts'
+import { precisaDoBomDia, textoDoBomDia, type MensagemDaFila } from '../_shared/bom-dia-da-equipe.ts'
 import { chaveDoWhatsApp, foraDaListaDeTeste, listaDeTeste } from '../_shared/whatsapp-teste.ts'
 
 /**
  * Bom dia das 8h para quem chamou a equipe de madrugada (21/10/2026).
  *
- * Chamada pelo pg_cron as 8h de segunda a sexta (migration
- * 20261021090000_bom_dia_da_equipe), com x-cron-secret. A regra mora em
+ * Chamada pelo pg_cron as 8h, todo dia (migration
+ * 20261021120000_bom_dia_todo_dia), com x-cron-secret. A regra mora em
  * _shared/bom-dia-da-equipe.ts; aqui so se le o banco e envia.
  *
  * Falhar aqui nao pode passar calado: cada recusa da Meta fica gravada na
@@ -27,6 +27,7 @@ Deno.serve(async (req) => {
   const admin = adminClient()
   const agora = new Date()
   const resumo = { enviados: 0, falhas: 0, conferidas: 0 }
+  const texto = textoDoBomDia(agora)
 
   try {
     const { data: clinicas, error } = await admin
@@ -86,7 +87,7 @@ Deno.serve(async (req) => {
             recipient_type: 'individual',
             to: conversa.wa_id,
             type: 'text',
-            text: { body: BOM_DIA_DA_EQUIPE },
+            text: { body: texto },
           }),
         })
         const corpo = await resposta.json().catch(() => ({}))
@@ -97,7 +98,7 @@ Deno.serve(async (req) => {
           external_message_id: resposta.ok ? corpo?.messages?.[0]?.id ?? null : null,
           direction: 'outbound',
           message_type: 'text',
-          body: BOM_DIA_DA_EQUIPE,
+          body: texto,
           automatic: true,
           status: resposta.ok ? 'accepted' : 'failed',
           sent_at: resposta.ok ? enviadoEm : null,

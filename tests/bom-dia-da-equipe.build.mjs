@@ -85,13 +85,23 @@ function dentroDoExpediente(agora = /* @__PURE__ */ new Date()) {
 
 // supabase/functions/_shared/bom-dia-da-equipe.ts
 var BOM_DIA_DA_EQUIPE = "Bom dia! \u{1F499} A equipe j\xE1 est\xE1 por aqui. Voc\xEA chamou a gente fora do hor\xE1rio: em que podemos te ajudar?";
+var BOM_DIA_FORA_DO_EXPEDIENTE = "Bom dia! \u{1F499} Voc\xEA chamou a gente fora do hor\xE1rio: em que posso te ajudar? Por aqui j\xE1 d\xE1 para tirar d\xFAvidas e marcar a consulta, e o que precisar da equipe eu passo para ela.";
+function textoDoBomDia(agora) {
+  return dentroDoExpediente(agora) ? BOM_DIA_DA_EQUIPE : BOM_DIA_FORA_DO_EXPEDIENTE;
+}
 var TRECHOS_DO_PEDIDO = [
   "Estou direcionando voc\xEA para algu\xE9m da nossa equipe",
   "Me conta aqui o que voc\xEA precisa"
 ];
 var JANELA_MS = 23 * 3600 * 1e3;
+function deManha(agora) {
+  const hora = Number(
+    new Intl.DateTimeFormat("en-GB", { timeZone: EXPEDIENTE.fuso, hour: "2-digit", hourCycle: "h23" }).format(agora)
+  );
+  return hora >= EXPEDIENTE.inicio && hora < 12;
+}
 function precisaDoBomDia(mensagens, agora) {
-  if (!dentroDoExpediente(agora)) return false;
+  if (!deManha(agora)) return false;
   const ultima = mensagens.at(-1);
   if (!ultima || ultima.direction !== "outbound" || ultima.automatic === false) return false;
   if (!TRECHOS_DO_PEDIDO.some((trecho) => String(ultima.body ?? "").includes(trecho))) return false;
@@ -103,6 +113,8 @@ function precisaDoBomDia(mensagens, agora) {
 }
 export {
   BOM_DIA_DA_EQUIPE,
+  BOM_DIA_FORA_DO_EXPEDIENTE,
   TRECHOS_DO_PEDIDO,
-  precisaDoBomDia
+  precisaDoBomDia,
+  textoDoBomDia
 };

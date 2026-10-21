@@ -1,7 +1,7 @@
 // Bom dia das 8h para quem chamou a equipe fora do horario (21/10/2026).
 // Real: a Fatima tocou "Falar com a equipe" a 00:15 e nao escreveu mais nada.
 import { readFileSync } from 'node:fs'
-import { BOM_DIA_DA_EQUIPE, TRECHOS_DO_PEDIDO, precisaDoBomDia } from './bom-dia-da-equipe.build.mjs'
+import { BOM_DIA_DA_EQUIPE, BOM_DIA_FORA_DO_EXPEDIENTE, TRECHOS_DO_PEDIDO, precisaDoBomDia, textoDoBomDia } from './bom-dia-da-equipe.build.mjs'
 import { ESPERA_DO_ASSUNTO } from './assistente.build.mjs'
 
 let ok = 0
@@ -39,20 +39,26 @@ confere('pedido no horario comercial: nao', !precisaDoBomDia([
   de('outbound', ROBO, '2026-10-20T14:00:05Z'),
 ], oitoDaManha))
 confere('ultima nossa nao e o pedido: nao', !precisaDoBomDia([...madrugada.slice(0, 3), de('outbound', 'Consulta marcada!', '2026-10-21T03:16:00Z')], oitoDaManha))
-confere('fora do expediente agora (sabado 8h): nao', !precisaDoBomDia([
-  de('inbound', 'Falar com a equipe', '2026-10-24T03:00:00Z'),
-  de('outbound', ROBO, '2026-10-24T03:00:05Z'),
-], new Date('2026-10-24T11:00:00Z')))
-// Sexta 20h ate segunda 8h passa das 24h da Meta: texto livre seria recusado.
-confere('janela de 24h fechada (sexta a noite): nao', !precisaDoBomDia([
-  de('inbound', 'Falar com a equipe', '2026-10-23T23:00:00Z'),
-  de('outbound', ROBO, '2026-10-23T23:00:05Z'),
-], new Date('2026-10-26T11:00:00Z')))
-confere('feriado (Finados, segunda): nao', !precisaDoBomDia([
+// Todo dia, e nao so nos dias de atendimento (21/10/2026, Edu: "nosso
+// diferencial de ter robo e atender full time"): sexta a noite recebe no
+// sabado, dentro das 24h.
+const sextaANoite = [
+  de('inbound', 'Falar com a equipe', '2026-10-23T22:00:00Z'),
+  de('outbound', ROBO, '2026-10-23T22:00:05Z'),
+]
+confere('sexta 19h: bom dia no sabado as 8h', precisaDoBomDia(sextaANoite, new Date('2026-10-24T11:00:00Z')))
+confere('sabado: texto sem "a equipe ja esta por aqui"', textoDoBomDia(new Date('2026-10-24T11:00:00Z')) === BOM_DIA_FORA_DO_EXPEDIENTE)
+confere('quarta: texto com a equipe', textoDoBomDia(oitoDaManha) === BOM_DIA_DA_EQUIPE)
+confere('feriado (Finados, segunda): manda, com o texto de fora do expediente', precisaDoBomDia([
   de('inbound', 'Falar com a equipe', '2026-11-02T03:00:00Z'),
   de('outbound', ROBO, '2026-11-02T03:00:05Z'),
-], new Date('2026-11-02T11:00:00Z')))
-confere('o texto pergunta em que pode ajudar', /^Bom dia!/.test(BOM_DIA_DA_EQUIPE) && BOM_DIA_DA_EQUIPE.includes('em que podemos te ajudar?'))
+], new Date('2026-11-02T11:00:00Z')) && textoDoBomDia(new Date('2026-11-02T11:00:00Z')) === BOM_DIA_FORA_DO_EXPEDIENTE)
+confere('janela de 24h fechada (sexta a noite, segunda 8h): nao', !precisaDoBomDia(sextaANoite, new Date('2026-10-26T11:00:00Z')))
+confere('bom dia de fora do expediente ja enviado: nao repete', !precisaDoBomDia([...sextaANoite, de('outbound', BOM_DIA_FORA_DO_EXPEDIENTE, '2026-10-24T11:00:05Z')], new Date('2026-10-24T11:30:00Z')))
+confere('nada de bom dia a noite, mesmo chamada fora de hora', !precisaDoBomDia(madrugada, new Date('2026-10-21T23:00:00Z')))
+confere('nem de madrugada antes das 8h', !precisaDoBomDia(madrugada, new Date('2026-10-21T10:30:00Z')))
+confere('os dois textos dao bom dia e perguntam em que ajudar', /^Bom dia!/.test(BOM_DIA_DA_EQUIPE) && BOM_DIA_DA_EQUIPE.includes('em que podemos te ajudar?') && /^Bom dia!/.test(BOM_DIA_FORA_DO_EXPEDIENTE) && BOM_DIA_FORA_DO_EXPEDIENTE.includes('em que posso te ajudar?'))
+confere('fora do expediente nao promete a equipe agora', !/equipe já está/.test(BOM_DIA_FORA_DO_EXPEDIENTE))
 
 console.log(`bom dia da equipe: ${ok} verificacoes ok`)
 if (falhas.length) {
