@@ -61,6 +61,7 @@ import {
 } from '@/lib/repository'
 import { useDialogos } from '@/components/dialogos-contexto'
 import { avisoDoBloqueio, consultasDeUmDia } from '@/lib/bloqueio-de-dia'
+import { telefoneDoLembrete } from '@/lib/telefone-do-lembrete'
 import { lugaresDoRobo } from '@/lib/lugares'
 import CartaoDaUnidade from '@/sections/agenda/CartaoDaUnidade'
 import { valorDaConsulta } from '../../supabase/functions/_shared/campos-do-texto.ts'
@@ -132,12 +133,6 @@ function diaEHora(iso: string) {
  * nao vai receber lembrete nenhum, e a tela precisa dizer isso antes da
  * vespera, e nao depois da falta.
  */
-function telefoneDoLembrete(item: Appointment, patients: Patient[]) {
-  if (item.patientId) {
-    return patients.find((p) => p.id === item.patientId)?.telefone?.trim() ?? ''
-  }
-  return item.contactPhone.trim()
-}
 
 /** Consulta marcada para alguem de fora da base, sem telefone utilizavel. */
 function telefoneCurto(escolha: { patientId: string; telefone: string }) {
