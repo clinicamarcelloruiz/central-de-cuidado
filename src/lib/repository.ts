@@ -12,6 +12,7 @@ import type {
 import type { PatientDraft } from '@/lib/store'
 import type { Database } from '@/types/database'
 import { buscarTodas } from '@/lib/paginar'
+import { retornoIncluidoAte } from '@/lib/retorno'
 import { comNonoDigito, paraEnvio } from '../../supabase/functions/_shared/telefone-br.ts'
 
 type PatientInsert = Database['public']['Tables']['patients']['Insert']
@@ -1744,6 +1745,11 @@ export interface ResumoDoPaciente {
   /** Consultas futuras ainda de pe. */
   agendadas: number
   cancelamentos: number
+  /**
+   * Ate quando o retorno esta incluido (AAAA-MM-DD): a ultima consulta feita
+   * mais 30 dias. Nulo sem consulta feita (20/10/2026).
+   */
+  retornoAte: string | null
 }
 
 /**
@@ -1756,7 +1762,7 @@ export interface ResumoDoPaciente {
 export async function resumoDoPaciente(clinicId: string, patientId: string) {
   const agora = new Date().toISOString()
 
-  const [contatos, realizadas, agendadas, cancelamentos] = await Promise.all([
+  const [contatos, realizadas, agendadas, cancelamentos, ultimaDaAgenda, cadastro] = await Promise.all([
     supabase
       .from('whatsapp_messages')
       .select('id', { count: 'exact', head: true })
@@ -1782,13 +1788,35 @@ export async function resumoDoPaciente(clinicId: string, patientId: string) {
       .eq('clinic_id', clinicId)
       .eq('patient_id', patientId)
       .eq('status', 'cancelled'),
+    supabase
+      .from('appointments')
+      .select('starts_at')
+      .eq('clinic_id', clinicId)
+      .eq('patient_id', patientId)
+      .not('status', 'in', '(cancelled,no_show)')
+      .lt('starts_at', agora)
+      .order('starts_at', { ascending: false })
+      .limit(1),
+    supabase.from('patients').select('consultation_date').eq('id', patientId).maybeSingle(),
   ])
 
+  // O dia no fuso do consultorio: 21h de um dia em Sao Paulo ja e o dia
+  // seguinte em UTC.
+  const inicio = ultimaDaAgenda.data?.[0]?.starts_at ?? null
+  const diaDaAgenda = inicio
+    ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(inicio))
+    : null
   return {
     contatos: contatos.count ?? 0,
     realizadas: realizadas.count ?? 0,
     agendadas: agendadas.count ?? 0,
     cancelamentos: cancelamentos.count ?? 0,
+    // A ultima consulta e a mais recente entre a data do cadastro (a mesma que
+    // a Agenda usa) e a ultima consulta da agenda que ja passou.
+    retornoAte: retornoIncluidoAte([
+      diaDaAgenda,
+      (cadastro.data as { consultation_date?: string | null } | null)?.consultation_date ?? null,
+    ]),
   } satisfies ResumoDoPaciente
 }
 
@@ -1878,6 +1906,13 @@ export interface Conversation {
   respondidaPelaEquipe: boolean
   /** De qual anuncio a conversa veio (19/10/2026). Nulo quando nao veio de anuncio. */
   origemAnuncio?: OrigemDoAnuncio | null
+  /**
+   * Nome dado pela equipe (botao Renomear, 20/10/2026). Quando existe, ja vem
+   * em patientName; este campo diz que o nome e da equipe, e nao do cadastro.
+   */
+  nomePersonalizado?: string | null
+  /** Nome do paciente do cadastro ligado a conversa, mesmo com nome da equipe. */
+  nomeDoCadastro?: string | null
 }
 
 export type OrigemDoAnuncio = 'instagram' | 'facebook' | 'meta' | 'google'
@@ -1898,6 +1933,8 @@ export interface ConversationMessage {
   anexoPath: string | null
   /** Escrita pelo atendente com IA (15/10/2026). */
   porIA?: boolean
+  /** Mensagem que esta responde, citada como no WhatsApp (20/10/2026). */
+  respondeA?: string | null
 }
 
 /**
@@ -1967,11 +2004,30 @@ export async function listConversations(clinicId: string): Promise<Conversation[
     } catch (erro) {
       console.warn('Sem whatsapp_conversations.origem_anuncio; o selo do anuncio fica de fora', erro)
     }
+    // Nome dado pela equipe (20/10/2026): coluna nova, lida a parte - sem ela,
+    // vale o nome do cadastro, como antes.
+    const nomeDaEquipe = new Map<string, string>()
+    try {
+      const { data: renomeadas, error } = await semTipo
+        .from('whatsapp_conversations')
+        .select('id,nome_personalizado')
+        .eq('clinic_id', clinicId)
+        .not('nome_personalizado', 'is', null)
+      if (error) throw error
+      for (const c of (renomeadas ?? []) as { id: string; nome_personalizado: string }[]) {
+        if (c.nome_personalizado.trim()) nomeDaEquipe.set(c.id, c.nome_personalizado.trim())
+      }
+    } catch (erro) {
+      console.warn('Sem whatsapp_conversations.nome_personalizado; vale o nome do cadastro', erro)
+    }
     return linhas.map((row) => ({
       id: row.id,
       patientId: row.patient_id,
       semAcompanhamento: Boolean(row.patient_id && semAcompanhamento.has(row.patient_id)),
-      patientName: (row.patient_id && nomePorId.get(row.patient_id)) || 'Contato sem cadastro',
+      patientName:
+        nomeDaEquipe.get(row.id) || (row.patient_id && nomePorId.get(row.patient_id)) || 'Contato sem cadastro',
+      nomePersonalizado: nomeDaEquipe.get(row.id) ?? null,
+      nomeDoCadastro: (row.patient_id && nomePorId.get(row.patient_id)) || null,
       profileName: row.profile_name ?? '',
       phone: formatarTelefone(row.display_phone || row.wa_id || ''),
       phoneDigits: (row.display_phone || row.wa_id || '').replace(/\D/g, ''),
@@ -2180,6 +2236,19 @@ export async function listConversationMessages(conversationId: string): Promise<
   } catch (erro) {
     console.warn('Sem whatsapp_messages.gerada_por_ia; a etiqueta da IA fica de fora', erro)
   }
+  // Citacao (20/10/2026): coluna nova, lida a parte - sem ela, so a citacao some.
+  const citada = new Map<string, string>()
+  try {
+    const { data: comCitacao, error: erroDaCitacao } = await semTipo
+      .from('whatsapp_messages')
+      .select('id,responde_a')
+      .eq('conversation_id', conversationId)
+      .not('responde_a', 'is', null)
+    if (erroDaCitacao) throw erroDaCitacao
+    for (const m of (comCitacao ?? []) as { id: string; responde_a: string }[]) citada.set(m.id, m.responde_a)
+  } catch (erro) {
+    console.warn('Sem whatsapp_messages.responde_a; as citacoes ficam de fora', erro)
+  }
 
   return linhas.map((row) => ({
     id: row.id,
@@ -2193,6 +2262,7 @@ export async function listConversationMessages(conversationId: string): Promise<
     anexoMime: anexos.get(row.id)?.mime ?? null,
     anexoPath: anexos.get(row.id)?.path ?? null,
     porIA: daIA.has(row.id),
+    respondeA: citada.get(row.id) ?? null,
   }))
 }
 
@@ -2589,11 +2659,12 @@ export async function sendConversationQuestionnaire(conversationId: string) {
  * legenda. Mesma funcao do texto, em formulario: o servidor revalida a janela
  * de 24h, guarda o arquivo no acervo e manda pela Meta (24/09/2026).
  */
-export async function sendConversationFile(conversationId: string, arquivo: File, legenda: string) {
+export async function sendConversationFile(conversationId: string, arquivo: File, legenda: string, respondeA: string | null = null) {
   const corpo = new FormData()
   corpo.append('conversationId', conversationId)
   corpo.append('text', legenda)
   corpo.append('arquivo', arquivo)
+  if (respondeA) corpo.append('respondeA', respondeA)
   await invokeWithFormData('whatsapp-reply', corpo)
 }
 
@@ -2603,9 +2674,11 @@ export async function sendConversationReply(
   text: string,
   /** Verdadeiro para aviso do sistema; falso para o que a equipe digitou. */
   automatico = false,
+  /** Mensagem citada, como o "responder" do WhatsApp (20/10/2026). */
+  respondeA: string | null = null,
 ) {
   const { data, error } = await supabase.functions.invoke('whatsapp-reply', {
-    body: { conversationId, text, automatico },
+    body: { conversationId, text, automatico, ...(respondeA ? { respondeA } : {}) },
   })
   if (error) {
     // O corpo da resposta traz a mensagem em portugues; o error do invoke traz
@@ -2615,6 +2688,36 @@ export async function sendConversationReply(
   if ((data as { error?: string } | null)?.error) {
     throw new Error((data as { error: string }).error)
   }
+}
+
+/**
+ * Da um nome a conversa, na tela (20/10/2026). Vazio volta ao nome do cadastro
+ * ou do WhatsApp. O cadastro do paciente nao muda.
+ */
+export async function renomearConversa(conversationId: string, nome: string) {
+  const limpo = nome.trim().replace(/\s+/g, ' ').slice(0, 120)
+  const { error } = await semTipo
+    .from('whatsapp_conversations')
+    .update({ nome_personalizado: limpo || null })
+    .eq('id', conversationId)
+  if (error) {
+    throw new Error(
+      /nome_personalizado/.test(error.message ?? '')
+        ? 'O sistema ainda está sendo atualizado. Tente renomear de novo em alguns minutos.'
+        : 'Não foi possível renomear a conversa.',
+    )
+  }
+}
+
+/**
+ * "Este numero nao e do paciente": desliga a conversa do cadastro (20/10/2026).
+ * Ver desvincular_conversa_do_paciente.
+ */
+export async function desligarConversaDoPaciente(conversationId: string) {
+  const { error } = await (supabase as unknown as SupabaseClient).rpc('desvincular_conversa_do_paciente', {
+    p_conversation_id: conversationId,
+  })
+  if (error) fail(error)
 }
 
 /**

@@ -924,6 +924,31 @@ Deno.serve(async (req) => {
             }
           }
 
+          // A familia citou uma mensagem nossa (o "responder" do WhatsApp,
+          // 20/10/2026): a tela mostra a citacao em cima do balao. Coluna nova,
+          // gravada a parte - sem ela, so a citacao some.
+          const idCitado = message.context?.id
+          if (idCitado && externalId) {
+            try {
+              const { data: citada } = await admin
+                .from('whatsapp_messages')
+                .select('id')
+                .eq('conversation_id', conversation.id)
+                .eq('external_message_id', idCitado)
+                .maybeSingle()
+              if (citada?.id) {
+                const { error: erroCitacao } = await admin
+                  .from('whatsapp_messages')
+                  .update({ responde_a: citada.id })
+                  .eq('conversation_id', conversation.id)
+                  .eq('external_message_id', externalId)
+                if (erroCitacao) throw erroCitacao
+              }
+            } catch (erro) {
+              console.warn('Nao gravei qual mensagem a familia citou', erro)
+            }
+          }
+
           // A familia respondendo a uma conversa que o medico (ou o Edu) esta
           // levando pelo WhatsApp dele (18/10/2026): a mensagem vai aos
           // celulares, na mesma conversa. Ver repassarRespostaDaFamilia. Com
@@ -1242,6 +1267,9 @@ Deno.serve(async (req) => {
                 chamar: chaveIA ? claudePelaApi(chaveIA) : null,
                 roboDireto: () => tratarConversa(opcoesDoRobo),
                 roboNaoEntendeuAgora: () => roboRegistrou(conversation.id, 'nao_entendi'),
+                // "Falar com a equipe" tocado na lista chega como numero; o titulo
+                // diz o que era (ver esperarOAssunto).
+                tituloDoToque: message.type === 'interactive' ? body : null,
               })
               resultado = desfecho.resultado
               daIA = desfecho.origem === 'ia'

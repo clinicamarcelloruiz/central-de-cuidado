@@ -15,6 +15,8 @@ import {
   semNarracao,
   montarSituacao,
   perguntaLateral,
+  esperarOAssunto,
+  ESPERA_DO_ASSUNTO,
 } from './assistente.build.mjs'
 
 let ok = 0
@@ -741,6 +743,9 @@ confere('"a tela ja mostra" nao sai', semNarracao('A tela já mostra a remarcaç
 confere('agendamento: tres palavras a mais sao pergunta, mesmo sem "?"', perguntaLateral('santos e presisa de pedido da pediatra pra consulta', true) && !perguntaLateral('santos e presisa de pedido da pediatra pra consulta'))
 confere('agendamento: resposta curta do passo nao e pergunta', !perguntaLateral('pode ser sexta de manha', true))
 confere('chamada em formato de parametro nao sai', semNarracao('Já avisei. <parameter name="motivo">urgencia</parameter>') === 'Já avisei.', semNarracao('Já avisei. <parameter name="motivo">urgencia</parameter>'))
+// Real 19/10/2026: a instrucao virou frase e chegou a mae.
+confere('"nao ha o que acrescentar" nao sai', semNarracao('Não há o que acrescentar, então não escrevo nada.') === '', semNarracao('Não há o que acrescentar, então não escrevo nada.'))
+confere('"nada a acrescentar" sai e a resposta fica', semNarracao('Nada a acrescentar. Atendemos aos sábados em São Paulo.') === 'Atendemos aos sábados em São Paulo.', semNarracao('Nada a acrescentar. Atendemos aos sábados em São Paulo.'))
 confere('"vou abrir" sem abrir nada nao sai', semNarracao('Entendi. Agora vou abrir a troca do horário.') === 'Entendi.')
 {
   // "depois das 17h" e limite: a IA nao guarda as 17:00.
@@ -2243,6 +2248,48 @@ confere('narracao: "voce recebe nesta conversa" fica', semNarracao('Quando o rel
   // Real 20/10/2026: a IA escreveu "Presenca confirmada!" sem a agenda registrar.
   confere('IA nao confirma presenca: manda tocar em Confirmar presenca', sistema.includes('Você não confirma presença em consulta') && sistema.includes('nunca escreva "presença confirmada"') && sistema.includes('*Confirmar presença*'))
   confere('desistencia pelo convenio: exemplo sem prometer quanto reembolsa', sistema.includes('pensei que atendesse plano de saúde') && sistema.includes('perguntar quanto eles reembolsam dessa consulta') && !/reembolsa(m)? (o valor )?(total|tudo)/.test(sistema))
+  // Pedido do Dr. Marcello (20/10/2026): consulta dia 23, exame pronto dia 27.
+  confere('retorno esperando o exame: o medico aceita, sem chamar a equipe', sistema.includes('Retorno depois dos 30 dias porque o exame pedido na consulta só fica pronto depois') && sistema.includes('o médico aceita como retorno') && sistema.includes('Não é exceção e não chame a equipe'))
+  confere('retorno esperando o exame: muito longe ou duvida vai ao medico', sistema.includes('Chame a equipe (excecao), para o médico avaliar, só se o resultado sai muito depois do prazo') && sistema.includes('ou se tiver dúvida'))
+}
+
+// "Falar com a equipe" sem assunto (20/10/2026): primeiro o assunto, depois a
+// equipe. Antes o toque ia direto para a fila e para os celulares.
+{
+  const menu = 'Como podemos ajudar hoje?\n\n*1* 💬 Dúvidas sobre a consulta\n*2* 🗓️ Marcar uma consulta ou retorno\n*3* 🗣️ Falar com alguém da equipe'
+  const casos = [
+    ['toque no 9', { texto: '9' }, null, 'esperar'],
+    ['toque "Falar com a equipe" da lista (chega o id)', { texto: '3', etapa: 'menu' }, 'Falar com a equipe', 'esperar'],
+    ['"3" digitado no menu', { texto: '3', etapa: 'menu', ultimaDoConsultorio: menu }, null, 'esperar'],
+    ['"quero falar com uma pessoa"', { texto: 'Quero falar com uma pessoa' }, null, 'esperar'],
+    ['"atendente"', { texto: 'atendente' }, null, 'esperar'],
+  ]
+  for (const [nome, extra, titulo, esperado] of casos) {
+    const c = claudeFalso([texto('nao devia')])
+    const f = ferramentasFalsas()
+    const rd = roboDireto()
+    const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao(extra), ferramentas: f, chamar: c.chamar, roboDireto: rd.fn, tituloDoToque: titulo })
+    confere(`equipe sem assunto (${nome}): pergunta o assunto`, d.resultado?.resposta === ESPERA_DO_ASSUNTO && !d.resultado?.atencao, JSON.stringify(d.resultado))
+    confere(`equipe sem assunto (${nome}): ninguem e chamado`, !f.feito.some((x) => x[0] === 'equipe') && c.chamadas.length === 0 && rd.chamado.vezes === 0)
+    confere(`equipe sem assunto (${nome}): esperarOAssunto`, esperarOAssunto({ ...situacao(extra), titulo }) === esperado)
+  }
+  // Insistiu logo depois da pergunta: vai a equipe.
+  {
+    const f = ferramentasFalsas()
+    const c = claudeFalso([texto('nao devia')])
+    const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: '9', ultimaDoConsultorio: ESPERA_DO_ASSUNTO }), ferramentas: f, chamar: c.chamar, roboDireto: roboDireto().fn })
+    confere('equipe: insistiu depois da pergunta vai a equipe', d.resultado?.atencao === 'atendente' && f.feito.some((x) => x[0] === 'equipe' && x[1] === 'atendente') && c.chamadas.length === 0, JSON.stringify(d.resultado))
+  }
+  // O que NAO e pedido de equipe sem assunto.
+  for (const [nome, extra, titulo] of [
+    ['"3" escolhendo a unidade', { texto: '3', etapa: 'aguardando_unidade', ultimaDoConsultorio: '*1* Santos\n*2* São Paulo\n*3* Telemedicina\n\nDigite *9* para falar com a nossa equipe' }, null],
+    ['pedido com assunto', { texto: 'quero falar com a equipe sobre o reembolso' }, null],
+    ['ja na fila da equipe', { texto: '9', etapa: 'atendente' }, null],
+    ['equipe conversando', { texto: '9', equipeConversando: true }, null],
+    ['toque em Marcar uma consulta', { texto: '2', etapa: 'menu' }, 'Marcar uma consulta'],
+  ]) {
+    confere(`nao espera o assunto: ${nome}`, esperarOAssunto({ ...situacao(extra), titulo }) === null)
+  }
 }
 
 console.log(`assistente: ${ok} verificacoes ok`)

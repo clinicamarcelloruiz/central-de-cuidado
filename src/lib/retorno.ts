@@ -81,3 +81,29 @@ export function agruparPorDia(horarios: string[], fuso = 'America/Sao_Paulo'): {
   }
   return [...grupos.entries()].map(([dia, lista]) => ({ dia, horarios: lista }))
 }
+
+/** Retorno incluido no valor: ate 30 dias depois da consulta (ver dataDoRetorno). */
+export const DIAS_DO_RETORNO = 30
+
+/**
+ * Ate quando o retorno esta incluido (20/10/2026): a mais recente das datas de
+ * consulta (AAAA-MM-DD ou ISO) mais 30 dias. Nulo sem nenhuma data.
+ *
+ * Pedido do Edu: no cabecalho da conversa, a data limite para a familia marcar
+ * o retorno. A recepcao fazia a conta de cabeca a cada pergunta.
+ */
+export function retornoIncluidoAte(datas: (string | null | undefined)[]): string | null {
+  const validas = datas
+    .map((d) => (d ?? '').slice(0, 10))
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort()
+  const ultima = validas.at(-1)
+  return ultima ? somarDias(ultima, DIAS_DO_RETORNO) : null
+}
+
+/** Quantos dias faltam (negativo: venceu ha tantos dias), contando so a data. */
+export function diasAte(ate: string, hoje: string): number {
+  const a = Date.parse(`${ate.slice(0, 10)}T12:00:00Z`)
+  const h = Date.parse(`${hoje.slice(0, 10)}T12:00:00Z`)
+  return Math.round((a - h) / 86_400_000)
+}

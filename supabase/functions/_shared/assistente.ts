@@ -385,9 +385,14 @@ function instrucoes(s: Situacao): string {
     'É da equipe (use chamar_equipe: em para_familia vai tudo o que a família lê, a resposta ao que você já sabe e, em uma frase, que a equipe responde o resto por aqui; em resumo_para_equipe, escreva para a equipe o que precisa ser respondido):',
     '1. Conduta médica sobre esta criança: o que fazer com um sintoma, remédio, dose, o que significa um resultado de exame, se é grave, se ela precisa de tal exame ou tratamento.',
     '2. Documento assinado pelo médico: receita nova, pedido de exame novo sem consulta, atestado, relatório, declaração. (2ª via de algo já emitido: abrir_fluxo segunda_via.)',
-    '3. Exceção às regras: encaixe fora da agenda, desconto, retorno fora do prazo, mudar valor.',
+    '3. Exceção às regras: encaixe fora da agenda, desconto, retorno fora do prazo (salvo o retorno que espera o exame, abaixo), mudar valor.',
     '4. Dinheiro e conflito: estorno, cobrança contestada, reclamação.',
     'Se pedirem para falar com uma pessoa: se for uma dessas quatro, chame a equipe; se não, resolva você, e chame só se insistirem.',
+    // Pedido do Dr. Marcello (20/10/2026): uma consulta era dia 23 e o exame
+    // so ficava pronto dia 27. Retorno que passa dos 30 dias esperando o
+    // resultado ele aceita; a equipe so entra quando o atraso parece demora da
+    // familia ou o caso e complexo.
+    '- Retorno depois dos 30 dias porque o exame pedido na consulta só fica pronto depois (a consulta foi dia 23 e o resultado sai dia 27, por exemplo): o médico aceita como retorno. Não é exceção e não chame a equipe: diga que pode marcar o retorno para quando o resultado estiver pronto e abra o agendamento. Chame a equipe (excecao), para o médico avaliar, só se o resultado sai muito depois do prazo (semanas ou meses, como se o exame tivesse demorado a ser feito), se o exame é complexo e o prazo não está claro, ou se tiver dúvida.',
     '',
     'Falar de sintoma não é pedir conduta. "Minha filha tem refluxo, ele trata?" pergunta sobre o serviço: responda (se a condição está em <clinica>) e ofereça marcar. Pergunta sobre o serviço é sua: se o médico pede exames, se atende tal idade ou tal problema, como é a consulta, consulta online, valor, convênio, reembolso, endereço, estacionamento. Nunca diga o que fazer com o sintoma nem cite remédio. O que NÃO fazer também é conduta ("não dê nada", "não dê o remédio", "espere"): nunca escreva.',
     '"É refluxo?", "é normal?" de quem está procurando atendimento: diga que é exatamente o que o médico avalia na consulta e ofereça marcar, sem chamar a equipe. Chame a equipe quando pedirem o que fazer agora, quando for sobre resultado de exame ou tratamento que a criança já faz, ou quando parecer urgente.',
@@ -537,6 +542,58 @@ export function ficaComORobo(s: Situacao): string | null {
 }
 
 const ATE = 4
+
+/**
+ * "Falar com a equipe" sem dizer o assunto (20/10/2026).
+ *
+ * O toque no menu ia direto para a fila da equipe e para os celulares do
+ * alerta, e muitas vezes era para perguntar o valor ou o endereco. O Edu: "tem
+ * que esperar ver qual vai ser a manifestacao primeiro e ver se voce nao vai
+ * conseguir resolver; se nao conseguir, voce envia". Agora o pedido sem assunto
+ * ouve esta pergunta, e a mensagem seguinte vai para a IA, que resolve ou chama
+ * a equipe com o assunto ja dito. Pedir de novo, logo depois desta pergunta, e
+ * insistir: ai vai direto para a equipe.
+ */
+export const ESPERA_DO_ASSUNTO =
+  'Claro! Me conta aqui o que você precisa. Se eu conseguir resolver, já te respondo na hora; ' +
+  'se for algo que precisa da equipe, eu passo para ela, que responde por aqui.'
+const TRECHO_DA_ESPERA = 'Se eu conseguir resolver, já te respondo na hora'
+
+const SO_PEDIU_A_EQUIPE =
+  /^(?:atendente|secretaria|equipe|ajuda|(?:quero |queria |preciso |gostaria de )?falar com (?:a |o |uma |um |alguem da |alguem |algum )?(?:equipe|atendente|secretaria|alguem|pessoa|humano)(?: da equipe| da clinica| do consultorio)?)[.!]*$/
+
+export const EQUIPE_DEPOIS_DA_ESPERA = 'Combinado! Já passei sua conversa para a equipe, que responde por aqui.'
+
+/**
+ * 'esperar': pediu a equipe sem assunto, e ouve ESPERA_DO_ASSUNTO.
+ * 'equipe': pediu de novo logo depois dessa pergunta - insistiu, vai a equipe.
+ * null: nao e pedido de equipe sem assunto (ou a equipe ja esta na conversa).
+ */
+export function esperarOAssunto(p: {
+  texto: string
+  /** Texto do item tocado, quando a familia tocou numa lista ou botao. */
+  titulo?: string | null
+  etapa: string | null
+  ultimaDoConsultorio: string | null
+  equipeConversando: boolean
+}): 'esperar' | 'equipe' | null {
+  if (p.equipeConversando || p.etapa === 'atendente') return null
+  const ultima = semAcento(p.ultimaDoConsultorio ?? '')
+  if (!soPediuAEquipe(p.texto, p.titulo, ultima)) return null
+  return ultima.includes(semAcento(TRECHO_DA_ESPERA)) ? 'equipe' : 'esperar'
+}
+
+function soPediuAEquipe(texto: string, tituloDoToque: string | null | undefined, ultima: string): boolean {
+  const t = semAcento(texto).trim()
+  const titulo = semAcento(tituloDoToque ?? '').trim()
+  if (SO_PEDIU_A_EQUIPE.test(t) || SO_PEDIU_A_EQUIPE.test(titulo)) return true
+  // O 9 chama a equipe em qualquer etapa (ver pediuAtendente). Outro numero so
+  // quando a nossa ultima mensagem o oferecia para isso ("*3* Falar com alguem
+  // da equipe", no menu).
+  if (t === '9') return true
+  const numero = /^(\d)$/.exec(t)?.[1]
+  return Boolean(numero && new RegExp(String.raw`\*${numero}\*[^\n]*falar com`).test(ultima))
+}
 
 /**
  * Primeiro teste real com familia (15/10/2026): para um "ola" o Claude escreveu
@@ -901,6 +958,10 @@ export function falaComAEquipe(texto: string): boolean {
 const FIM = String.raw`(?![\wà-ú])`
 const COMECA_PELA_FAMILIA = /^\s*(?:(?:a|essa|esta)\s+(?:fam[ií]lia|m[aã]e|av[oó]|respons[aá]vel)\s+(?!d[aeo]s?\b|d[aeo]\s)\S+|o\s+usu[aá]rio\b)/i
 const NARRACAO = [
+  // Real 19/10/2026 ("aconchego na praia"): a instrucao "se nao houver o que
+  // acrescentar, nao escreva nada" virou a frase "Nao ha o que acrescentar,
+  // entao nao escrevo nada.", que chegou a mae em cima da tela do robo.
+  /\bn[aã]o\s+(?:h[aá]|tenho|existe)\s+(?:nada\s+)?(?:o\s+)?(?:que|a)\s+acrescentar\b|\bnada\s+a\s+acrescentar\b|\bn[aã]o\s+(?:vou\s+)?escrev(?:o|er|erei)\s+nada\b/i,
   new RegExp(String.raw`\b(?:a|essa|esta)\s+fam[ií]lia\s+(?:disse|aceitou|quer|escolheu|pediu|pede|pergunt\w*|n[aã]o|j[aá]|est[aá]|confirmou|respondeu|mandou|escreveu|tem|decidiu|procura\w*|vai)${FIM}`, 'i'),
   new RegExp(String.raw`\b(?:a|o)\s+(?:m[aã]e|pai|av[oó]|respons[aá]vel)\s+(?:disse|aceitou|quer|escolheu|pediu|pede|pergunt\w*|n[aã]o|j[aá]|est[aá]|confirmou|respondeu|mandou|escreveu|tem|decidiu|procura\w*|vai)${FIM}`, 'i'),
   new RegExp(String.raw`\b(?:ela|ele)\s+(?:perguntou|escreveu|respondeu|quer saber|est[aá] dizendo|disse que)${FIM}`, 'i'),
@@ -2220,6 +2281,8 @@ export async function atenderComAssistente(opcoes: {
   modelo?: string
   /** O robo como hoje, com a mensagem real. */
   roboDireto: () => Promise<Resultado | null>
+  /** Texto do item tocado, quando a mensagem foi um toque (ver esperarOAssunto). */
+  tituloDoToque?: string | null
   /**
    * O robo registrou "nao entendi" nesta mensagem? A resposta dele nem sempre
    * comeca assim: o naoEntendi tambem devolve a frase clinica ou uma resposta
@@ -2282,6 +2345,26 @@ export async function atenderComAssistente(opcoes: {
         ? { ...doRoboAgora, resposta: comProntoSocorroAgora(doRoboAgora.resposta.replace(/\n*Se piorar, não espere[^\n]*/g, ''), situacao), atencao: 'urgencia' as const }
         : doRoboAgora
       return { resultado, origem: 'robo', eventos: [{ evento: 'ia_passou_ao_robo', detalhe: doRobo }] }
+    }
+  }
+
+  // Pediu a equipe sem dizer para que: primeiro o assunto (ver esperarOAssunto).
+  // A etapa fica como esta: a resposta seguinte segue dela.
+  const pedidoDeEquipe = esperarOAssunto({
+    texto: situacao.texto,
+    titulo: opcoes.tituloDoToque,
+    etapa: situacao.etapa,
+    ultimaDoConsultorio: situacao.ultimaDoConsultorio,
+    equipeConversando: situacao.equipeConversando,
+  })
+  if (pedidoDeEquipe === 'esperar') {
+    return { resultado: { resposta: ESPERA_DO_ASSUNTO }, origem: 'robo', eventos: [{ evento: 'equipe_espera_assunto' }] }
+  }
+  if (pedidoDeEquipe === 'equipe') {
+    return {
+      resultado: await ferramentas.equipe('atendente', EQUIPE_DEPOIS_DA_ESPERA),
+      origem: 'robo',
+      eventos: [{ evento: 'equipe_insistiu' }],
     }
   }
 

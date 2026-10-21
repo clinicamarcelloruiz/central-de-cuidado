@@ -6,7 +6,7 @@ import {
   desfazerHeranca,
   temConteudo,
 } from './continuidade-da-consulta.build.mjs'
-import { prazoDoRetorno, somarDias, janelaDoRetorno, agruparPorDia } from './retorno.build.mjs'
+import { prazoDoRetorno, somarDias, janelaDoRetorno, agruparPorDia, retornoIncluidoAte, diasAte } from './retorno.build.mjs'
 import {
   lmsNaIdade,
   valorNoEscore,
@@ -143,6 +143,15 @@ confere('estatura adequada acima de -2', classificar('altura', 2.8, 20) === 'Est
 confere('IMC antes dos 5: risco de sobrepeso', classificar('imc', 1.5, 30) === 'Risco de sobrepeso')
 confere('IMC depois dos 5: sobrepeso', classificar('imc', 1.5, 80) === 'Sobrepeso')
 confere('IMC acima de +3 aos 10 anos: obesidade grave', classificar('imc', 3.2, 120) === 'Obesidade grave')
+
+// Prazo do retorno no cabecalho da conversa (20/10/2026): a mais recente das
+// datas de consulta, mais 30 dias.
+confere('prazo do retorno: consulta + 30 dias', retornoIncluidoAte(['2026-10-14']) === '2026-11-13')
+confere('prazo do retorno: vale a consulta mais recente', retornoIncluidoAte(['2026-09-23', '2026-10-14', null]) === '2026-11-13')
+confere('prazo do retorno: aceita data com hora', retornoIncluidoAte(['2026-10-14T17:40:00-03:00']) === '2026-11-13')
+confere('prazo do retorno: sem consulta, sem prazo', retornoIncluidoAte([null, undefined, '']) === null)
+confere('prazo do retorno: vira o mes', retornoIncluidoAte(['2026-01-31']) === '2026-03-02')
+confere('dias ate o prazo', diasAte('2026-11-13', '2026-10-20') === 24 && diasAte('2026-10-20', '2026-10-20') === 0 && diasAte('2026-10-01', '2026-10-20') === -19)
 
 console.log(`Prontuário (herança, retorno, curvas): ${ok} verificações passaram.`)
 if (falhas) {

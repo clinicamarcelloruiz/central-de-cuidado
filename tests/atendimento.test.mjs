@@ -2312,6 +2312,15 @@ await caso('Real 06/10: pergunta longa na fila não recebe o botão de marcar', 
   ['Tenho gêmeas idênticas de 3 anos e meio. Poderia agendar a consulta pro valor de 450 para as duas?', null],
 ], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false })
 
+// Real 20/10/2026 (credenciamento de convenio): frase comprida com a equipe
+// conversando e conversa, nao pedido de marcar. O pedido curto continua.
+await caso('Real 20/10: com a equipe conversando, "iremos agendar" no meio da frase não ganha o botão', [
+  ['Já coloquei a informação que será a última vez que iremos agendar pra', null],
+], { estadoInicial: { booking_state: 'atendente' }, podeIniciarMenu: false })
+await caso('Real 20/10: sem ninguém da equipe conversando, a mesma frase ainda ganha o botão', [
+  ['Já coloquei a informação que será a última vez que iremos agendar pra', 'Marcar uma consulta'],
+], { estadoInicial: { booking_state: 'atendente' } })
+
 // Real 06/10/2026 (Isaque): 3 dias depois do acompanhamento, sintoma vira recado.
 await caso('Real 06/10: sintoma depois do acompanhamento vai para a equipe', [
   ['Isaque ele faz cocô todos dias, porém tem dia que faz as bolinhas mais duras, depois faz 4 vez no dia', 'Obrigado por nos contar'],

@@ -5606,7 +5606,20 @@ async function tratarConversaPorDentro(opcoes: {
     }
     const perguntaLonga =
       parecePergunta(texto) && normalizar(texto).split(/\s+/).filter(Boolean).length >= 10
-    const querMarcar = !perguntaLonga && (pediuAgendamento(texto) || texto.trim() === '2')
+    // Com a equipe conversando, so o pedido curto (20/10/2026). A Caroliny, do
+    // credenciamento da Trasmontano, conversava com o Edu sobre uma paciente
+    // que remarcou tres vezes; escreveu "Ja coloquei a informacao que sera a
+    // ultima vez que iremos agendar pra" e recebeu "toque em Marcar uma
+    // consulta" no meio da conversa. Frase comprida com gente conversando so
+    // ganha o botao se pede alguma coisa ("Preciso agendar o retorno dele em 6
+    // meses" continua pedido).
+    const pedeAlgo =
+      /\?|\b(preciso|precisava|precisamos|quero|queria|queremos|gostaria|gostariamos|pode|poderia|podemos|consigo|consegue|conseguimos|da pra|tem como|marca|marque|agende|agenda)\b/
+    const conversaDaEquipe =
+      !opcoes.podeIniciarMenu &&
+      normalizar(texto).split(/\s+/).filter(Boolean).length > 6 &&
+      !pedeAlgo.test(normalizar(texto))
+    const querMarcar = !perguntaLonga && !conversaDaEquipe && (pediuAgendamento(texto) || texto.trim() === '2')
     if (querMarcar && jaRespondidas < LIMITE_NA_ESPERA) {
       // Na fila, retorno para daqui a meses: o botao de marcar levaria a uma
       // agenda que nao chega la. Ver retornoAlemDaAgenda.
