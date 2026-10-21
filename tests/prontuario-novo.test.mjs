@@ -146,11 +146,18 @@ confere('IMC acima de +3 aos 10 anos: obesidade grave', classificar('imc', 3.2, 
 
 // Prazo do retorno no cabecalho da conversa (20/10/2026): a mais recente das
 // datas de consulta, mais 30 dias.
-confere('prazo do retorno: consulta + 30 dias', retornoIncluidoAte(['2026-10-14']) === '2026-11-13')
-confere('prazo do retorno: vale a consulta mais recente', retornoIncluidoAte(['2026-09-23', '2026-10-14', null]) === '2026-11-13')
-confere('prazo do retorno: aceita data com hora', retornoIncluidoAte(['2026-10-14T17:40:00-03:00']) === '2026-11-13')
-confere('prazo do retorno: sem consulta, sem prazo', retornoIncluidoAte([null, undefined, '']) === null)
-confere('prazo do retorno: vira o mes', retornoIncluidoAte(['2026-01-31']) === '2026-03-02')
+const HOJE_R = '2026-10-21'
+confere('prazo do retorno: consulta da agenda + 30 dias', retornoIncluidoAte({ daAgenda: '2026-10-14' }, HOJE_R) === '2026-11-13')
+confere('prazo do retorno: vale a mais recente das duas', retornoIncluidoAte({ daAgenda: '2026-09-23', doCadastro: '2026-10-14' }, HOJE_R) === '2026-11-13')
+confere('prazo do retorno: aceita data com hora', retornoIncluidoAte({ daAgenda: '2026-10-14T17:40:00-03:00' }, HOJE_R) === '2026-11-13')
+confere('prazo do retorno: sem consulta, sem prazo', retornoIncluidoAte({ daAgenda: null, doCadastro: '' }, HOJE_R) === null)
+confere('prazo do retorno: vira o mes', retornoIncluidoAte({ daAgenda: '2026-01-31' }, HOJE_R) === '2026-03-02')
+// Real 21/10/2026 (Maria): marcou pelo WhatsApp para 23/10 e ainda nao veio;
+// a data do cadastro e a da consulta marcada. Sem consulta feita, sem prazo.
+confere('Real 21/10: so consulta marcada (data futura no cadastro), sem prazo', retornoIncluidoAte({ daAgenda: null, doCadastro: '2026-10-23' }, HOJE_R) === null)
+confere('consulta marcada para hoje ainda nao conta pelo cadastro', retornoIncluidoAte({ doCadastro: '2026-10-21' }, HOJE_R) === null)
+confere('consulta feita hoje pela agenda conta', retornoIncluidoAte({ daAgenda: '2026-10-21' }, HOJE_R) === '2026-11-20')
+confere('cadastro com consulta passada conta', retornoIncluidoAte({ doCadastro: '2026-10-01' }, HOJE_R) === '2026-10-31')
 confere('dias ate o prazo', diasAte('2026-11-13', '2026-10-20') === 24 && diasAte('2026-10-20', '2026-10-20') === 0 && diasAte('2026-10-01', '2026-10-20') === -19)
 
 console.log(`Prontuário (herança, retorno, curvas): ${ok} verificações passaram.`)

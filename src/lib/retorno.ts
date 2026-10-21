@@ -86,18 +86,32 @@ export function agruparPorDia(horarios: string[], fuso = 'America/Sao_Paulo'): {
 export const DIAS_DO_RETORNO = 30
 
 /**
- * Ate quando o retorno esta incluido (20/10/2026): a mais recente das datas de
- * consulta (AAAA-MM-DD ou ISO) mais 30 dias. Nulo sem nenhuma data.
+ * Ate quando o retorno esta incluido (20/10/2026): a ultima consulta FEITA mais
+ * 30 dias. Nulo sem consulta feita.
  *
  * Pedido do Edu: no cabecalho da conversa, a data limite para a familia marcar
  * o retorno. A recepcao fazia a conta de cabeca a cada pergunta.
+ *
+ * So consulta que ja aconteceu (21/10/2026). A "data da consulta" do cadastro e
+ * tambem a da consulta MARCADA: a Maria, que marcou pelo WhatsApp e ainda nao
+ * veio, aparecia com "Retorno ate 22/11". O Edu: o retorno so aparece quando a
+ * familia ja passou em consulta e voltou a falar. A data da agenda ja vem so do
+ * que passou; a do cadastro vale so se for anterior a hoje.
  */
-export function retornoIncluidoAte(datas: (string | null | undefined)[]): string | null {
-  const validas = datas
-    .map((d) => (d ?? '').slice(0, 10))
-    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+export function retornoIncluidoAte(
+  consulta: { daAgenda?: string | null; doCadastro?: string | null },
+  hoje: string,
+): string | null {
+  const dia = (d?: string | null) => {
+    const v = (d ?? '').slice(0, 10)
+    return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null
+  }
+  const daAgenda = dia(consulta.daAgenda)
+  const doCadastro = dia(consulta.doCadastro)
+  const feitas = [daAgenda && daAgenda <= hoje.slice(0, 10) ? daAgenda : null, doCadastro && doCadastro < hoje.slice(0, 10) ? doCadastro : null]
+    .filter((d): d is string => Boolean(d))
     .sort()
-  const ultima = validas.at(-1)
+  const ultima = feitas.at(-1)
   return ultima ? somarDias(ultima, DIAS_DO_RETORNO) : null
 }
 

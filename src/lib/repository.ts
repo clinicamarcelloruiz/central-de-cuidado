@@ -1813,10 +1813,13 @@ export async function resumoDoPaciente(clinicId: string, patientId: string) {
     cancelamentos: cancelamentos.count ?? 0,
     // A ultima consulta e a mais recente entre a data do cadastro (a mesma que
     // a Agenda usa) e a ultima consulta da agenda que ja passou.
-    retornoAte: retornoIncluidoAte([
-      diaDaAgenda,
-      (cadastro.data as { consultation_date?: string | null } | null)?.consultation_date ?? null,
-    ]),
+    retornoAte: retornoIncluidoAte(
+      {
+        daAgenda: diaDaAgenda,
+        doCadastro: (cadastro.data as { consultation_date?: string | null } | null)?.consultation_date ?? null,
+      },
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date()),
+    ),
   } satisfies ResumoDoPaciente
 }
 
