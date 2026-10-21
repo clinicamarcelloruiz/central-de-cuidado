@@ -42,6 +42,11 @@ verify_jwt = false
 # de teste das notificacoes no celular). Mantem o JWT.
 verify_jwt = true
 
+[functions.bom-dia-da-equipe]
+# Bom dia das 8h para quem chamou a equipe de madrugada (21/10/2026): chamada
+# pelo pg_cron, sem sessao de usuario. Exige x-cron-secret, como o lembrete.
+verify_jwt = false
+
 [functions.ficha-pendente]
 # Reserva sem cadastro (01/10/2026): chamada a cada 15 min pelo pg_cron, sem
 # sessao de usuario. Exige x-cron-secret, como o lembrete.
