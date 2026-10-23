@@ -284,6 +284,78 @@ confere('numeros: sem equipe cadastrada vai ao medico mesmo assim', JSON.stringi
   confere('urgencia ignora o campo: vai aos dois', urgencia.length === 2, JSON.stringify(urgencia))
 }
 
+// 8. A foto, o audio ou o documento vao junto (23/10/2026, ver anexo-para-equipe.ts).
+confere('anexo: foto sozinha agora vai aos celulares', deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'anexo' }) === 'novo')
+confere('anexo: vai ao medico (costuma ser exame)', pedidoParaOMedico('anexo', null) === true)
+confere('anexo: assunto', assuntoDoPedido('anexo', null) === 'mandou foto, áudio ou documento')
+const comFoto = { ...pedidoDaFamilia, anexo: { tipo: 'image', link: 'https://acervo/foto' }, assunto: 'mandou foto, áudio ou documento' }
+{
+  const banco = ajustesComNumeros()
+  const enviados = []
+  const meta = async (url, init) => {
+    enviados.push(JSON.parse(init.body))
+    return { ok: true, status: 200, json: async () => ({ messages: [{ id: `wamid.${enviados.length}` }] }) }
+  }
+  const r = await enviarAlertaDeUrgencia(banco, comFoto, meta)
+  confere('anexo: aviso e foto para cada numero, nessa ordem', JSON.stringify(enviados.map((e) => `${e.to}:${e.type}`)) === JSON.stringify(['5513997039614:template', '5513997039614:image', '5511988887777:template', '5511988887777:image']) && r.length === 2, JSON.stringify(enviados.map((e) => `${e.to}:${e.type}`)))
+  confere('anexo: a foto leva o link do acervo', enviados[1]?.image?.link === 'https://acervo/foto')
+  const nota = banco.db.conversation_notes?.[0]?.texto ?? ''
+  confere('anexo: a nota diz que a foto foi', nota.startsWith('📲') && nota.includes('A foto foi junto para final 9614 e final 7777'), nota)
+}
+{
+  // Fora da janela de 24 h: o aviso chega, a foto nao, e a nota grita.
+  const banco = ajustesComNumeros()
+  const meta = async (url, init) => {
+    const corpo = JSON.parse(init.body)
+    if (corpo.type === 'image') return { ok: false, status: 400, json: async () => ({ error: { code: 131047, message: 'Re-engagement message' } }) }
+    return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'w' }] }) }
+  }
+  const r = await enviarAlertaDeUrgencia(banco, comFoto, meta)
+  const nota = banco.db.conversation_notes?.[0]?.texto ?? ''
+  confere('anexo fora da janela: o aviso conta como enviado', r.every((e) => e.ok))
+  confere('anexo fora da janela: nota diz que nao foi e esta na Central', nota.includes('⚠️ A foto não foi para final 9614 e final 7777') && nota.includes('Central'), nota)
+}
+{
+  // Aviso que nao chegou: a foto nem e tentada para aquele numero.
+  const banco = ajustesComNumeros()
+  const tipos = []
+  const meta = async (url, init) => {
+    const corpo = JSON.parse(init.body)
+    tipos.push(`${corpo.to}:${corpo.type}`)
+    if (corpo.to === '5511988887777') return { ok: false, status: 400, json: async () => ({ error: { message: 'erro' } }) }
+    return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'w' }] }) }
+  }
+  await enviarAlertaDeUrgencia(banco, comFoto, meta)
+  confere('anexo: so vai para quem recebeu o aviso', !tipos.includes('5511988887777:image') && tipos.includes('5513997039614:image'), JSON.stringify(tipos))
+}
+{
+  // Seguimento com pedido ainda sem resposta: o aviso nao repete, a foto vai sozinha.
+  const banco = ajustesComNumeros()
+  banco.db.alertas_de_urgencia.push({ id: 'a-9', clinic_id: 'c1', conversa_whatsapp: 'conv-1', veredito: null, criado_em: new Date(pedido.agora.getTime() - 3600e3).toISOString(), mensagens: [] })
+  const enviados = []
+  const meta = async (url, init) => {
+    enviados.push(JSON.parse(init.body))
+    return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'w' }] }) }
+  }
+  await enviarAlertaDeUrgencia(banco, { ...comFoto, seguimento: true }, meta)
+  confere('seguimento com foto: so a foto, sem aviso de novo', enviados.length === 2 && enviados.every((e) => e.type === 'image'), JSON.stringify(enviados.map((e) => e.type)))
+  confere('seguimento com foto: nao registra alerta novo', banco.db.alertas_de_urgencia.length === 1)
+  confere('seguimento com foto: nota so do arquivo, sem evento de pedido', (banco.db.conversation_notes?.[0]?.texto ?? '').startsWith('📎') && !(banco.db.whatsapp_bot_events ?? []).length, JSON.stringify(banco.db.conversation_notes))
+  // Sem foto, o seguimento segue segurado (comportamento de antes).
+  const banco2 = ajustesComNumeros()
+  banco2.db.alertas_de_urgencia.push({ id: 'a-9', clinic_id: 'c1', conversa_whatsapp: 'conv-1', veredito: null, criado_em: new Date(pedido.agora.getTime() - 3600e3).toISOString(), mensagens: [] })
+  let chamadas = 0
+  await enviarAlertaDeUrgencia(banco2, { ...pedidoDaFamilia, seguimento: true }, async () => { chamadas++; return { ok: true, status: 200, json: async () => ({}) } })
+  confere('seguimento sem foto: nada sai', chamadas === 0)
+}
+{
+  // Figurinha nao vai como arquivo.
+  const banco = ajustesComNumeros()
+  const tipos = []
+  await enviarAlertaDeUrgencia(banco, { ...pedidoDaFamilia, anexo: { tipo: 'sticker', link: 'https://acervo/s' } }, async (url, init) => { tipos.push(JSON.parse(init.body).type); return { ok: true, status: 200, json: async () => ({}) } })
+  confere('figurinha: so o aviso', tipos.every((t) => t === 'template'), JSON.stringify(tipos))
+}
+
 console.log(`alerta de urgencia: ${ok} verificacoes ok`)
 if (falhas.length) {
   for (const f of falhas) console.log('✗ ' + f)

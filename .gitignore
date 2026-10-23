@@ -80,3 +80,4 @@ tests/respostas-da-equipe.build.mjs
 tests/depois-do-convenio.build.mjs
 tests/consulta-aconteceu.build.mjs
 tests/robo-da-conversa.build.mjs
+tests/anexo-para-equipe.build.mjs

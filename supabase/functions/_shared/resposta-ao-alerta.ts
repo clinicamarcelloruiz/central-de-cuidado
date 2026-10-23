@@ -1,3 +1,4 @@
+import { mensagemDoAnexo, type AnexoParaEquipe } from './anexo-para-equipe.ts'
 import { BOTOES_DO_ALERTA, MODELO_DO_PEDIDO, numerosDoPedido, parametrosDoPedido, payloadDoVeredito, type Veredito } from './alerta-de-urgencia.ts'
 import { montarConteudo } from './conteudo.ts'
 import { linkDoWhatsApp, semFormatacaoDoWhatsApp } from './instagram.ts'
@@ -645,7 +646,7 @@ const MIDIA_DA_FAMILIA: Record<string, string> = {
 
 export async function repassarRespostaDaFamilia(
   amb: Pick<AmbienteDaResposta, 'admin' | 'clinicId' | 'agora' | 'numeros' | 'enviarWhatsApp'>,
-  p: { conversaWhatsApp: string; quem: string; texto: string; idioma?: string },
+  p: { conversaWhatsApp: string; quem: string; texto: string; idioma?: string; anexo?: AnexoParaEquipe },
 ): Promise<boolean> {
   try {
     if (!amb.numeros.length) return false
@@ -689,9 +690,17 @@ Para responder, escreva aqui: vai para ${quem}.`,
         ],
       },
     }
+    // O arquivo vai atras do texto livre (23/10/2026, ver anexo-para-equipe.ts):
+    // se o texto livre passou, a janela de 24h daquele celular esta aberta e o
+    // arquivo passa tambem. Quem so recebeu o modelo fica com o "veja na Central".
+    const corpoDoAnexo = p.anexo ? mensagemDoAnexo(p.anexo, quem) : null
     const ids: string[] = []
     for (const numero of destinos) {
       let envio = await amb.enviarWhatsApp(numero, livre)
+      if (envio.ok && corpoDoAnexo) {
+        const doAnexo = await amb.enviarWhatsApp(numero, corpoDoAnexo)
+        if (!doAnexo.ok) console.warn('Repasse da familia: o arquivo nao foi para', numero.slice(-4), doAnexo.erro)
+      }
       if (!envio.ok) envio = await amb.enviarWhatsApp(numero, modelo)
       if (envio.ok && envio.id) ids.push(envio.id)
       if (!envio.ok) console.error('Repasse da familia nao chegou a', numero.slice(-4), envio.erro)

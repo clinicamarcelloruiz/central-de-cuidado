@@ -34,6 +34,7 @@ import {
 } from '../_shared/mensagem-recebida.ts'
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 import { montarAviso, quemEscreveu } from '../_shared/aviso-da-equipe.ts'
+import { anexoQueVai, type AnexoParaEquipe } from '../_shared/anexo-para-equipe.ts'
 import { assuntoDoPedido, deveAlertar, deveEncaminhar, enviarAlertaDeUrgencia, lerNumeros as lerNumerosDoAlerta, pedidoParaOMedico } from '../_shared/alerta-de-urgencia.ts'
 import { repassarRespostaDaFamilia, tratarRespostaDaEquipe, whatsAppPelaApi } from '../_shared/resposta-ao-alerta.ts'
 import { enviarDirect } from '../_shared/instagram-api.ts'
@@ -909,6 +910,24 @@ Deno.serve(async (req) => {
           const anexo = midia && externalId
             ? await guardarAnexo(admin, clinicId, externalId, midia, phoneNumberId)
             : null
+          // O arquivo vai junto para os celulares da equipe (23/10/2026, ver
+          // _shared/anexo-para-equipe.ts), por link assinado do acervo: o id da
+          // Meta serve para baixar, nao para reenviar. Sem o link, vai so o
+          // aviso, como antes - e o log diz.
+          let anexoParaEquipe: AnexoParaEquipe | undefined
+          if (anexo && anexoQueVai(message.type)) {
+            try {
+              const { data: assinado, error: erroDoLink } = await admin.storage
+                .from('whatsapp-anexos')
+                .createSignedUrl(anexo.path, 24 * 3600)
+              if (erroDoLink) throw erroDoLink
+              if (assinado?.signedUrl) {
+                anexoParaEquipe = { tipo: String(message.type), link: assinado.signedUrl, nome: midia?.filename }
+              }
+            } catch (erro) {
+              console.warn('Nao gerei o link do anexo para os celulares; vai so o aviso', erro)
+            }
+          }
 
           const { error: messageError } = await admin.from('whatsapp_messages').insert({
             clinic_id: clinicId,
@@ -1008,6 +1027,7 @@ Deno.serve(async (req) => {
                     telefone: waId,
                   }),
                   texto: body,
+                  anexo: anexoParaEquipe,
                 },
               )
             }
@@ -1123,6 +1143,7 @@ Deno.serve(async (req) => {
                 texto,
                 agora: new Date(),
                 conversaWhatsApp: conversation.id,
+                anexo: anexoParaEquipe,
               })
               if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(pedido)
               else await pedido
@@ -1568,6 +1589,8 @@ Deno.serve(async (req) => {
                   texto: body,
                   agora: new Date(),
                   conversaWhatsApp: conversation.id,
+                  // A foto do vomito com sangue vai junto do alerta.
+                  anexo: anexoParaEquipe,
                 })
                 if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(alerta)
                 else await alerta

@@ -253,6 +253,21 @@ confere('escolherAlerta: aviso mais novo que a resposta pergunta', escolherAlert
   confere('repasse: foto vira aviso para ver na Central', JSON.stringify(enviados[0].conteudo).includes('Mandou uma foto'), JSON.stringify(enviados[0].conteudo))
 }
 {
+  // 23/10/2026: a foto vai atras do texto livre, so para quem o texto livre alcancou.
+  const c = cenario({ alertas: [alerta({ respondido_em: haMinutos(3), respondido_por: MEDICO })] })
+  const enviados = []
+  c.amb.enviarWhatsApp = async (para, conteudo) => {
+    enviados.push({ para, conteudo })
+    if (para === EQUIPE && conteudo.type !== 'template') return { ok: false, erro: 'Re-engagement message' }
+    return { ok: true, id: `w${enviados.length}` }
+  }
+  await repassarRespostaDaFamilia(c.amb, { conversaWhatsApp: 'conv-1', quem: 'Helena', texto: '[image]', anexo: { tipo: 'image', link: 'https://acervo/foto' } })
+  const doMedico = enviados.filter((e) => e.para === MEDICO).map((e) => e.conteudo.type)
+  const daEquipe = enviados.filter((e) => e.para === EQUIPE).map((e) => e.conteudo.type)
+  confere('repasse com foto: medico (janela aberta) recebe texto e foto', JSON.stringify(doMedico) === JSON.stringify(['interactive', 'image']), JSON.stringify(doMedico))
+  confere('repasse com foto: fora da janela so o modelo, sem tentar a foto', !daEquipe.includes('image') && daEquipe.includes('template'), JSON.stringify(daEquipe))
+}
+{
   const c = cenario({ alertas: [alerta()] })
   confere('sem resposta pelo WhatsApp: nao repassa', (await repassarRespostaDaFamilia(c.amb, { conversaWhatsApp: 'conv-1', quem: 'Helena', texto: 'oi' })) === false && c.enviados.length === 0)
   const velho = cenario({ alertas: [alerta({ respondido_em: haMinutos(7 * 60), respondido_por: MEDICO })] })

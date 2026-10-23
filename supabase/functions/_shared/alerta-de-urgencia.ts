@@ -1,3 +1,4 @@
+import { anexoQueVai, mensagemDoAnexo, notaDoAnexo, type AnexoParaEquipe } from './anexo-para-equipe.ts'
 import { semDadosPessoais } from './assistente.ts'
 import { montarConteudo } from './conteudo.ts'
 import { textoDoModelo } from './modelos.ts'
@@ -46,7 +47,9 @@ export const MODELO_DO_PEDIDO = 'pedido_equipe'
 // 'ajuda' e 'remarcacao' (18/10/2026): os botoes "Preciso de ajuda" do
 // acompanhamento e "remarcar" do lembrete. O Heitor apertou "Preciso de ajuda"
 // no primeiro dia e o pedido nao chegou a ninguem.
-export const MOTIVOS_QUE_ENCAMINHAM = ['atendente', 'documento', 'farmacia', 'nao_suportada', 'ajuda', 'remarcacao'] as const
+// 'anexo' (23/10/2026): foto, audio ou documento da familia vao aos celulares,
+// com o proprio arquivo atras do aviso (ver anexo-para-equipe.ts).
+export const MOTIVOS_QUE_ENCAMINHAM = ['atendente', 'documento', 'farmacia', 'nao_suportada', 'ajuda', 'remarcacao', 'anexo'] as const
 export type TipoDoAviso = 'urgencia' | 'pedido'
 
 /**
@@ -82,6 +85,7 @@ export function assuntoDoPedido(motivo: string | null, motivoDaIA: string | null
     nao_suportada: 'tentou falar com a clínica (talvez uma ligação)',
     ajuda: 'pediu ajuda no acompanhamento depois da consulta',
     remarcacao: 'quer remarcar a consulta (respondeu ao lembrete)',
+    anexo: 'mandou foto, áudio ou documento',
   }
   return (motivoDaIA && daIA[motivoDaIA]) || (motivo && doRobo[motivo]) || 'pedido para a equipe'
 }
@@ -100,7 +104,9 @@ export function assuntoDoPedido(motivo: string | null, motivoDaIA: string | null
  * Urgencia nao passa por aqui: o alerta sempre vai ao medico.
  */
 const DA_IA_PARA_O_MEDICO = ['medico', 'documento', 'excecao']
-const DO_ROBO_PARA_O_MEDICO = ['farmacia', 'ajuda']
+// 'anexo' (23/10/2026): o que a familia manda em arquivo costuma ser exame ou
+// foto da crianca - quem precisa ver e o medico.
+const DO_ROBO_PARA_O_MEDICO = ['farmacia', 'ajuda', 'anexo']
 
 export function pedidoParaOMedico(motivo: string | null, motivoDaIA: string | null): boolean {
   if (motivoDaIA) return DA_IA_PARA_O_MEDICO.includes(motivoDaIA)
@@ -286,6 +292,8 @@ export type PedidoDeAlerta = {
   seguimento?: boolean
   /** Pedido que precisa do medico (ver pedidoParaOMedico). Sem o campo, vai a todos. */
   paraOMedico?: boolean
+  /** A foto, o audio ou o documento da mensagem, que vai logo atras do aviso (23/10/2026). */
+  anexo?: AnexoParaEquipe
 }
 
 const JANELA_DO_PEDIDO_MS = 6 * 3600 * 1000
@@ -329,7 +337,15 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
       console.info('Alerta de urgencia: nenhum numero cadastrado nesta clinica')
       return []
     }
-    if (pedido && p.seguimento && (await pedidoEmAberto(admin, p))) return []
+    // Seguimento com pedido ainda sem resposta: o aviso nao sai de novo (seria
+    // um por mensagem), mas o arquivo sai sozinho - a foto do exame que chega
+    // depois do "quero falar com a equipe" e justamente o que o medico precisa.
+    const comAnexo = Boolean(p.anexo && anexoQueVai(p.anexo.tipo))
+    let soOAnexo = false
+    if (pedido && p.seguimento && (await pedidoEmAberto(admin, p))) {
+      if (!comAnexo) return []
+      soOAnexo = true
+    }
 
     const { data: ajustes, error: erroDosAjustes } = await admin
       .from('clinic_settings')
@@ -345,18 +361,40 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
     const corpoDoModelo = { type: 'body', parameters: parametros.map((text) => ({ type: 'text', text })) }
 
     // O alerta fica registrado antes de sair: e o id dele que vai nos botoes.
-    // Sem a tabela (migration nao chegou), sai sem botoes, como antes.
-    const alertaId = await registrarAlerta(admin, p)
+    // Sem a tabela (migration nao chegou), sai sem botoes, como antes. So o
+    // arquivo (seguimento) nao e alerta novo.
+    const alertaId = soOAnexo ? null : await registrarAlerta(admin, p)
     // Com botoes so quando ha alerta registrado; se a Meta disser que o modelo
     // com botoes nao existe (ainda em analise), o resto vai pelo sem botoes.
     // No pedido, "com botoes" e o modelo; sem ele, o texto (ver textoDoPedido).
     let comBotoes = pedido || Boolean(alertaId)
 
     const envios: EnvioDoAlerta[] = []
+    const enviosDoAnexo: EnvioDoAlerta[] = []
     const mensagens: string[] = []
+    const corpoDoAnexo = comAnexo ? mensagemDoAnexo(p.anexo!, p.quem) : null
+    const mandarAnexo = async (numero: string) => {
+      if (!corpoDoAnexo) return
+      try {
+        const resposta = await buscar(`https://graph.facebook.com/${versao}/${numeroDoRobo}/messages`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: numero, ...corpoDoAnexo }),
+        })
+        const corpo = await resposta.json().catch(() => ({}))
+        if (resposta.ok) enviosDoAnexo.push({ numero, ok: true })
+        else enviosDoAnexo.push({ numero, ok: false, erro: corpo?.error?.message ?? `HTTP ${resposta.status}` })
+      } catch (erro) {
+        enviosDoAnexo.push({ numero, ok: false, erro: String(erro).slice(0, 200) })
+      }
+    }
     for (const numero of numeros) {
       if (!numeroDoRobo || !token) {
         envios.push({ numero, ok: false, erro: 'WhatsApp da clínica sem número ou token no servidor' })
+        continue
+      }
+      if (soOAnexo) {
+        await mandarAnexo(numero)
         continue
       }
       // O pedido sem o modelo aprovado vai como texto, com o mesmo botao: chega
@@ -424,6 +462,8 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
           envios.push({ numero, ok: true })
           const id = r.corpo?.messages?.[0]?.id
           if (id) mensagens.push(String(id))
+          // O arquivo logo atras do aviso, so para quem recebeu o aviso.
+          await mandarAnexo(numero)
         } else {
           const codigo = r.corpo?.error?.code ? `(#${r.corpo.error.code}) ` : ''
           envios.push({ numero, ok: false, erro: `${codigo}${r.corpo?.error?.message ?? `HTTP ${r.status}`}` })
@@ -441,12 +481,17 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
       }
     }
 
-    const { detalhe, nota, falhou } = descreverEnvio(envios, pedido ? 'pedido' : 'urgencia')
+    const descrito = descreverEnvio(envios, pedido ? 'pedido' : 'urgencia')
+    const { detalhe, falhou } = descrito
     if (falhou) console.error('Alerta de urgencia nao saiu para todos', detalhe)
+    const doAnexo = comAnexo ? notaDoAnexo(p.anexo!.tipo, enviosDoAnexo) : ''
+    if (enviosDoAnexo.some((e) => !e.ok)) console.warn('Anexo nao foi para todos os celulares', JSON.stringify(enviosDoAnexo))
+    // So o arquivo (seguimento): a nota e so dele; sem nada a dizer, nada se grava.
+    const nota = soOAnexo ? doAnexo : [descrito.nota, doAnexo].filter(Boolean).join('\n')
 
     // Registro: cada parte no seu try, porque perder a nota nao pode custar o
     // evento, e vice-versa.
-    if (p.conversaWhatsApp) {
+    if (p.conversaWhatsApp && nota) {
       try {
         const { error } = await admin
           .from('conversation_notes')
@@ -455,7 +500,8 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
       } catch (erro) {
         console.error('Alerta de urgencia: nota nao gravada', erro)
       }
-      try {
+      // So o arquivo nao e pedido novo: nao conta nos Numeros do WhatsApp.
+      if (!soOAnexo) try {
         const { error } = await admin
           .from('whatsapp_bot_events')
           .insert({ clinic_id: p.clinicId, conversation_id: p.conversaWhatsApp, evento: pedido ? 'pedido_equipe' : 'alerta_urgencia', detalhe })
@@ -464,7 +510,7 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
         console.error('Alerta de urgencia: evento nao gravado', erro)
       }
     }
-    if (p.conversaInstagram) {
+    if (p.conversaInstagram && nota) {
       try {
         const { error } = await admin
           .from('instagram_mensagens')
