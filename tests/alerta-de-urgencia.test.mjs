@@ -1,7 +1,7 @@
 // Alerta de urgencia no WhatsApp pessoal do medico (17/10/2026).
 // Regra em supabase/functions/_shared/alerta-de-urgencia.ts. Sem Meta e sem
 // banco: um fetch de mentira e um admin que guarda o que foi gravado.
-import { assuntoDoPedido, deveAlertar, deveEncaminhar, descreverEnvio, enviarAlertaDeUrgencia, MODELO_DO_ALERTA, numerosDoAlerta, numerosDoPedido, parametrosDoAlerta, parametrosDoPedido, pedidoParaOMedico } from './alerta-de-urgencia.build.mjs'
+import { assuntoDoPedido, deveAlertar, deveEncaminhar, descreverEnvio, enviarAlertaDeUrgencia, MODELO_DO_ALERTA, numerosDoAlerta, parametrosDoAlerta, parametrosDoPedido, pedidoDoDirect, pedidoParaOMedico } from './alerta-de-urgencia.build.mjs'
 import { textoDoModelo } from './modelos.build.mjs'
 import { bancoFalso } from './fixtures/banco-falso.mjs'
 
@@ -55,7 +55,7 @@ confere('alerta: urgencia resolvida e nova urgencia alerta', deveAlertar({ atenc
 // 4. O que fica registrado.
 {
   const certo = descreverEnvio([{ numero: '5513997039614', ok: true }, { numero: '5511988887777', ok: true }])
-  confere('registro: enviado', !certo.falhou && certo.detalhe === 'enviado 2/2' && certo.nota.includes('final 9614') && certo.nota.includes('final 7777'), certo.nota)
+  confere('registro: enviado, sem nota', !certo.falhou && certo.detalhe === 'enviado 2/2' && certo.nota === '', certo.nota)
   const semModelo = descreverEnvio([{ numero: '5513997039614', ok: false, erro: '(#132001) Template name does not exist in the translation' }, { numero: '5511988887777', ok: true }])
   confere('registro: falha grita', semModelo.falhou && semModelo.nota.startsWith('⚠️') && semModelo.nota.includes('Avise o Dr. Marcello por telefone'), semModelo.nota)
   confere('registro: modelo nao aprovado explicado', semModelo.nota.includes('ainda não foi aprovado na Meta'), semModelo.nota)
@@ -98,7 +98,8 @@ const pedido = { clinicId: 'c1', canal: 'WhatsApp', quem: 'Helena', texto: 'ela 
   const corpo = enviados[0][1]
   confere('envio: modelo certo', corpo.type === 'template' && corpo.template.name === 'alerta_urgencia' && corpo.to === '5513997039614', JSON.stringify(corpo))
   confere('envio: pelo numero do robo', enviados[0][0].endsWith('/123/messages'), enviados[0][0])
-  confere('envio: nota na conversa', admin.gravado.some(([t, l]) => t === 'conversation_notes' && l.conversation_id === 'conv-1' && l.texto.startsWith('🚨')))
+  // 23/10/2026, o Edu: "nao precisa das notas". Deu certo, nada na conversa.
+  confere('envio: sem nota quando deu certo', !admin.gravado.some(([t]) => t === 'conversation_notes'))
   confere('envio: evento nos numeros', admin.gravado.some(([t, l]) => t === 'whatsapp_bot_events' && l.evento === 'alerta_urgencia' && l.detalhe === 'enviado 2/2'))
 }
 {
@@ -125,8 +126,11 @@ const pedido = { clinicId: 'c1', canal: 'WhatsApp', quem: 'Helena', texto: 'ela 
 {
   const admin = adminFalso({ numeros: ['5513997039614'] })
   await enviarAlertaDeUrgencia(admin, { ...pedido, canal: 'Instagram', conversaWhatsApp: undefined, conversaInstagram: 'ig-1' }, async () => ({ ok: true, status: 200, json: async () => ({}) }))
-  confere('instagram: nota no direct', admin.gravado.some(([t, l]) => t === 'instagram_mensagens' && l.direcao === 'nota' && l.conversa_id === 'ig-1'))
+  confere('instagram: deu certo, sem nota no direct', !admin.gravado.some(([t]) => t === 'instagram_mensagens'))
   confere('instagram: sem evento do whatsapp', !admin.gravado.some(([t]) => t === 'whatsapp_bot_events'))
+  const falhou = adminFalso({ numeros: ['5513997039614'] })
+  await enviarAlertaDeUrgencia(falhou, { ...pedido, canal: 'Instagram', conversaWhatsApp: undefined, conversaInstagram: 'ig-1' }, async () => ({ ok: false, status: 400, json: async () => ({ error: { message: 'erro' } }) }))
+  confere('instagram: falhou, a nota grita no direct', falhou.gravado.some(([t, l]) => t === 'instagram_mensagens' && l.direcao === 'nota' && l.conversa_id === 'ig-1' && l.texto.includes('NÃO chegou')))
 }
 
 // 6. Com a tabela dos alertas (17/10/2026): registrado e com os botoes de
@@ -169,14 +173,31 @@ const ajustesComNumeros = () => bancoFalso({
   confere('teste da tela: alerta marcado como teste', banco.db.alertas_de_urgencia[0]?.teste === true)
 }
 
-// 7. O pedido que nao e urgencia, nos mesmos celulares (18/10/2026): sem
-// secretaria, quem responde e o medico ou o Edu.
-confere('pedido: conversa entra na fila do atendente', deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'atendente' }) === 'novo')
-confere('pedido: 2a via de receita', deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'documento' }) === 'novo')
-confere('pedido: troca de pedido na fila e novo', deveEncaminhar({ atencaoAntes: true, motivoAntes: 'atendente', motivoAgora: 'documento' }) === 'novo')
-confere('pedido: mae escrevendo de novo na fila e seguimento', deveEncaminhar({ atencaoAntes: true, motivoAntes: 'atendente', motivoAgora: 'atendente' }) === 'seguimento')
-confere('pedido: "Preciso de ajuda" do acompanhamento', deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'ajuda' }) === 'novo')
-confere('pedido: remarcar pelo lembrete', deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'remarcacao' }) === 'novo')
+// 7. O pedido que nao e urgencia, nos mesmos celulares (18/10/2026). Desde
+// 23/10/2026 so o que depende do Dr. Marcello: "so vai para o celular o que o
+// robo nao consegue resolver e depende de intervencao do Dr. Marcello ou
+// duvida sobre conduta, ou tambem encaixe de urgencia".
+const vai = (motivoAgora, motivoDaIA = null, antes = {}) => deveEncaminhar({ atencaoAntes: false, motivoAntes: null, ...antes, motivoAgora, motivoDaIA })
+confere('pedido: duvida de conduta vai', vai('atendente', 'medico') === 'novo')
+confere('pedido: receita ou exame novo vai', vai('atendente', 'documento') === 'novo')
+confere('pedido: encaixe ou excecao vai', vai('atendente', 'excecao') === 'novo')
+confere('pedido: "Preciso de ajuda" do acompanhamento vai', vai('ajuda') === 'novo')
+confere('pedido: farmacia pedindo correcao vai', vai('farmacia') === 'novo')
+confere('central: "falar com a equipe" do menu fica na Central', vai('atendente') === null)
+confere('central: valor e pagamento ficam na Central', vai('atendente', 'financeiro') === null)
+confere('central: pedir uma pessoa fica na Central', vai('atendente', 'pessoa') === null)
+confere('central: o que o robo nao soube fica na Central', vai('atendente', 'sem_informacao') === null)
+confere('central: 2a via e nota fiscal ficam na Central', vai('documento') === null)
+confere('central: remarcar pelo lembrete fica na Central', vai('remarcacao') === null)
+confere('central: ligacao ou mensagem que o WhatsApp nao mostra fica na Central', vai('nao_suportada') === null)
+confere('pedido: mae escrevendo de novo na fila e seguimento', vai('atendente', 'medico', { atencaoAntes: true, motivoAntes: 'atendente' }) === 'seguimento')
+confere('pedido: da fila de financeiro para conduta e seguimento, e sai (nada em aberto)', vai('atendente', 'medico', { atencaoAntes: true, motivoAntes: 'atendente' }) !== null)
+confere('pedido: troca de pedido na fila e novo', vai('ajuda', null, { atencaoAntes: true, motivoAntes: 'atendente' }) === 'novo')
+// O direct do Instagram grava a duvida de conduta como "medico".
+confere('direct: "medico" vira conduta', JSON.stringify(pedidoDoDirect('medico')) === '{"motivo":"atendente","motivoDaIA":"medico"}')
+confere('direct: duvida de conduta vai', vai(pedidoDoDirect('medico').motivo, pedidoDoDirect('medico').motivoDaIA) === 'novo')
+confere('direct: "atendente" fica na Central', vai(pedidoDoDirect('atendente').motivo, pedidoDoDirect('atendente').motivoDaIA) === null)
+confere('direct: sem motivo nao vai', vai(pedidoDoDirect(undefined).motivo) === null)
 confere('pedido: cancelar pelo lembrete fica so na tela', deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'cancelamento' }) === null)
 confere('pedido: assunto do acompanhamento', assuntoDoPedido('ajuda', null) === 'pediu ajuda no acompanhamento depois da consulta')
 confere('pedido: urgencia tem o alerta proprio', deveEncaminhar({ atencaoAntes: false, motivoAntes: null, motivoAgora: 'urgencia' }) === null)
@@ -189,7 +210,7 @@ confere('pedido: assunto desconhecido', assuntoDoPedido('outro', 'outro') === 'p
   confere('pedido: cinco parametros, assunto antes do trecho', p.length === 5 && p[3] === 'pergunta para o Dr. Marcello' && p[4] === 'pode dar dipirona?' && p[2] === '11:05', JSON.stringify(p))
   confere('pedido: texto do modelo para o registro', (textoDoModelo('pedido_equipe', p) ?? '').includes('Assunto: pergunta para o Dr. Marcello') && (textoDoModelo('pedido_equipe', p) ?? '').endsWith('[Eu respondo]'))
   const certo = descreverEnvio([{ numero: '5513997039614', ok: true }], 'pedido')
-  confere('pedido: nota propria', certo.nota.startsWith('📲') && !certo.nota.includes('urgência'), certo.nota)
+  confere('pedido: deu certo, sem nota', certo.nota === '' && !certo.falhou && certo.detalhe === 'enviado 1/1', JSON.stringify(certo))
   const semModelo = descreverEnvio([{ numero: '5513997039614', ok: false, erro: '(#132001) Template name does not exist in the translation' }], 'pedido')
   confere('pedido: falha grita sem mandar ligar', semModelo.falhou && semModelo.nota.includes('pedido_equipe ainda não foi aprovado') && semModelo.nota.includes('Responda a família por aqui') && !semModelo.nota.includes('telefone'), semModelo.nota)
 }
@@ -207,7 +228,7 @@ const pedidoDaFamilia = { ...pedido, tipo: 'pedido', assunto: 'pergunta para o D
   confere('pedido: modelo pedido_equipe', enviados[0]?.template?.name === 'pedido_equipe' && enviados[0].template.components[0].parameters.length === 5, JSON.stringify(enviados[0]))
   const botoes = (enviados[0]?.template?.components ?? []).filter((c) => c.type === 'button')
   confere('pedido: botao Eu respondo com o id', botoes.length === 1 && botoes[0].parameters[0].payload === `URG:${registrado?.id}:responde`, JSON.stringify(botoes))
-  confere('pedido: nota e evento proprios', banco.db.conversation_notes?.[0]?.texto.startsWith('📲') && banco.db.whatsapp_bot_events?.[0]?.evento === 'pedido_equipe', JSON.stringify(banco.db.whatsapp_bot_events))
+  confere('pedido: sem nota, com evento proprio', !(banco.db.conversation_notes ?? []).length && banco.db.whatsapp_bot_events?.[0]?.evento === 'pedido_equipe', JSON.stringify(banco.db.whatsapp_bot_events))
 }
 {
   // Modelo ainda em analise: vai como texto com o mesmo botao.
@@ -264,24 +285,16 @@ confere('equipe: pedir uma pessoa nao vai a ele', !pedidoParaOMedico('atendente'
 confere('equipe: o que o robo nao soube nao vai a ele', !pedidoParaOMedico('atendente', 'sem_informacao'))
 confere('equipe: 2a via e nota fiscal nao vao a ele', !pedidoParaOMedico('documento', null))
 confere('equipe: remarcar e ligacao nao vao a ele', !pedidoParaOMedico('remarcacao', null) && !pedidoParaOMedico('nao_suportada', null))
-confere('numeros: para o medico vai a todos', JSON.stringify(numerosDoPedido(['m', 'e'], true)) === '["m","e"]')
-confere('numeros: so equipe tira o primeiro', JSON.stringify(numerosDoPedido(['m', 'e1', 'e2'], false)) === '["e1","e2"]')
-confere('numeros: sem equipe cadastrada vai ao medico mesmo assim', JSON.stringify(numerosDoPedido(['m'], false)) === '["m"]')
 {
+  // 23/10/2026, o Edu: "sempre enviar para 2 celulares". O que vai, vai aos dois.
   const banco = ajustesComNumeros()
   const para = []
   const meta = async (url, init) => {
     para.push(JSON.parse(init.body).to)
     return { ok: true, status: 200, json: async () => ({ messages: [{ id: `wamid.${para.length}` }] }) }
   }
-  const r = await enviarAlertaDeUrgencia(banco, { ...pedidoDaFamilia, paraOMedico: false }, meta)
-  confere('pedido so da equipe: sai so para o segundo numero', r.length === 1 && JSON.stringify(para) === '["5511988887777"]', JSON.stringify(para))
-  const urgencia = []
-  await enviarAlertaDeUrgencia(ajustesComNumeros(), { ...pedido, paraOMedico: false }, async (url, init) => {
-    urgencia.push(JSON.parse(init.body).to)
-    return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'w' }] }) }
-  })
-  confere('urgencia ignora o campo: vai aos dois', urgencia.length === 2, JSON.stringify(urgencia))
+  const r = await enviarAlertaDeUrgencia(banco, { ...pedidoDaFamilia, assunto: 'pedido fora do padrão' }, meta)
+  confere('pedido: sempre aos dois numeros', r.length === 2 && JSON.stringify(para) === '["5513997039614","5511988887777"]', JSON.stringify(para))
 }
 
 // 8. A foto, o audio ou o documento vao junto (23/10/2026, ver anexo-para-equipe.ts).
@@ -300,7 +313,7 @@ const comFoto = { ...pedidoDaFamilia, anexo: { tipo: 'image', link: 'https://ace
   confere('anexo: aviso e foto para cada numero, nessa ordem', JSON.stringify(enviados.map((e) => `${e.to}:${e.type}`)) === JSON.stringify(['5513997039614:template', '5513997039614:image', '5511988887777:template', '5511988887777:image']) && r.length === 2, JSON.stringify(enviados.map((e) => `${e.to}:${e.type}`)))
   confere('anexo: a foto leva o link do acervo', enviados[1]?.image?.link === 'https://acervo/foto')
   const nota = banco.db.conversation_notes?.[0]?.texto ?? ''
-  confere('anexo: a nota diz que a foto foi', nota.startsWith('📲') && nota.includes('A foto foi junto para final 9614 e final 7777'), nota)
+  confere('anexo: foi para os dois, sem nota', nota === '' && banco.db.whatsapp_bot_events?.[0]?.evento === 'pedido_equipe', nota)
 }
 {
   // Fora da janela de 24 h: o aviso chega, a foto nao, e a nota grita.
@@ -340,7 +353,7 @@ const comFoto = { ...pedidoDaFamilia, anexo: { tipo: 'image', link: 'https://ace
   await enviarAlertaDeUrgencia(banco, { ...comFoto, seguimento: true }, meta)
   confere('seguimento com foto: so a foto, sem aviso de novo', enviados.length === 2 && enviados.every((e) => e.type === 'image'), JSON.stringify(enviados.map((e) => e.type)))
   confere('seguimento com foto: nao registra alerta novo', banco.db.alertas_de_urgencia.length === 1)
-  confere('seguimento com foto: nota so do arquivo, sem evento de pedido', (banco.db.conversation_notes?.[0]?.texto ?? '').startsWith('📎') && !(banco.db.whatsapp_bot_events ?? []).length, JSON.stringify(banco.db.conversation_notes))
+  confere('seguimento com foto: foi, sem nota e sem evento de pedido', !(banco.db.conversation_notes ?? []).length && !(banco.db.whatsapp_bot_events ?? []).length, JSON.stringify(banco.db.conversation_notes))
   // Sem foto, o seguimento segue segurado (comportamento de antes).
   const banco2 = ajustesComNumeros()
   banco2.db.alertas_de_urgencia.push({ id: 'a-9', clinic_id: 'c1', conversa_whatsapp: 'conv-1', veredito: null, criado_em: new Date(pedido.agora.getTime() - 3600e3).toISOString(), mensagens: [] })

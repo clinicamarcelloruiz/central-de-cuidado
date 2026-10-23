@@ -58,9 +58,13 @@ export type TipoDoAviso = 'urgencia' | 'pedido'
  * novo. O seguimento so sai se nao houver encaminhamento sem resposta nas
  * ultimas 6 horas (ver pedidoEmAberto): assim o medico recebe a mensagem
  * seguinte depois de responder, e nao uma por mensagem enquanto nao olhou.
+ *
+ * So o que depende do Dr. Marcello sai daqui (23/10/2026, ver
+ * pedidoParaOMedico). O resto fica na fila da Central.
  */
-export function deveEncaminhar(e: { atencaoAntes: boolean; motivoAntes: string | null; motivoAgora: string | null }): 'novo' | 'seguimento' | null {
+export function deveEncaminhar(e: { atencaoAntes: boolean; motivoAntes: string | null; motivoAgora: string | null; motivoDaIA?: string | null }): 'novo' | 'seguimento' | null {
   if (!e.motivoAgora || !(MOTIVOS_QUE_ENCAMINHAM as readonly string[]).includes(e.motivoAgora)) return null
+  if (!pedidoParaOMedico(e.motivoAgora, e.motivoDaIA ?? null)) return null
   return e.atencaoAntes && e.motivoAntes === e.motivoAgora ? 'seguimento' : 'novo'
 }
 
@@ -91,17 +95,19 @@ export function assuntoDoPedido(motivo: string | null, motivoDaIA: string | null
 }
 
 /**
- * So o que depende do medico vai ao celular dele (19/10/2026).
+ * O que vai aos celulares: so o que depende do Dr. Marcello.
  *
- * Desde 18/10 todo pedido a equipe ia aos dois celulares, o do Dr. Marcello e
- * o do Edu. O Edu reclamou no dia seguinte: "as vezes eles colocam falar com a
- * equipe e e para perguntar valor" - e era o combinado so subir ao medico o
- * que precisa de decisao dele. Ficam com ele: conduta sobre a crianca, receita
- * ou exame novo (a assinatura e dele), excecao as regras (encaixe, desconto,
- * retorno fora do prazo), a farmacia pedindo correcao de receita e o "Preciso
- * de ajuda" depois da consulta. O resto (falar com alguem, valor, pagamento,
- * 2a via, nota fiscal, remarcar, o que o robo nao soube) vai so a equipe.
- * Urgencia nao passa por aqui: o alerta sempre vai ao medico.
+ * 19/10/2026: o que dependia dele ia aos dois celulares e o resto so ao do
+ * Edu. 23/10/2026, o Edu: "sempre enviar para 2 celulares... so vai para o
+ * celular o que o robo nao consegue resolver e depende de intervencao do
+ * Dr. Marcello ou duvida sobre conduta, ou tambem encaixe de urgencia". Agora
+ * a lista decide SE vai, e quando vai e sempre aos dois numeros. Vai: conduta
+ * sobre a crianca, receita ou exame novo (a assinatura e dele), excecao as
+ * regras (encaixe, desconto, retorno fora do prazo), a farmacia pedindo
+ * correcao de receita, o "Preciso de ajuda" depois da consulta e foto ou exame
+ * mandado pela familia. Fica so na Central: falar com alguem, valor,
+ * pagamento, 2a via, nota fiscal, remarcar, o que o robo nao soube. Urgencia
+ * nao passa por aqui: o alerta sempre vai aos dois.
  */
 const DA_IA_PARA_O_MEDICO = ['medico', 'documento', 'excecao']
 // 'anexo' (23/10/2026): o que a familia manda em arquivo costuma ser exame ou
@@ -114,14 +120,16 @@ export function pedidoParaOMedico(motivo: string | null, motivoDaIA: string | nu
 }
 
 /**
- * Para quem vai o pedido. O primeiro numero da lista e o do medico (ver
- * papelDoNumero em resposta-ao-alerta.ts). Sem ninguem alem dele, vai a ele:
- * pedido que nao chega a ninguem e o defeito que esta regra nao pode criar.
+ * No direct do Instagram a duvida de conduta fica gravada como "medico" (do
+ * robo ou da IA); no WhatsApp ela chega como "atendente" com o motivo da IA
+ * "medico". Traduz para a mesma regra (23/10/2026): sem isso, com a regra
+ * nova, a duvida de conduta do direct nunca chegaria aos celulares.
  */
-export function numerosDoPedido(numeros: string[], paraOMedico: boolean): string[] {
-  if (paraOMedico || numeros.length < 2) return numeros
-  return numeros.slice(1)
+export function pedidoDoDirect(motivo: string | null | undefined): { motivo: string | null; motivoDaIA: string | null } {
+  if (motivo === 'medico') return { motivo: 'atendente', motivoDaIA: 'medico' }
+  return { motivo: motivo ?? null, motivoDaIA: null }
 }
+
 
 export type Veredito = 'urgente' | 'aguardar' | 'responde'
 
@@ -208,16 +216,11 @@ export function descreverEnvio(envios: EnvioDoAlerta[], tipo: TipoDoAviso = 'urg
   const certos = envios.filter((e) => e.ok)
   const errados = envios.filter((e) => !e.ok)
   const pedido = tipo === 'pedido'
+  // Deu certo: sem nota (23/10/2026, o Edu: "nao precisa das notas" - uma
+  // por encaminhamento poluia a conversa). O registro fica no evento, nos
+  // Numeros do WhatsApp. So a falha vira nota: essa a equipe precisa ver.
   if (!errados.length) {
-    const quantos = envios.length === 1 ? '1 número' : `${envios.length} números`
-    const finais = certos.map((e) => final(e.numero)).join(', ')
-    return {
-      detalhe: `enviado ${certos.length}/${envios.length}`,
-      nota: pedido
-        ? `📲 Pedido encaminhado no WhatsApp para ${quantos} (${finais}). A resposta de lá volta para a família.`
-        : `🚨 Alerta de urgência enviado no WhatsApp para ${quantos} (${finais}).`,
-      falhou: false,
-    }
+    return { detalhe: `enviado ${certos.length}/${envios.length}`, nota: '', falhou: false }
   }
   const motivo = errados[0].erro ?? 'sem detalhe'
   const naoAprovado = /132001|template name does not exist|does not exist in/i.test(motivo)
@@ -290,8 +293,6 @@ export type PedidoDeAlerta = {
   assunto?: string
   /** Mensagem seguinte na mesma fila: so sai se nao houver pedido sem resposta. */
   seguimento?: boolean
-  /** Pedido que precisa do medico (ver pedidoParaOMedico). Sem o campo, vai a todos. */
-  paraOMedico?: boolean
   /** A foto, o audio ou o documento da mensagem, que vai logo atras do aviso (23/10/2026). */
   anexo?: AnexoParaEquipe
 }
@@ -332,7 +333,8 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
   try {
     const pedido = p.tipo === 'pedido'
     const todos = p.numeros ?? (await lerNumeros(admin, p.clinicId))
-    const numeros = pedido ? numerosDoPedido(todos, p.paraOMedico !== false) : todos
+    // Sempre aos dois (23/10/2026): quem decide se vai e deveEncaminhar.
+    const numeros = todos
     if (!numeros.length) {
       console.info('Alerta de urgencia: nenhum numero cadastrado nesta clinica')
       return []
@@ -500,8 +502,12 @@ export async function enviarAlertaDeUrgencia(admin: Admin, p: PedidoDeAlerta, bu
       } catch (erro) {
         console.error('Alerta de urgencia: nota nao gravada', erro)
       }
-      // So o arquivo nao e pedido novo: nao conta nos Numeros do WhatsApp.
-      if (!soOAnexo) try {
+    }
+    // O evento grava mesmo sem nota: desde 23/10/2026 o envio que deu certo
+    // nao deixa nota, e o evento e o unico registro dele. So o arquivo nao e
+    // pedido novo: nao conta nos Numeros do WhatsApp.
+    if (p.conversaWhatsApp && !soOAnexo) {
+      try {
         const { error } = await admin
           .from('whatsapp_bot_events')
           .insert({ clinic_id: p.clinicId, conversation_id: p.conversaWhatsApp, evento: pedido ? 'pedido_equipe' : 'alerta_urgencia', detalhe })

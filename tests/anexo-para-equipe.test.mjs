@@ -21,10 +21,12 @@ confere('figurinha: nao vira mensagem', mensagemDoAnexo({ tipo: 'sticker', link 
 confere('sem link: nao vira mensagem', mensagemDoAnexo({ tipo: 'image', link: '' }, 'X') === null)
 
 confere('nota: sem tentativa, vazia', notaDoAnexo('image', []) === '')
-const foi = notaDoAnexo('image', [{ numero: '5513997039614', ok: true }])
-confere('nota: diz para quem foi', foi.includes('A foto foi junto para final 9614') && !foi.includes('⚠️'), foi)
+// 23/10/2026: deu certo, sem nota ("nao precisa das notas").
+const foi = notaDoAnexo('image', [{ numero: '5513997039614', ok: true }, { numero: '5511988887777', ok: true }])
+confere('nota: foi para todos, vazia', foi === '', foi)
 const naoFoi = notaDoAnexo('voice', [{ numero: '5513997039614', ok: true }, { numero: '5511988887777', ok: false, erro: 'Re-engagement message' }])
 confere('nota: falha grita e diz que esta na Central', naoFoi.includes('⚠️ O áudio não foi para final 7777') && naoFoi.includes('24 horas') && naoFoi.includes('Central'), naoFoi)
+confere('nota: na falha, so fala de quem nao recebeu', !naoFoi.includes('9614'), naoFoi)
 
 console.log(`anexo para a equipe: ${ok} verificacoes ok`)
 if (falhas.length) {

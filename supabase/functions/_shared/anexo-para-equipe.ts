@@ -59,21 +59,15 @@ const NOME_DO_TIPO: Record<string, string> = {
 }
 
 /**
- * A linha da nota da conversa sobre o arquivo. Vazia quando nao houve tentativa.
- * Falha grita: a equipe precisa saber que o arquivo so esta na Central.
+ * A linha da nota da conversa sobre o arquivo: so quando NAO foi para algum
+ * celular (23/10/2026, sem nota de sucesso - ver descreverEnvio). Falha grita:
+ * a equipe precisa saber que o arquivo so esta na Central.
  */
 export function notaDoAnexo(tipo: string, envios: { numero: string; ok: boolean; erro?: string }[]): string {
   if (!envios.length) return ''
   const nome = NOME_DO_TIPO[tipo] ?? 'O arquivo'
   const final = (n: string) => `final ${n.slice(-4)}`
-  const foram = envios.filter((e) => e.ok).map((e) => final(e.numero))
   const naoForam = envios.filter((e) => !e.ok).map((e) => final(e.numero))
-  const partes: string[] = []
-  if (foram.length) partes.push(`📎 ${nome} foi junto para ${foram.join(' e ')}.`)
-  if (naoForam.length) {
-    partes.push(
-      `⚠️ ${nome} não foi para ${naoForam.join(' e ')}: a Meta só deixa mandar arquivo para quem escreveu ao número da clínica nas últimas 24 horas. Está aqui na Central.`,
-    )
-  }
-  return partes.join('\n')
+  if (!naoForam.length) return ''
+  return `⚠️ ${nome} não foi para ${naoForam.join(' e ')}: a Meta só deixa mandar arquivo para quem escreveu ao número da clínica nas últimas 24 horas. Está aqui na Central.`
 }

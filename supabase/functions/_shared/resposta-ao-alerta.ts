@@ -1,5 +1,5 @@
 import { mensagemDoAnexo, type AnexoParaEquipe } from './anexo-para-equipe.ts'
-import { BOTOES_DO_ALERTA, MODELO_DO_PEDIDO, numerosDoPedido, parametrosDoPedido, payloadDoVeredito, type Veredito } from './alerta-de-urgencia.ts'
+import { BOTOES_DO_ALERTA, MODELO_DO_PEDIDO, parametrosDoPedido, payloadDoVeredito, type Veredito } from './alerta-de-urgencia.ts'
 import { montarConteudo } from './conteudo.ts'
 import { linkDoWhatsApp, semFormatacaoDoWhatsApp } from './instagram.ts'
 import { textoDoModelo } from './modelos.ts'
@@ -661,12 +661,10 @@ export async function repassarRespostaDaFamilia(
     if (error) throw error
     const alerta = (data as { id: string; mensagens: string[] | null; quem: string; respondido_por?: string | null }[] | null)?.[0]
     if (!alerta) return false
-    // Quem da equipe assumiu a conversa segue com ela (19/10/2026): a familia
-    // respondendo ao Edu nao vai ao celular do medico. Se quem respondeu foi o
-    // medico, vai aos dois, como antes. Ver pedidoParaOMedico.
-    const destinos = papelDoNumero(String(alerta.respondido_por ?? ''), amb.numeros) === 'equipe'
-      ? numerosDoPedido(amb.numeros, false)
-      : amb.numeros
+    // Sempre aos dois celulares (23/10/2026, o Edu: "sempre enviar para 2
+    // celulares"). Ate aqui, quando quem respondeu era o Edu, a familia so
+    // voltava ao celular dele.
+    const destinos = amb.numeros
 
     const quem = p.quem.trim() || alerta.quem || 'A família'
     const fala = MIDIA_DA_FAMILIA[p.texto.trim()] ?? p.texto.trim()

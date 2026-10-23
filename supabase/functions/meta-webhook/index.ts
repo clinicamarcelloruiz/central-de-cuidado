@@ -35,7 +35,7 @@ import {
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 import { montarAviso, motivoFinal, quemEscreveu } from '../_shared/aviso-da-equipe.ts'
 import { anexoQueVai, type AnexoParaEquipe } from '../_shared/anexo-para-equipe.ts'
-import { assuntoDoPedido, deveAlertar, deveEncaminhar, enviarAlertaDeUrgencia, lerNumeros as lerNumerosDoAlerta, pedidoParaOMedico } from '../_shared/alerta-de-urgencia.ts'
+import { assuntoDoPedido, deveAlertar, deveEncaminhar, enviarAlertaDeUrgencia, lerNumeros as lerNumerosDoAlerta } from '../_shared/alerta-de-urgencia.ts'
 import { repassarRespostaDaFamilia, tratarRespostaDaEquipe, whatsAppPelaApi } from '../_shared/resposta-ao-alerta.ts'
 import { enviarDirect } from '../_shared/instagram-api.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
@@ -1125,13 +1125,14 @@ Deno.serve(async (req) => {
                 atencaoAntes: Boolean(conversaAnterior?.needs_attention),
                 motivoAntes: (conversaAnterior?.attention_reason as string | null) ?? null,
                 motivoAgora: motivo,
+                // Sem o motivo da IA, "atendente" fica so na Central; com
+                // "medico" ou "excecao", vai aos celulares (23/10/2026).
+                motivoDaIA,
               })
               if (!encaminhar) return
               const pedido = enviarAlertaDeUrgencia(admin, {
                 tipo: 'pedido',
                 seguimento: encaminhar === 'seguimento',
-                // So o que depende do medico vai a ele (19/10/2026).
-                paraOMedico: pedidoParaOMedico(motivo, motivoDaIA),
                 assunto: assuntoDoPedido(motivo, motivoDaIA, quemAtende(clinicId).o),
                 clinicId,
                 canal: 'WhatsApp',
