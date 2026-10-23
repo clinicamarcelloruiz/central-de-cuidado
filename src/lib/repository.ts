@@ -14,6 +14,7 @@ import type { Database } from '@/types/database'
 import { buscarTodas } from '@/lib/paginar'
 import { retornoIncluidoAte } from '@/lib/retorno'
 import { comNonoDigito, paraEnvio } from '../../supabase/functions/_shared/telefone-br.ts'
+import { consultasQueNaoAconteceram, type ConsultaDaAgenda, type HorarioDaAgenda } from '../../supabase/functions/_shared/consulta-aconteceu.ts'
 
 type PatientInsert = Database['public']['Tables']['patients']['Insert']
 type PatientUpdate = Database['public']['Tables']['patients']['Update']
@@ -66,6 +67,8 @@ type FollowupRow = {
   followup_key: FollowupKey
   status: 'pending' | 'opened' | 'completed' | 'pendente' | 'enviado' | 'concluido'
   opened_at: string | null
+  consultation_id?: string | null
+  semConsulta?: boolean
 }
 
 type SettingsRow = {
@@ -144,6 +147,7 @@ function mapPatient(row: PatientRow, followupRows: FollowupRow[]): Patient {
       id: item.id,
       status: toUiStatus(item.status),
       enviadoEm: item.opened_at ?? undefined,
+      ...(item.semConsulta ? { semConsulta: true } : {}),
     }
   }
 
@@ -2851,6 +2855,45 @@ export async function unresolveConversation(conversationId: string) {
   if (error) fail(error)
 }
 
+/**
+ * Marca os acompanhamentos pendentes cuja consulta nao aconteceu (23/10/2026,
+ * caso do Kadu): o envio automatico os segura, e a tela dizia "sai automatico
+ * hoje as 9h". Mesma regra do servidor (consultasQueNaoAconteceram). Se a
+ * leitura falhar, a tela fica como antes - e o console diz.
+ */
+async function marcarSemConsulta(clinicId: string, linhas: FollowupRow[]) {
+  try {
+    const pendentes = linhas.filter((l) => toUiStatus(l.status) === 'pendente' && l.consultation_id)
+    const ids = [...new Set(pendentes.map((l) => String(l.consultation_id)))]
+    if (!ids.length) return
+    const consultas: ConsultaDaAgenda[] = []
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data, error } = await semTipo
+        .from('consultations')
+        .select('id,clinic_id,patient_id,consultation_date,chief_complaint,clinical_history,assessment,plan')
+        .eq('clinic_id', clinicId)
+        .in('id', ids.slice(i, i + 100))
+      if (error) throw error
+      consultas.push(...((data ?? []) as ConsultaDaAgenda[]))
+    }
+    const pacientes = [...new Set(consultas.map((c) => c.patient_id))]
+    const agenda: HorarioDaAgenda[] = []
+    for (let i = 0; i < pacientes.length; i += 100) {
+      const { data, error } = await semTipo
+        .from('appointments')
+        .select('patient_id,clinic_id,starts_at,status')
+        .eq('clinic_id', clinicId)
+        .in('patient_id', pacientes.slice(i, i + 100))
+      if (error) throw error
+      agenda.push(...((data ?? []) as HorarioDaAgenda[]))
+    }
+    const fora = consultasQueNaoAconteceram(consultas, agenda)
+    for (const l of pendentes) if (fora.has(String(l.consultation_id))) l.semConsulta = true
+  } catch (erro) {
+    console.warn('Nao consegui conferir as consultas dos acompanhamentos; a etiqueta "nao sai sozinho" fica de fora', erro)
+  }
+}
+
 export async function fetchDb(
   clinicId: string,
   defaults: Record<FollowupKey, string>,
@@ -2873,7 +2916,7 @@ export async function fetchDb(
     buscarTodas((de, ate) =>
       supabase
         .from('followups')
-        .select('id,patient_id,followup_key,status,opened_at')
+        .select('id,patient_id,followup_key,status,opened_at,consultation_id')
         .eq('clinic_id', clinicId)
         .is('archived_at', null)
         .order('id')
@@ -2891,6 +2934,7 @@ export async function fetchDb(
   if (settingsResult.error) fail(settingsResult.error)
 
   const followupRows = (followupsResult.data ?? []) as FollowupRow[]
+  await marcarSemConsulta(clinicId, followupRows)
   const byPatient = new Map<string, FollowupRow[]>()
   for (const item of followupRows) {
     const list = byPatient.get(item.patient_id) ?? []

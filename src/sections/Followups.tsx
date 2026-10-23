@@ -294,7 +294,19 @@ export default function Followups({ patients, etapas, setFollowup, onAbrirConver
                 )}
                 {/* Sem isto a equipe olha a fila e acha que precisa clicar em
                     tudo, sem saber que o sistema envia sozinho no dia certo. */}
-                {!wasSent && (
+                {/* Consulta sem prontuario nem presenca (23/10/2026, caso do
+                    Kadu): o servidor segura o envio, e a tela nao pode
+                    prometer o contrario. */}
+                {!wasSent && patient.followups[item.key].semConsulta && (
+                  <span
+                    title="A consulta não tem prontuário nem presença marcada na agenda. Se a criança foi atendida, marque a presença ou escreva o prontuário; se não foi, conclua."
+                    className="inline-flex items-center gap-1 rounded-full bg-[#fff4e5] px-2 py-1 text-[8px] font-extrabold uppercase tracking-[0.1em] text-[#b45309]"
+                  >
+                    <Clock3 className="h-2.5 w-2.5" strokeWidth={3} />
+                    não sai sozinho: sem prontuário nem presença
+                  </span>
+                )}
+                {!wasSent && !patient.followups[item.key].semConsulta && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-[#f2f5f4] px-2 py-1 text-[8px] font-extrabold uppercase tracking-[0.1em] text-[#6b7c86]">
                     <Clock3 className="h-2.5 w-2.5" strokeWidth={3} />
                     {isOverdue || isToday

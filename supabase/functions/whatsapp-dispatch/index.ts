@@ -1,6 +1,6 @@
 import { adminClient, corsHeaders, json } from '../_shared/whatsapp.ts'
 import { sendFollowup } from '../_shared/sendFollowup.ts'
-import { consultaAconteceu, diaEmSaoPaulo } from '../_shared/consulta-aconteceu.ts'
+import { consultasQueNaoAconteceram } from '../_shared/consulta-aconteceu.ts'
 
 /**
  * Disparo automatico diario dos acompanhamentos vencidos.
@@ -126,12 +126,7 @@ Deno.serve(async (req) => {
         if (erroDaAgenda) throw erroDaAgenda
         agenda.push(...((data ?? []) as typeof agenda))
       }
-      for (const c of consultas) {
-        const doDia = agenda
-          .filter((a) => a.patient_id === c.patient_id && a.clinic_id === c.clinic_id && diaEmSaoPaulo(a.starts_at) === c.consultation_date)
-          .map((a) => a.status)
-        if (!consultaAconteceu(c, doDia)) semConsulta.add(c.id)
-      }
+      for (const id of consultasQueNaoAconteceram(consultas, agenda)) semConsulta.add(id)
       if (semConsulta.size) {
         console.warn(`whatsapp-dispatch: ${semConsulta.size} consulta(s) sem prontuario nem presenca; acompanhamento segurado`)
       }

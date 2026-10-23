@@ -1,6 +1,6 @@
 // Acompanhamento so para consulta que aconteceu (23/10/2026, caso do Kadu).
 // Ver supabase/functions/_shared/consulta-aconteceu.ts.
-import { consultaAconteceu, diaEmSaoPaulo, temProntuario } from './consulta-aconteceu.build.mjs'
+import { consultaAconteceu, consultasQueNaoAconteceram, diaEmSaoPaulo, temProntuario } from './consulta-aconteceu.build.mjs'
 
 let ok = 0
 const falhas = []
@@ -22,6 +22,27 @@ confere('So espaco nao e prontuario', !temProntuario(vazia) && temProntuario(esc
 // A agenda guarda em UTC: a consulta das 22h de Santos e 01h do dia seguinte.
 confere('Dia no relogio de Sao Paulo', diaEmSaoPaulo('2026-09-24T01:00:00Z') === '2026-09-23')
 confere('Kadu 16:40 em Santos', diaEmSaoPaulo('2026-09-23T19:40:00+00:00') === '2026-09-23')
+
+// O conjunto usado pelo envio e pela tela (23/10/2026).
+{
+  const consultas = [
+    { id: 'kadu', clinic_id: 'c1', patient_id: 'p1', consultation_date: '2026-09-23', ...vazia },
+    { id: 'veio', clinic_id: 'c1', patient_id: 'p2', consultation_date: '2026-09-23', ...vazia },
+    { id: 'escrita', clinic_id: 'c1', patient_id: 'p3', consultation_date: '2026-09-23', ...escrita },
+    { id: 'outra-clinica', clinic_id: 'c1', patient_id: 'p4', consultation_date: '2026-09-23', ...vazia },
+  ]
+  const agenda = [
+    { patient_id: 'p1', clinic_id: 'c1', starts_at: '2026-09-23T19:40:00+00:00', status: 'scheduled' },
+    { patient_id: 'p2', clinic_id: 'c1', starts_at: '2026-09-23T13:00:00+00:00', status: 'attended' },
+    { patient_id: 'p3', clinic_id: 'c1', starts_at: '2026-09-23T13:00:00+00:00', status: 'no_show' },
+    // Mesmo paciente em outra clinica nao conta para esta.
+    { patient_id: 'p4', clinic_id: 'c2', starts_at: '2026-09-23T13:00:00+00:00', status: 'cancelled' },
+    // Outro dia nao conta.
+    { patient_id: 'p2', clinic_id: 'c1', starts_at: '2026-09-30T13:00:00+00:00', status: 'cancelled' },
+  ]
+  const fora = consultasQueNaoAconteceram(consultas, agenda)
+  confere('conjunto: so o Kadu fica de fora', fora.size === 1 && fora.has('kadu'))
+}
 
 console.log(`consulta aconteceu: ${ok} verificacoes ok`)
 if (falhas.length) {

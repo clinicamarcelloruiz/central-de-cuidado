@@ -8,6 +8,11 @@ export interface FollowupState {
   id?: string
   status: FollowupStatus
   enviadoEm?: string
+  /**
+   * A consulta nao teve prontuario nem presenca na agenda (23/10/2026): o
+   * envio automatico segura este acompanhamento. Ver consulta-aconteceu.ts.
+   */
+  semConsulta?: boolean
 }
 
 export interface Patient {
