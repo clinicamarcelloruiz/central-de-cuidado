@@ -273,13 +273,24 @@ Deno.serve(async (req) => {
     registro = new RegistroDeEventos({
       inserir: (linha) => admin.from('whatsapp_webhook_events').insert(linha),
       apagar: (chave) => admin.from('whatsapp_webhook_events').delete().eq('event_key', chave),
+      concluir: (chave) =>
+        admin.from('whatsapp_webhook_events').update({ concluded_at: new Date().toISOString() }).eq('event_key', chave),
+      // Condicional: so a linha sem conclusao e gravada antes do corte. Dois
+      // reenvios ao mesmo tempo nao retomam juntos (o primeiro move processed_at).
+      retomar: (chave, gravadoAntesDe) =>
+        admin.from('whatsapp_webhook_events')
+          .update({ processed_at: new Date().toISOString() })
+          .eq('event_key', chave)
+          .is('concluded_at', null)
+          .lt('processed_at', gravadoAntesDe)
+          .select('event_key'),
     })
 
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
         // Tudo que veio antes terminou; um erro daqui ate o proximo registrar
         // nao pertence a nenhum evento.
-        registro.concluir()
+        await registro.concluir()
         if (change.field !== 'messages') continue
         const value = change.value ?? {}
         const phoneNumberId = String(value.metadata?.phone_number_id ?? '')
@@ -325,7 +336,7 @@ Deno.serve(async (req) => {
 
         for (const message of value.messages ?? []) {
           // A mensagem anterior do lote terminou (inclusive pelos continue).
-          registro.concluir()
+          await registro.concluir()
           const externalId = String(message.id ?? '')
           if (!externalId) continue
 
@@ -1813,7 +1824,7 @@ Deno.serve(async (req) => {
         }
 
         for (const delivery of value.statuses ?? []) {
-          registro.concluir()
+          await registro.concluir()
           const externalId = String(delivery.id ?? '')
           const status = String(delivery.status ?? '')
           if (!externalId || statusRank[status] === undefined) continue
@@ -1876,6 +1887,8 @@ Deno.serve(async (req) => {
       }
     }
 
+    // O ultimo evento do lote tambem terminou.
+    await registro.concluir()
     return text('EVENT_RECEIVED')
   } catch (error) {
     console.error(error)
