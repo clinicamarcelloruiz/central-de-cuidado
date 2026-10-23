@@ -64,6 +64,7 @@ import {
   voltarAEnviarMensagens,
   saveAutoReply,
   ligarRobo,
+  desligarRoboNaConversa,
   sendConversationReply,
   sendConversationMenu,
   sendConversationQuestionnaire,
@@ -1280,6 +1281,25 @@ export default function Conversations({
     }
   }
 
+  // Robo so desta conversa (23/10/2026). Grava na hora e mostra o que ficou
+  // no banco; erro aparece ao lado do botao.
+  const [trocandoRoboDaConversa, setTrocandoRoboDaConversa] = useState(false)
+  async function alternarRoboDaConversa(conversa: Conversation) {
+    if (trocandoRoboDaConversa) return
+    const desligar = !conversa.roboDesligado
+    setTrocandoRoboDaConversa(true)
+    setAvisoRobo('')
+    try {
+      const ficou = await desligarRoboNaConversa(conversa.id, desligar)
+      setConversations((atual) => atual.map((c) => (c.id === conversa.id ? { ...c, roboDesligado: ficou } : c)))
+      if (ficou !== desligar) setAvisoRobo('O banco não aceitou a mudança. Tente de novo.')
+    } catch (cause) {
+      setAvisoRobo(cause instanceof Error ? cause.message : 'Não foi possível mudar o robô desta conversa.')
+    } finally {
+      setTrocandoRoboDaConversa(false)
+    }
+  }
+
   async function salvarAutoReply() {
     if (!clinicId || salvandoAuto) return
     // O fecho vai colado no texto de qualquer unidade: so {valores} e
@@ -1891,14 +1911,14 @@ export default function Conversations({
           )}
         </p>
 
-        {/* Fica visivel mesmo com o topo recolhido: e botao de emergencia. */}
-        {clinicId && (
+        {/* O desligar do dia a dia e por conversa (botao no cabecalho dela,
+            23/10/2026). Aqui so aparece o aviso quando o robo da CLINICA
+            inteira esta desligado, com o botao de religar: e facil esquecer. */}
+        {clinicId && !autoReply.enabled && (
           <span className="flex items-center gap-2">
-            {!autoReply.enabled && (
-              <span className="rounded-full bg-[#fde8e8] px-2.5 py-1 text-[10px] font-extrabold text-[#b42318]">
-                Robô desligado: ninguém recebe resposta automática
-              </span>
-            )}
+            <span className="rounded-full bg-[#fde8e8] px-2.5 py-1 text-[10px] font-extrabold text-[#b42318]">
+              Robô desligado para todas as conversas
+            </span>
             <button
               type="button"
               onClick={() => void alternarRobo()}
@@ -1915,7 +1935,7 @@ export default function Conversations({
               }`}
             >
               <Power className="h-3.5 w-3.5" />
-              {trocandoRobo ? 'Aguarde...' : autoReply.enabled ? 'Desligar robô' : 'Religar robô'}
+              {trocandoRobo ? 'Aguarde...' : 'Religar robô'}
             </button>
             {avisoRobo && <span className="text-[10px] font-bold text-[#b42318]">{avisoRobo}</span>}
           </span>
@@ -2227,6 +2247,11 @@ export default function Conversations({
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     {/* Veio de anuncio (19/10/2026): ver a aba Instagram da Visao geral. */}
                     {conversation.origemAnuncio && <SeloDaOrigem origem={conversation.origemAnuncio} />}
+                    {conversation.roboDesligado && (
+                      <span className="rounded-full bg-[#fde8e8] px-2 py-0.5 text-[9px] font-extrabold text-[#b42318]">
+                        Robô desligado
+                      </span>
+                    )}
                     {semCadastro && (
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-extrabold text-slate-500">
                         {conversation.profileName ? 'Nome do WhatsApp' : 'Sem cadastro'}
@@ -2459,6 +2484,30 @@ export default function Conversations({
                       </div>
                     )}
                   </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                  <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void alternarRoboDaConversa(selected)}
+                    disabled={trocandoRoboDaConversa}
+                    title={
+                      selected.roboDesligado
+                        ? 'O robô volta a responder esta família (menu, agendamento e atendente com IA)'
+                        : 'Só esta família deixa de receber respostas do robô; as outras conversas seguem normais'
+                    }
+                    className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[10px] font-extrabold transition disabled:opacity-60 ${
+                      selected.roboDesligado
+                        ? 'bg-[#2f855a] text-white hover:bg-[#276749]'
+                        : 'border border-[#f3b4b4] bg-white text-[#b42318] hover:bg-[#fde8e8]'
+                    }`}
+                  >
+                    <Power className="h-3.5 w-3.5" />
+                    {trocandoRoboDaConversa
+                      ? 'Aguarde...'
+                      : selected.roboDesligado
+                        ? 'Religar robô nesta conversa'
+                        : 'Desligar robô nesta conversa'}
+                  </button>
                   {selected.status === 'opted_out' ? (
                     <button
                       type="button"
@@ -2496,6 +2545,14 @@ export default function Conversations({
                       Concluir conversa
                     </button>
                   )}
+                  </div>
+                  {selected.roboDesligado && (
+                    <span className="rounded-full bg-[#fde8e8] px-2.5 py-0.5 text-[9px] font-extrabold text-[#b42318]">
+                      Robô desligado: só a equipe responde esta família
+                    </span>
+                  )}
+                  {avisoRobo && <span className="text-[10px] font-bold text-[#b42318]">{avisoRobo}</span>}
+                  </div>
                 </div>
 
                 {renomeando && (

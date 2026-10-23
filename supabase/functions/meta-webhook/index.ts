@@ -23,6 +23,7 @@ import {
 import { quemAtende } from '../_shared/quem-atende.ts'
 import { montarMensagens } from '../_shared/conteudo.ts'
 import { RegistroDeEventos } from '../_shared/eventos-do-webhook.ts'
+import { roboRespondeNaConversa } from '../_shared/robo-da-conversa.ts'
 import { variantesDoTelefone } from '../_shared/telefone-br.ts'
 import {
   destinoDaNaoSuportada,
@@ -619,6 +620,29 @@ Deno.serve(async (req) => {
               (extra as { booking_insurance?: string | null } | null)?.booking_insurance ?? null
           }
 
+          // Robo desligado so nesta conversa pela equipe (23/10/2026, ver
+          // _shared/robo-da-conversa.ts). Coluna nova, lida a parte: sem ela,
+          // o robo responde como antes - e o log diz por que.
+          let roboDesligadoNaConversaEm: string | null = null
+          if (linhaAnterior) {
+            try {
+              const { data: chave, error: erroDaChave } = await admin
+                .from('whatsapp_conversations')
+                .select('robo_desligado_em')
+                .eq('clinic_id', clinicId)
+                .eq('wa_id', waId)
+                .maybeSingle()
+              if (erroDaChave) throw erroDaChave
+              roboDesligadoNaConversaEm = (chave as { robo_desligado_em?: string | null } | null)?.robo_desligado_em ?? null
+            } catch (erro) {
+              console.warn('Sem whatsapp_conversations.robo_desligado_em; o robo responde nesta conversa como antes', erro)
+            }
+          }
+          const roboLigadoAqui = roboRespondeNaConversa({
+            ligadoNaClinica: settings.whatsapp_autoreply_enabled,
+            desligadoNaConversaEm: roboDesligadoNaConversaEm,
+          })
+
           // Etapa vencida: depois de 24h parada, a conversa recomeca do zero.
           //
           // A varredura de hora em hora (liberar_conversas_travadas) limpa o
@@ -1155,7 +1179,7 @@ Deno.serve(async (req) => {
             !complementoDeRajada &&
             !semRespostaDoRobo(message.type) &&
             destinoNaoSuportada === 'normal' &&
-            settings.whatsapp_autoreply_enabled
+            roboLigadoAqui
           ) {
             const opcoesDoRobo: Parameters<typeof tratarConversa>[0] = {
               admin,
@@ -1568,7 +1592,7 @@ Deno.serve(async (req) => {
           if (destinoNaoSuportada !== 'normal' && !foraDaLista) {
             try {
               let respondeu = false
-              if (destinoNaoSuportada === 'pedir_texto' && settings.whatsapp_autoreply_enabled && !equipeFalouRecentemente) {
+              if (destinoNaoSuportada === 'pedir_texto' && roboLigadoAqui && !equipeFalouRecentemente) {
                 respondeu = await responder(TEXTO_NAO_SUPORTADA)
               }
               if (!respondeu) {

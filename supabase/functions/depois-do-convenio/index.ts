@@ -96,8 +96,31 @@ Deno.serve(async (req) => {
         continue
       }
 
+      // Robo desligado so nesta conversa pela equipe (23/10/2026): esta
+      // mensagem tambem e do robo. Coluna nova, lida a parte; sem ela, nenhuma
+      // conversa sai desta rodada - melhor um dia sem o texto que falar com
+      // quem a equipe calou.
+      const roboDesligadoEm = new Set<string>()
+      try {
+        const ids = (conversas ?? []).map((c) => String(c.id))
+        if (ids.length) {
+          const { data: desligadas, error: erroDaChave } = await admin
+            .from('whatsapp_conversations')
+            .select('id')
+            .in('id', ids)
+            .not('robo_desligado_em', 'is', null)
+          if (erroDaChave) throw erroDaChave
+          for (const d of (desligadas ?? []) as { id: string }[]) roboDesligadoEm.add(String(d.id))
+        }
+      } catch (erro) {
+        console.warn('Depois do convenio: sem whatsapp_conversations.robo_desligado_em; nada sai nesta rodada', clinicId, erro)
+        resumo.falhas++
+        continue
+      }
+
       for (const conversa of conversas ?? []) {
         if (conversa.needs_attention) continue
+        if (roboDesligadoEm.has(String(conversa.id))) continue
         if (foraDaListaDeTeste(lista, String(conversa.wa_id))) continue
         resumo.conferidas++
 

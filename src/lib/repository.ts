@@ -1916,6 +1916,8 @@ export interface Conversation {
   nomePersonalizado?: string | null
   /** Nome do paciente do cadastro ligado a conversa, mesmo com nome da equipe. */
   nomeDoCadastro?: string | null
+  /** A equipe desligou o robo so nesta conversa (23/10/2026). */
+  roboDesligado?: boolean
 }
 
 export type OrigemDoAnuncio = 'instagram' | 'facebook' | 'meta' | 'google'
@@ -2023,6 +2025,20 @@ export async function listConversations(clinicId: string): Promise<Conversation[
     } catch (erro) {
       console.warn('Sem whatsapp_conversations.nome_personalizado; vale o nome do cadastro', erro)
     }
+    // Robo desligado so nesta conversa (23/10/2026): coluna nova, lida a
+    // parte - sem ela, o botao mostra o robo ligado, como o webhook o trata.
+    const roboDesligado = new Set<string>()
+    try {
+      const { data: desligadas, error } = await semTipo
+        .from('whatsapp_conversations')
+        .select('id')
+        .eq('clinic_id', clinicId)
+        .not('robo_desligado_em', 'is', null)
+      if (error) throw error
+      for (const c of (desligadas ?? []) as { id: string }[]) roboDesligado.add(c.id)
+    } catch (erro) {
+      console.warn('Sem whatsapp_conversations.robo_desligado_em; o botao do robo por conversa fica como ligado', erro)
+    }
     return linhas.map((row) => ({
       id: row.id,
       patientId: row.patient_id,
@@ -2045,6 +2061,7 @@ export async function listConversations(clinicId: string): Promise<Conversation[
       textoBusca: '',
       respondidaPelaEquipe: row.respondida,
       origemAnuncio: origemPorConversa.get(row.id) ?? null,
+      roboDesligado: roboDesligado.has(row.id),
     })) as Conversation[]
   } catch (causa) {
     console.warn('Resumo das conversas indisponível; usando o caminho antigo (baixa todas as mensagens)', causa)
@@ -2729,6 +2746,29 @@ export async function renomearConversa(conversationId: string, nome: string) {
         : 'Não foi possível renomear a conversa.',
     )
   }
+}
+
+/**
+ * Liga ou desliga o robo so nesta conversa (23/10/2026). O botao geral do topo
+ * calava o robo para todas as familias; o Edu queria por conversa. Grava so a
+ * coluna nova e confere o que ficou no banco: botao dizendo "desligado" com o
+ * robo ainda falando e o pior resultado possivel aqui.
+ */
+export async function desligarRoboNaConversa(conversationId: string, desligar: boolean): Promise<boolean> {
+  const { data, error } = await semTipo
+    .from('whatsapp_conversations')
+    .update({ robo_desligado_em: desligar ? new Date().toISOString() : null })
+    .eq('id', conversationId)
+    .select('robo_desligado_em')
+    .single()
+  if (error) {
+    throw new Error(
+      /robo_desligado_em/.test(error.message ?? '')
+        ? 'O sistema ainda está sendo atualizado. Tente de novo em alguns minutos.'
+        : 'Não foi possível mudar o robô desta conversa.',
+    )
+  }
+  return Boolean((data as { robo_desligado_em?: string | null } | null)?.robo_desligado_em)
 }
 
 /**
