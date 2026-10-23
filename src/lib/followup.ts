@@ -141,6 +141,11 @@ export function pendingFollowups(patients: Patient[], etapas: FollowupKey[] = FO
     for (const key of FOLLOWUP_KEYS.filter((k) => etapas.includes(k))) {
       const st = p.followups[key]
       if (st.status === 'concluido') continue
+      // So o que existe no banco (23/10/2026). A ficha sem acompanhamento (o
+      // do Kadu foi arquivado: a consulta de 23/09 nunca aconteceu) ainda tem
+      // a data da consulta, e a tela montava um "30 dias" pendente a partir
+      // dela - com "sai automatico hoje as 9h", que nunca sairia.
+      if (!st.id) continue
       const due = dueDate(p, key)
       const dias = daysFromToday(due)
       let urgencia: FollowupUrgencia = 'futuro'

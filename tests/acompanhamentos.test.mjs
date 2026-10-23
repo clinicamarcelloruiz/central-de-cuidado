@@ -40,6 +40,10 @@ const so30e90 = ['d30', 'm90']
 confere('etapa desligada nao entra na fila', !pendingFollowups([naoSaiu], so30e90).some((i) => i.key === 'd15'))
 confere('etapa desligada nao conta no menu', dueCount([enviado, naoSaiu], so30e90) === 0, String(dueCount([enviado, naoSaiu], so30e90)))
 confere('sem escolha, as tres etapas valem', pendingFollowups([naoSaiu]).some((i) => i.key === 'd15'))
+// Acompanhamento arquivado (23/10/2026, Kadu): a ficha guarda a data da
+// consulta, mas sem linha no banco nada sai - e a tela nao pode mostrar.
+const arquivado = paciente('c', consulta, { status: 'pendente' })
+confere('sem acompanhamento no banco nao entra na fila', !pendingFollowups([arquivado]).length && dueCount([arquivado]) === 0, JSON.stringify(pendingFollowups([arquivado]).map((i) => i.key)))
 confere('etapas por extenso: tres', etapasPorExtenso(['d15', 'd30', 'm90']) === '15 dias, 30 dias e 3 meses', etapasPorExtenso(['d15', 'd30', 'm90']))
 confere('etapas por extenso: duas, na ordem certa', etapasPorExtenso(['m90', 'd30']) === '30 dias e 3 meses', etapasPorExtenso(['m90', 'd30']))
 confere('etapas por extenso: uma', etapasPorExtenso(['d30']) === '30 dias')
