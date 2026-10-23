@@ -76,3 +76,4 @@ tests/simulador.build/
 # Saida do SIMULAR CONVERSAS.bat
 simulacao-do-robo.txt
 tests/origem-do-anuncio.build.mjs
+tests/respostas-da-equipe.build.mjs

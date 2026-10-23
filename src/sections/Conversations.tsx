@@ -35,6 +35,7 @@ import { SeloDaOrigem } from '@/sections/NumerosDoInstagram'
 import { criarNota, listarNotas, type NotaDaConversa } from '@/lib/notas-da-conversa'
 import { mandarParaOCelular } from '@/lib/notificacoes'
 import { linhaDoTempo } from '@/lib/linha-do-tempo'
+import { respostasDaEquipe, type OpcaoDaEquipe } from '@/lib/respostas-da-equipe'
 import { CHAVE_DO_VISUAL, EVENTO_MODO_WHATSAPP } from '@/lib/modo-whatsapp'
 import { VisualizadorDeArquivo, type ArquivoAberto } from '@/components/VisualizadorDeArquivo'
 import { marcaSemClinicaConhecida } from '@/lib/marca'
@@ -669,7 +670,7 @@ export default function Conversations({
   const [error, setError] = useState('')
   const { perguntar } = useDialogos()
   const [clinicId, setClinicId] = useState<string | null>(null)
-  const [prontas, setProntas] = useState<RespostaPronta[]>([])
+  const [prontas, setProntas] = useState<OpcaoDaEquipe<RespostaPronta>[]>([])
   // Valor e endereco de cada atendimento: a resposta pronta com {valores}
   // entra no campo ja preenchida, como o robo a mandaria (14/10/2026).
   const [lugares, setLugares] = useState<Lugar[] | null>(null)
@@ -705,7 +706,7 @@ export default function Conversations({
     if (!clinicId) return
     let vivo = true
     listRespostasProntas(clinicId)
-      .then((lista) => vivo && setProntas(lista.filter((p) => p.ativa && p.resposta.trim())))
+      .then((lista) => vivo && setProntas(respostasDaEquipe(lista)))
       .catch((erro) => console.warn('Nao consegui carregar as respostas prontas', erro))
     Promise.all([listUnits(clinicId), getTelemedicina(clinicId)])
       .then(([units, tele]) => vivo && setLugares(lugaresDoRobo(units, tele)))
@@ -2789,7 +2790,7 @@ export default function Conversations({
                               <option value="">Resposta pronta…</option>
                               {prontas.map((p) => (
                                 <option key={p.id} value={p.id}>
-                                  {p.assunto}
+                                  {p.rotulo}
                                 </option>
                               ))}
                             </select>

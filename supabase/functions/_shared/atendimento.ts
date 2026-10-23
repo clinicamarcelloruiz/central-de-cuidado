@@ -5751,7 +5751,10 @@ async function tratarConversaPorDentro(opcoes: {
   async function retornoDistante(): Promise<{ pedido: { dias: number; mes: string }; horizonte: number } | null> {
     if (!pediuAgendamento(texto) && !/\bretorno\b/.test(normalizar(texto))) return null
     const horizonte = await horizonteDaAgenda(admin, clinicId)
-    const pedido = retornoAlemDaAgenda(texto, horizonte)
+    // relogioEmFoco: sem ele o mes saia do relogio real, e o teste de "daqui uns
+    // 40 dias" (fixo em 07/10) passou a dizer dezembro a partir de 22/10/2026,
+    // travando a publicacao. Em producao os dois relogios sao o mesmo.
+    const pedido = retornoAlemDaAgenda(texto, horizonte, relogioEmFoco ?? new Date())
     return pedido ? { pedido, horizonte } : null
   }
 
