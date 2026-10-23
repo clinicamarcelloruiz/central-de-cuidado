@@ -499,16 +499,17 @@ confere('mascara telefone', semDadosPessoais('me liga no (13) 99706-6339') === '
 
 // 19. Painel com IA (17/10/2026).
 // Resposta so com pensamento: o Sonnet devolveu um bloco de pensamento vazio e
-// a mae ficou sem resposta. Agora o pedido nao pensa antes, e o vazio tenta
-// de novo antes de cair no robo.
+// a mae ficou sem resposta. O vazio tenta de novo antes de cair no robo. Desde
+// 23/10/2026 a IA pensa quando precisa ('adaptive'), com teto que cabe o
+// pensamento E a resposta (com 700 o pensamento comia tudo).
 {
   const pensou = { content: [{ type: 'thinking', thinking: '', signature: 'x' }] }
   const c = claudeFalso([pensou, texto('Atende sim, aos sábados em São Paulo.')])
   const rd = roboDireto()
   const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao(), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: rd.fn })
   confere('resposta vazia: tenta de novo e responde', d.origem === 'ia' && d.resultado.resposta.startsWith('Atende sim') && c.chamadas.length === 2, JSON.stringify(d))
-  confere('pedido sem pensar antes', c.chamadas[0]?.thinking?.type === 'between_tools', JSON.stringify(c.chamadas[0]?.thinking))
-  confere('pedido com folga de tokens', c.chamadas[0]?.max_tokens >= 1500, String(c.chamadas[0]?.max_tokens))
+  confere('pensa quando precisa', c.chamadas[0]?.thinking?.type === 'adaptive' && c.chamadas[0]?.output_config?.effort === 'medium', JSON.stringify(c.chamadas[0]?.thinking))
+  confere('teto cabe pensamento e resposta', c.chamadas[0]?.max_tokens >= 6000, String(c.chamadas[0]?.max_tokens))
 }
 {
   const pensou = { content: [{ type: 'thinking', thinking: '', signature: 'x' }] }

@@ -1307,6 +1307,26 @@ export function limparTexto(t: string, manterProntoSocorro: boolean): string {
 }
 
 /**
+ * A IA pensa antes de responder quando precisa (23/10/2026). O Edu: "faca a IA
+ * pensar tambem quando tiver duvida, olhar o contexto, antes dela enviar de
+ * fato". 'adaptive': o proprio modelo decide se pensa e quanto - "obrigada"
+ * sai direto; duvida de conduta, pedido ambiguo e conversa longa ganham
+ * raciocinio. Medido em 23/10/2026 com 4 conversas do painel (23 chamadas):
+ * pensou em 11, tempo medio 3,3 s (era 3,2), pior caso 7,3 s (era 6,4) - bem
+ * dentro do prazo de 15 s; ~40 tokens de saida a mais por chamada. Se o prazo
+ * apertar, baixar o esforco para 'low' antes de desligar o pensamento.
+ *
+ * De 17/10 a 23/10/2026 a IA respondia sem pensar ('between_tools'; a API
+ * recusa 'disabled' neste modelo). O motivo: com o pensamento ligado e teto de
+ * 700 tokens, o pensamento comia o teto e a resposta saia vazia - a mae de uma
+ * crianca vomitando ficou sem resposta duas vezes no painel. O pensamento
+ * conta no max_tokens: dai o teto alto, que so custa o que for usado. E a
+ * resposta vazia continua tentando de novo antes de cair no robo.
+ */
+export const PENSAMENTO = { thinking: { type: 'adaptive' }, output_config: { effort: 'medium' } } as const
+export const TETO_DE_TOKENS = 8000
+
+/**
  * Uma conversa com o Claude, ate ele dar a resposta final ou usar uma
  * ferramenta que encerra a vez (abrir_fluxo, responder_etapa, chamar_equipe).
  */
@@ -1327,14 +1347,8 @@ async function conversarComClaude(
     const resposta = await chamar(
       {
         model: modelo,
-        // 700 cortava a resposta quando o Sonnet pensava antes (17/10/2026).
-        max_tokens: 1500,
-        // Sem pensar antes de responder (17/10/2026, painel com IA): o Sonnet
-        // devolvia so um bloco de pensamento vazio, sem texto nem ferramenta, e a
-        // mae de uma crianca vomitando ficou sem resposta duas vezes. A API recusa
-        // 'disabled' neste modelo e manda usar 'between_tools': nada antes da
-        // resposta, so notas curtas entre uma ferramenta e outra.
-        thinking: { type: 'between_tools' },
+        max_tokens: TETO_DE_TOKENS,
+        ...PENSAMENTO,
         system: sistemaDoClaude(s, emEtapa),
         tools: ferramentasDoClaude(emEtapa),
         messages: mensagens,
