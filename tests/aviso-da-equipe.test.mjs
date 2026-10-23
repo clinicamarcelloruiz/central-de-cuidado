@@ -1,7 +1,7 @@
 // Quando a mensagem da familia vira notificacao no celular da equipe.
 // Regra em supabase/functions/_shared/aviso-da-equipe.ts.
 import assert from 'node:assert/strict'
-import { montarAviso } from './aviso-da-equipe.build.mjs'
+import { montarAviso, motivoFinal } from './aviso-da-equipe.build.mjs'
 
 let ok = 0
 function caso(nome, fn) {
@@ -92,6 +92,26 @@ caso('tentou falar (mensagem que o WhatsApp nao mostra) avisa a equipe', () => {
   const aviso = montarAviso({ ...base, motivoAgora: 'nao_suportada', texto: 'Tentou falar (talvez uma ligação pelo WhatsApp)' })
   assert.ok(aviso, 'nao_suportada deveria avisar')
   assert.match(aviso.titulo, /tentou falar com a clínica/)
+})
+
+// Real 23/10/2026 (13) 98812-5129: "Obrigado pela atencao" depois do "um
+// abraco" da IA virou "Quer falar com a equipe" e pedido no celular do Edu.
+caso('fechamento calado nao vira pedido de gente', () => {
+  assert.equal(motivoFinal({ houveResposta: false, calouNoFechamento: true, atencaoAntes: false, motivoAntes: null }), null)
+})
+caso('fechamento calado mantem a bandeira que ja estava', () => {
+  assert.equal(motivoFinal({ houveResposta: false, calouNoFechamento: true, atencaoAntes: true, motivoAntes: 'documento' }), 'documento')
+})
+caso('silencio de verdade continua indo para a equipe', () => {
+  assert.equal(motivoFinal({ houveResposta: false, atencaoAntes: false, motivoAntes: null }), 'atendente')
+  assert.equal(motivoFinal({ houveResposta: false, atencaoAntes: true, motivoAntes: 'ajuda' }), 'ajuda')
+})
+caso('resposta com pedido: o motivo do resultado', () => {
+  assert.equal(motivoFinal({ houveResposta: true, atencaoDoResultado: 'urgencia', atencaoAntes: true, motivoAntes: 'atendente' }), 'urgencia')
+})
+caso('resposta sem pedido: a bandeira so sobe', () => {
+  assert.equal(motivoFinal({ houveResposta: true, atencaoAntes: true, motivoAntes: 'atendente' }), 'atendente')
+  assert.equal(motivoFinal({ houveResposta: true, atencaoAntes: false, motivoAntes: 'atendente' }), null)
 })
 
 console.log(`aviso-da-equipe: ${ok} verificacoes ok`)

@@ -54,6 +54,31 @@ const MIDIA: Record<string, string> = {
 }
 
 /** O nome que a equipe reconhece. O alerta no WhatsApp do medico usa o mesmo. */
+/**
+ * O motivo da fila depois desta mensagem, o mesmo que o webhook grava.
+ *
+ *  - o robo respondeu: o que o resultado pediu; sem pedido, a bandeira que ja
+ *    estava (ela so sobe);
+ *  - o robo calou de proposito: a conversa vai para a equipe, com o motivo
+ *    que ja existia ou "atendente" (22/09/2026: duas familias ficaram o dia
+ *    todo caladas, sem ninguem saber);
+ *  - MENOS quando calou porque a familia so encerrou a conversa (23/10/2026):
+ *    "Obrigado pela atencao" depois do "um abraco" da IA acendeu a conversa
+ *    como "Quer falar com a equipe" e mandou pedido ao celular do Edu, sem a
+ *    familia ter pedido nada. Ai fica a bandeira que ja estava, ou nenhuma.
+ */
+export function motivoFinal(p: {
+  houveResposta: boolean
+  atencaoDoResultado?: string | null
+  calouNoFechamento?: boolean
+  atencaoAntes: boolean
+  motivoAntes: string | null
+}): string | null {
+  if (p.houveResposta) return p.atencaoDoResultado ?? (p.atencaoAntes ? p.motivoAntes || null : null)
+  if (p.calouNoFechamento) return p.atencaoAntes ? p.motivoAntes || null : null
+  return p.motivoAntes || 'atendente'
+}
+
 export function quemEscreveu(entrada: Pick<EntradaDoAviso, 'pacientes' | 'nomeDoPerfil' | 'telefone'>): string {
   // Um paciente so no telefone: o nome dele e o que a equipe procura na lista.
   // Com irmaos, o nome do perfil (em geral a mae) e mais honesto do que

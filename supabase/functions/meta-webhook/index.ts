@@ -33,7 +33,7 @@ import {
   textoDosContatos,
 } from '../_shared/mensagem-recebida.ts'
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
-import { montarAviso, quemEscreveu } from '../_shared/aviso-da-equipe.ts'
+import { montarAviso, motivoFinal, quemEscreveu } from '../_shared/aviso-da-equipe.ts'
 import { anexoQueVai, type AnexoParaEquipe } from '../_shared/anexo-para-equipe.ts'
 import { assuntoDoPedido, deveAlertar, deveEncaminhar, enviarAlertaDeUrgencia, lerNumeros as lerNumerosDoAlerta, pedidoParaOMedico } from '../_shared/alerta-de-urgencia.ts'
 import { repassarRespostaDaFamilia, tratarRespostaDaEquipe, whatsAppPelaApi } from '../_shared/resposta-ao-alerta.ts'
@@ -1379,6 +1379,9 @@ Deno.serve(async (req) => {
               else await sombra
             }
 
+            // A IA calou porque a familia so encerrou ("obrigado", emoji): nao
+            // e pedido de gente (ver motivoFinal em _shared/aviso-da-equipe.ts).
+            const calouNoFechamento = eventosDaIA.some((e) => e.evento === 'ia_calou_no_fechamento')
             if (resultado) {
               const antesDaResposta = new Date(Date.now() - 2000).toISOString()
               await responder(resultado.resposta, null, {
@@ -1459,7 +1462,7 @@ Deno.serve(async (req) => {
                     .eq('id', conversation.id)
                 }
               }
-            } else {
+            } else if (!calouNoFechamento) {
               /**
                * O robo decidiu ficar calado: quem responde e uma pessoa.
                *
@@ -1547,12 +1550,13 @@ Deno.serve(async (req) => {
              */
             try {
               // Concluida nao apaga bandeira que ja estava acesa (ver acima).
-              const motivoAgora = resultado
-                ? resultado.atencao ??
-                  (conversaAnterior?.needs_attention
-                    ? String(conversaAnterior.attention_reason ?? '') || null
-                    : null)
-                : String(conversaAnterior?.attention_reason ?? '') || 'atendente'
+              const motivoAgora = motivoFinal({
+                houveResposta: Boolean(resultado),
+                atencaoDoResultado: resultado?.atencao ?? null,
+                calouNoFechamento,
+                atencaoAntes: Boolean(conversaAnterior?.needs_attention),
+                motivoAntes: String(conversaAnterior?.attention_reason ?? '') || null,
+              })
               const aviso = montarAviso({
                 conversationId: conversation.id,
                 atencaoAntes: Boolean(conversaAnterior?.needs_attention),
