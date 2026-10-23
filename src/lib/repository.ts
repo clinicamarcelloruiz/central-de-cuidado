@@ -3724,6 +3724,12 @@ export type RespostaPronta = {
   ordem: number
   /** Antes de responder, pergunta Santos, São Paulo ou Telemedicina e usa o texto do lugar. */
   perguntarUnidade: boolean
+  /**
+   * Sai sozinha 30 min depois de quem perguntou convênio ou preço e sumiu
+   * (23/10/2026, função depois-do-convenio). Coluna nova: indefinida quando o
+   * banco ainda não a tem.
+   */
+  aposConvenio?: boolean
 }
 
 /** Escape para a tabela nova, que os tipos gerados ainda não conhecem. */
@@ -3758,6 +3764,20 @@ export async function listRespostasProntas(clinicId: string): Promise<RespostaPr
     .eq('clinic_id', clinicId)
     .order('position', { ascending: true })
   if (error) fail(error)
+  // Coluna nova (20261023120000), lida a parte: sem ela a tela perde so a
+  // chave do envio automatico, nao a lista inteira.
+  let aposConvenio: Map<string, boolean> | null = null
+  try {
+    const { data: extra, error: semColuna } = await respostasProntas()
+      .select('id,after_price_silence')
+      .eq('clinic_id', clinicId)
+    if (semColuna) throw semColuna
+    aposConvenio = new Map(
+      ((extra ?? []) as { id: string; after_price_silence?: boolean | null }[]).map((l) => [l.id, Boolean(l.after_price_silence)]),
+    )
+  } catch (erro) {
+    console.warn('Coluna after_price_silence indisponivel; envio depois do convenio fica oculto', erro)
+  }
   return ((data ?? []) as LinhaDaResposta[]).map((linha) => ({
     id: linha.id,
     assunto: linha.subject,
@@ -3766,6 +3786,7 @@ export async function listRespostasProntas(clinicId: string): Promise<RespostaPr
     ativa: linha.is_active,
     ordem: linha.position,
     perguntarUnidade: Boolean(linha.ask_unit),
+    aposConvenio: aposConvenio ? Boolean(aposConvenio.get(linha.id)) : undefined,
   }))
 }
 
@@ -3783,18 +3804,27 @@ export async function saveRespostaPronta(
     ask_unit: resposta.perguntarUnidade,
   }
 
-  if (resposta.id) {
-    const { error } = await respostasProntas().update(valores).eq('id', resposta.id)
+  let id = resposta.id
+  if (id) {
+    const { error } = await respostasProntas().update(valores).eq('id', id)
     if (error) fail(error)
-    return resposta.id
+  } else {
+    const { data, error } = await respostasProntas()
+      .insert({ ...valores, clinic_id: clinicId })
+      .select('id')
+      .single()
+    if (error) fail(error)
+    id = ((data ?? {}) as { id?: string }).id ?? ''
   }
 
-  const { data, error } = await respostasProntas()
-    .insert({ ...valores, clinic_id: clinicId })
-    .select('id')
-    .single()
-  if (error) fail(error)
-  return ((data ?? {}) as { id?: string }).id ?? ''
+  // A chave do envio automatico, gravada a parte (coluna nova). So quando a
+  // tela a conhece: indefinida = o banco nao tinha a coluna ao carregar. Aqui
+  // falhar grita: a pessoa ligou a chave e precisa saber que nao pegou.
+  if (id && resposta.aposConvenio !== undefined) {
+    const { error } = await respostasProntas().update({ after_price_silence: resposta.aposConvenio }).eq('id', id)
+    if (error) fail(error)
+  }
+  return id
 }
 
 export async function deleteRespostaPronta(id: string): Promise<void> {

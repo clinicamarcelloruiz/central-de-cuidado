@@ -47,6 +47,11 @@ verify_jwt = true
 # pelo pg_cron, sem sessao de usuario. Exige x-cron-secret, como o lembrete.
 verify_jwt = false
 
+[functions.depois-do-convenio]
+# "Sobre o Dr. Marcello" 30 min depois de quem perguntou convenio ou preco e
+# sumiu (23/10/2026): chamada pelo pg_cron a cada 10 min. Exige x-cron-secret.
+verify_jwt = false
+
 [functions.ficha-pendente]
 # Reserva sem cadastro (01/10/2026): chamada a cada 15 min pelo pg_cron, sem
 # sessao de usuario. Exige x-cron-secret, como o lembrete.

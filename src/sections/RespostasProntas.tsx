@@ -110,7 +110,10 @@ export default function RespostasProntas() {
 
   function adicionar() {
     const ordem = (itens.at(-1)?.ordem ?? 0) + 10
-    setItens((antes) => [...antes, { ...NOVA, ordem }])
+    // A chave do envio automatico so aparece se o banco ja tem a coluna (os
+    // outros itens vieram com ela definida).
+    const aposConvenio = itens.some((i) => i.aposConvenio !== undefined) ? false : undefined
+    setItens((antes) => [...antes, { ...NOVA, ordem, aposConvenio }])
     setSalvo(false)
   }
 
@@ -319,6 +322,23 @@ export default function RespostasProntas() {
                 ))}
                 <span className="ml-auto text-[9px] font-bold text-slate-300">{item.resposta.length}/1024</span>
               </div>
+              {item.aposConvenio !== undefined && (
+                <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-[13px] border border-[#081b2c]/10 bg-[#fafaf8] px-3.5 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={item.aposConvenio}
+                    onChange={(e) => mudar(indice, { aposConvenio: e.target.checked })}
+                    className="mt-0.5 h-3.5 w-3.5 accent-[#2f7fc1]"
+                  />
+                  <span className="text-[10px] font-bold leading-relaxed text-slate-500">
+                    Mandar sozinha para quem perguntou convênio ou preço e não respondeu mais
+                    <span className="block font-semibold text-slate-400">
+                      30 minutos depois da nossa resposta, das 8h às 22h, uma vez por família. Funciona mesmo com o
+                      assunto desligado para o robô.
+                    </span>
+                  </span>
+                </label>
+              )}
               {problemasDe(item).map((p) => (
                 <p key={p} className="mt-1.5 text-[10px] font-bold text-red-600">
                   {p}

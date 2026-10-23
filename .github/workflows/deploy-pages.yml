@@ -179,5 +179,6 @@ jobs:
           supabase functions deploy notificar-equipe --project-ref "$PROJECT_REF"
           supabase functions deploy ficha-pendente --project-ref "$PROJECT_REF"
           supabase functions deploy bom-dia-da-equipe --project-ref "$PROJECT_REF"
+          supabase functions deploy depois-do-convenio --project-ref "$PROJECT_REF"
           supabase functions deploy instagram-webhook --project-ref "$PROJECT_REF"
           supabase functions deploy instagram-equipe --project-ref "$PROJECT_REF"
