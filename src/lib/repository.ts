@@ -2545,6 +2545,25 @@ export async function saveAutoReply(clinicId: string, prefs: AutoReplySettings) 
 }
 
 /**
+ * Liga ou desliga o robo inteiro de uma vez (23/10/2026). O Edu pediu um botao
+ * de emergencia depois que o robo ofereceu horario e preco para a mae do Kadu,
+ * que so tinha dito "eu nao passei em consulta". A chave e a mesma do menu
+ * automatico, mas grava SO ela: saveAutoReply regravaria tambem os textos, e
+ * um rascunho meio editado no painel iria para o ar junto com o clique.
+ * Devolve o valor que ficou no banco, para a tela mostrar o que vale de fato.
+ */
+export async function ligarRobo(clinicId: string, ligado: boolean): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('clinic_settings')
+    .update({ whatsapp_autoreply_enabled: ligado })
+    .eq('clinic_id', clinicId)
+    .select('whatsapp_autoreply_enabled')
+    .single()
+  if (error) fail(error)
+  return Boolean(data?.whatsapp_autoreply_enabled)
+}
+
+/**
  * Ate quando a equipe pode responder em texto livre nesta conversa.
  * A Meta so permite isso por 24h depois da ultima mensagem do paciente; depois
  * disso, apenas modelo aprovado. Devolve null quando o paciente nunca escreveu.

@@ -78,3 +78,4 @@ simulacao-do-robo.txt
 tests/origem-do-anuncio.build.mjs
 tests/respostas-da-equipe.build.mjs
 tests/depois-do-convenio.build.mjs
+tests/consulta-aconteceu.build.mjs

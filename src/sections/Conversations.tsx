@@ -29,6 +29,7 @@ import {
   Pencil,
   Reply,
   CalendarCheck,
+  Power,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { SeloDaOrigem } from '@/sections/NumerosDoInstagram'
@@ -62,6 +63,7 @@ import {
   unresolveConversation,
   voltarAEnviarMensagens,
   saveAutoReply,
+  ligarRobo,
   sendConversationReply,
   sendConversationMenu,
   sendConversationQuestionnaire,
@@ -733,6 +735,8 @@ export default function Conversations({
     infoText: '',
   })
   const [autoReplyAberto, setAutoReplyAberto] = useState(false)
+  const [trocandoRobo, setTrocandoRobo] = useState(false)
+  const [avisoRobo, setAvisoRobo] = useState('')
   const [salvandoAuto, setSalvandoAuto] = useState(false)
   const [avisoAuto, setAvisoAuto] = useState('')
   const [destravando, setDestravando] = useState<string | null>(null)
@@ -1254,6 +1258,25 @@ export default function Conversations({
       setAvisoRetomada(causa instanceof Error ? causa.message : 'Não foi possível enviar.')
     } finally {
       setEnviandoModelo(false)
+    }
+  }
+
+  // Botao de emergencia do robo: grava na hora, sem passar pelo "Salvar" do
+  // painel do menu. Erro aparece na tela - robo que a equipe acha desligado e
+  // continua falando e exatamente o que o botao existe para evitar.
+  async function alternarRobo() {
+    if (!clinicId || trocandoRobo) return
+    const ligar = !autoReply.enabled
+    setTrocandoRobo(true)
+    setAvisoRobo('')
+    try {
+      const ficou = await ligarRobo(clinicId, ligar)
+      setAutoReply((atual) => ({ ...atual, enabled: ficou }))
+      if (ficou !== ligar) setAvisoRobo('O banco não aceitou a mudança. Tente de novo.')
+    } catch (cause) {
+      setAvisoRobo(`Não consegui ${ligar ? 'religar' : 'desligar'} o robô: ${cause instanceof Error ? cause.message : 'erro desconhecido'}`)
+    } finally {
+      setTrocandoRobo(false)
     }
   }
 
@@ -1867,6 +1890,36 @@ export default function Conversations({
             </span>
           )}
         </p>
+
+        {/* Fica visivel mesmo com o topo recolhido: e botao de emergencia. */}
+        {clinicId && (
+          <span className="flex items-center gap-2">
+            {!autoReply.enabled && (
+              <span className="rounded-full bg-[#fde8e8] px-2.5 py-1 text-[10px] font-extrabold text-[#b42318]">
+                Robô desligado: ninguém recebe resposta automática
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => void alternarRobo()}
+              disabled={trocandoRobo}
+              title={
+                autoReply.enabled
+                  ? 'Para o robô na hora: menu, agendamento e atendente com IA deixam de responder'
+                  : 'O robô volta a responder quem escreve para a clínica'
+              }
+              className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[10px] font-extrabold transition disabled:opacity-60 ${
+                autoReply.enabled
+                  ? 'border border-[#f3b4b4] bg-white text-[#b42318] hover:bg-[#fde8e8]'
+                  : 'bg-[#2f855a] text-white hover:bg-[#276749]'
+              }`}
+            >
+              <Power className="h-3.5 w-3.5" />
+              {trocandoRobo ? 'Aguarde...' : autoReply.enabled ? 'Desligar robô' : 'Religar robô'}
+            </button>
+            {avisoRobo && <span className="text-[10px] font-bold text-[#b42318]">{avisoRobo}</span>}
+          </span>
+        )}
 
         {compacto && conversations.length > 0 && (
           <div className="relative min-w-[160px] max-w-[420px] flex-1">

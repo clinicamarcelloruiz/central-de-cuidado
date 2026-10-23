@@ -9,7 +9,7 @@
 // O banco aqui e falso e mora neste arquivo. Isso e proposital: o objetivo e
 // exercitar as DECISOES do robo (o que responder, o que gravar, quando ficar
 // calado), e nao o Supabase.
-import { tratarConversa, remarcarPeloLembrete, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica, sinalDeAlarme, pediuUrgencia, desistiuDoAgendamento, contaPiora, etiquetaQueFica, horaEmNumeros, horariosEmTexto } from './atendimento.build.mjs'
+import { tratarConversa, remarcarPeloLembrete, iniciarQuestionario, colherEventos, abrirFichaPeloLembrete, faltamNaFicha, retornoAlemDaAgenda, pediuMudarConsulta, diaPeloNome, avisoDoDiaDaConsulta, respostaAutomaticaDaFamilia, despedida, oferecerHorarios, conhecimentoDaClinica, sinalDeAlarme, pediuUrgencia, desistiuDoAgendamento, contaPiora, etiquetaQueFica, horaEmNumeros, horariosEmTexto, negouConsulta } from './atendimento.build.mjs'
 import { readFileSync } from 'node:fs'
 import { montarMensagens } from './conteudo.build.mjs'
 
@@ -816,6 +816,31 @@ await caso(
     },
   },
 )
+
+// Real 23/10: o acompanhamento falou da "consulta do dia 23/09", que nunca
+// aconteceu. "Eu nao passei em consulta" recebeu horarios e preco.
+await caso(
+  'Real 23/10: "Eu não passei em consulta" pede desculpas e chama a equipe, sem agenda',
+  [['Eu não passei em consulta', 'Desculpe pela mensagem']],
+  {
+    posAcompanhamento: true,
+    podeIniciarMenu: false,
+    verificar: ({ ultimoToque, titulo }) => {
+      if (!ultimoToque.atencao) falhas.push(`${titulo} | equipe nao foi chamada`)
+      else passou++
+      if (/R\$|Em qual unidade|Responda com o número do horário/.test(ultimoToque.resposta)) falhas.push(`${titulo} | ofereceu agenda ou preco`)
+      else passou++
+    },
+  },
+)
+for (const frase of ['Não fomos na consulta', 'nunca passei com o doutor', 'Acho que é engano, não tive consulta nenhuma aí', 'Faltamos, não deu pra ir']) {
+  if (negouConsulta(frase)) passou++
+  else falhas.push(`negouConsulta deveria reconhecer: ${frase}`)
+}
+for (const frase of ['Quero marcar uma consulta', 'Não consegui marcar consulta pelo site', 'Ele não passou bem essa semana', 'A consulta foi ótima']) {
+  if (!negouConsulta(frase)) passou++
+  else falhas.push(`negouConsulta nao deveria reconhecer: ${frase}`)
+}
 
 await caso(
   'Depois do acompanhamento, pedido de retorno abre a agenda (não vira recado)',

@@ -1,5 +1,6 @@
 import { adminClient, corsHeaders, json } from '../_shared/whatsapp.ts'
 import { sendFollowup } from '../_shared/sendFollowup.ts'
+import { consultaAconteceu, diaEmSaoPaulo } from '../_shared/consulta-aconteceu.ts'
 
 /**
  * Disparo automatico diario dos acompanhamentos vencidos.
@@ -54,7 +55,7 @@ Deno.serve(async (req) => {
 
     const { data: vencidos, error } = await admin
       .from('followups')
-      .select('id,clinic_id,patient_id,followup_key,due_date,whatsapp_failed_at')
+      .select('id,clinic_id,patient_id,consultation_id,followup_key,due_date,whatsapp_failed_at')
       .lte('due_date', today)
       .gte('due_date', limite.toISOString().slice(0, 10))
       .eq('status', 'pending')
@@ -98,10 +99,56 @@ Deno.serve(async (req) => {
       return json({ error: 'Erro ao listar acompanhamentos vencidos.', details: error.message }, 500)
     }
 
+    // Consulta que nao aconteceu nao ganha acompanhamento (ver
+    // _shared/consulta-aconteceu.ts, caso do Kadu). Se a conferencia falhar,
+    // nada sai hoje: melhor um dia de atraso que "como ele esta depois da
+    // consulta?" para quem nunca veio. Fica pendente e tenta amanha.
+    const semConsulta = new Set<string>()
+    try {
+      const idsDasConsultas = [...new Set(due.map((f) => f.consultation_id).filter(Boolean))] as string[]
+      type Consulta = { id: string; clinic_id: string; patient_id: string; consultation_date: string; chief_complaint: string | null; clinical_history: string | null; assessment: string | null; plan: string | null }
+      const consultas: Consulta[] = []
+      for (let i = 0; i < idsDasConsultas.length; i += 100) {
+        const { data, error: erroDaConsulta } = await admin
+          .from('consultations')
+          .select('id,clinic_id,patient_id,consultation_date,chief_complaint,clinical_history,assessment,plan')
+          .in('id', idsDasConsultas.slice(i, i + 100))
+        if (erroDaConsulta) throw erroDaConsulta
+        consultas.push(...((data ?? []) as Consulta[]))
+      }
+      const pacientes = [...new Set(consultas.map((c) => c.patient_id))]
+      const agenda: { patient_id: string; clinic_id: string; starts_at: string; status: string }[] = []
+      for (let i = 0; i < pacientes.length; i += 100) {
+        const { data, error: erroDaAgenda } = await admin
+          .from('appointments')
+          .select('patient_id,clinic_id,starts_at,status')
+          .in('patient_id', pacientes.slice(i, i + 100))
+        if (erroDaAgenda) throw erroDaAgenda
+        agenda.push(...((data ?? []) as typeof agenda))
+      }
+      for (const c of consultas) {
+        const doDia = agenda
+          .filter((a) => a.patient_id === c.patient_id && a.clinic_id === c.clinic_id && diaEmSaoPaulo(a.starts_at) === c.consultation_date)
+          .map((a) => a.status)
+        if (!consultaAconteceu(c, doDia)) semConsulta.add(c.id)
+      }
+      if (semConsulta.size) {
+        console.warn(`whatsapp-dispatch: ${semConsulta.size} consulta(s) sem prontuario nem presenca; acompanhamento segurado`)
+      }
+    } catch (erro) {
+      console.error('whatsapp-dispatch: nao consegui conferir se as consultas aconteceram; nenhum acompanhamento sai hoje', erro)
+      return json({ error: 'Não consegui conferir as consultas; nenhum acompanhamento enviado.' }, 500)
+    }
+
     const resumo = { vencidos: due.length, enviados: 0, pulados: 0, falhas: 0 }
     const detalhes: { followupId: string; resultado: string }[] = []
 
     for (const followup of due) {
+      if (followup.consultation_id && semConsulta.has(followup.consultation_id)) {
+        resumo.pulados += 1
+        detalhes.push({ followupId: followup.id, resultado: 'SEM_CONSULTA' })
+        continue
+      }
       const result = await sendFollowup(followup.id, {
         consentConfirmed: true,
         consentSource: 'clinic_care_relationship',

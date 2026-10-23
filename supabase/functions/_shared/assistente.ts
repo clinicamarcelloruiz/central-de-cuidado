@@ -37,7 +37,7 @@
  * por causa da IA.
  */
 import type { ConsultaMarcada, MotivoAtencao, Resultado } from './atendimento.ts'
-import { comOfertaDeHorario, conhecimentoDaClinica, contaPiora, horaEmNumeros, parecePergunta, pediuUrgencia, respostaAutomaticaDaFamilia, semHoraDeLimite, sinalDeAlarme } from './atendimento.ts'
+import { comOfertaDeHorario, conhecimentoDaClinica, contaPiora, horaEmNumeros, parecePergunta, pediuUrgencia, negouConsulta, respostaAutomaticaDaFamilia, semHoraDeLimite, sinalDeAlarme, soAgradecimento } from './atendimento.ts'
 import { assuntoClinico } from './respostas.ts'
 import { dentroDoExpediente } from './expediente.ts'
 
@@ -538,7 +538,33 @@ export function ficaComORobo(s: Situacao): string | null {
   if (pediuUrgencia(s.texto) && !urgenciaDePapel(s)) return 'urgencia'
   if (s.anexo) return 'anexo'
   if (respostaAutomaticaDaFamilia(s.texto)) return 'resposta_automatica'
+  // "Eu nao passei em consulta" (23/10/2026, Kadu): a IA leu como pedido de
+  // marcar e ofereceu horario e preco. O robo pede desculpas e chama a equipe.
+  if (negouConsulta(s.texto)) return 'negou_consulta'
   return null
+}
+
+/**
+ * A familia so fechou a conversa: emoji, risada, "perfeito", "ok, obrigada"
+ * (23/10/2026). Com a Vania o atendente com IA respondeu o 🥰 e depois o
+ * "Perfeito", cada um com uma frase nova de "quando quiser, e so chamar" - a
+ * conversa ja tinha terminado e o Edu achou o robo chato. So vale quando a
+ * nossa ultima mensagem NAO perguntou nada: depois de "quer que eu veja os
+ * horarios?", "perfeito" e um sim, e a IA precisa seguir.
+ */
+export function soFechamento(texto: string): boolean {
+  const t = texto.trim()
+  if (!t) return false
+  // So emoji, coracao, pontuacao: nenhuma letra nem numero.
+  if (!/[\p{L}\p{N}]/u.test(t)) return true
+  const sem = semAcento(t).toLowerCase().replace(/[^a-z]/g, '')
+  if (/^(k{3,}|(ha){2,}h?|(rs){1,}|(he){2,})$/.test(sem)) return true
+  return soAgradecimento(t)
+}
+
+export function fechouSemPergunta(s: Situacao): boolean {
+  if (!s.ultimaDoConsultorio || s.ultimaDoConsultorio.includes('?')) return false
+  return soFechamento(s.texto)
 }
 
 const ATE = 4
@@ -2346,6 +2372,13 @@ export async function atenderComAssistente(opcoes: {
         : doRoboAgora
       return { resultado, origem: 'robo', eventos: [{ evento: 'ia_passou_ao_robo', detalhe: doRobo }] }
     }
+  }
+
+  // Conversa encerrada e a familia so mandou um emoji ou "perfeito": silencio,
+  // sem chamar o Claude (ver soFechamento). Em etapa do agendamento quem
+  // decide e o robo, mais abaixo.
+  if (!emEtapa && fechouSemPergunta(situacao)) {
+    return { resultado: null, origem: 'robo', eventos: [{ evento: 'ia_calou_no_fechamento' }] }
   }
 
   // Pediu a equipe sem dizer para que: primeiro o assunto (ver esperarOAssunto).

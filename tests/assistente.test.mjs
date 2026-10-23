@@ -17,6 +17,7 @@ import {
   perguntaLateral,
   esperarOAssunto,
   ESPERA_DO_ASSUNTO,
+  soFechamento,
 } from './assistente.build.mjs'
 
 let ok = 0
@@ -2290,6 +2291,37 @@ confere('narracao: "voce recebe nesta conversa" fica', semNarracao('Quando o rel
   ]) {
     confere(`nao espera o assunto: ${nome}`, esperarOAssunto({ ...situacao(extra), titulo }) === null)
   }
+}
+
+// Real 23/10 (Vania): a conversa ja tinha fechado com "quando quiser, e so
+// chamar"; o 🥰 e o "Perfeito" ganharam, cada um, uma frase nova da IA.
+{
+  const fechou = 'Que bom ter você por aqui, Vania! 💙 Quando decidir a unidade, é só me dizer que eu já vejo os horários para você.'
+  for (const t of ['🥰', 'Perfeito', 'ok obrigada', 'kkkk', '👍🏻']) {
+    const c = claudeFalso([texto('Vania! Quando quiser, é só chamar. 💙')])
+    const rd = roboDireto()
+    const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: t, ultimaDoConsultorio: fechou }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: rd.fn })
+    confere(`fechamento "${t}": silencio`, d.resultado === null && c.chamadas.length === 0 && rd.chamado.vezes === 0, JSON.stringify(d.resultado))
+  }
+  // Depois de uma pergunta nossa, "perfeito" e resposta: a IA segue.
+  const c = claudeFalso([texto('Ótimo! Vou ver os horários.')])
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'Perfeito', ultimaDoConsultorio: 'Quer que eu veja os horários de alguma unidade para você?' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: roboDireto().fn })
+  confere('"perfeito" depois de pergunta: a IA responde', d.resultado !== null && c.chamadas.length === 1)
+  // Pergunta nova depois do fechamento continua respondida.
+  const c2 = claudeFalso([texto('Aceitamos pix e cartão.')])
+  const d2 = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'Aceita pix?', ultimaDoConsultorio: fechou }), ferramentas: ferramentasFalsas(), chamar: c2.chamar, roboDireto: roboDireto().fn })
+  confere('pergunta depois do fechamento: a IA responde', d2.resultado !== null && c2.chamadas.length === 1)
+  confere('soFechamento nao pega frase com pedido', !soFechamento('Perfeito, quero marcar sexta') && !soFechamento('Ele ainda está com dor'))
+}
+
+// Real 23/10 (Kadu): "Eu nao passei em consulta" fica com o robo, que pede
+// desculpas e chama a equipe - a IA tinha oferecido horario e preco.
+{
+  const c = claudeFalso([texto('Entendi! Vamos marcar uma nova.')])
+  const rd = roboDireto({ resposta: 'Desculpe pela mensagem!', atencao: 'atendente' })
+  const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'Eu não passei em consulta' }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: rd.fn })
+  confere('negou a consulta: quem responde e o robo', rd.chamado.vezes === 1 && c.chamadas.length === 0 && d.resultado?.resposta === 'Desculpe pela mensagem!')
+  confere('negou a consulta: ficaComORobo', ficaComORobo(situacao({ texto: 'Eu não passei em consulta' })) === 'negou_consulta')
 }
 
 console.log(`assistente: ${ok} verificacoes ok`)

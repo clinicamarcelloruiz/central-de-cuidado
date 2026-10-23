@@ -34,13 +34,19 @@ Deno.serve(async (req) => {
   try {
     const { data: clinicas, error } = await admin
       .from('clinic_settings')
-      .select('clinic_id,whatsapp_phone_number_id')
+      .select('clinic_id,whatsapp_phone_number_id,whatsapp_autoreply_enabled')
     if (error) throw error
 
     for (const ajustes of clinicas ?? []) {
       const clinicId = String(ajustes.clinic_id)
       const phoneNumberId = String(ajustes.whatsapp_phone_number_id ?? '').trim()
       if (!phoneNumberId) continue
+      // Robo desligado pelo botao das Conversas (23/10/2026): esta mensagem
+      // tambem e do robo, e quem desligou espera silencio.
+      if (ajustes.whatsapp_autoreply_enabled === false) {
+        console.warn('depois-do-convenio: robo desligado na clinica; nada enviado', clinicId)
+        continue
+      }
 
       // O texto: a resposta pronta marcada para isso. Coluna nova, lida a
       // parte - sem ela, nada sai e o log diz por que.

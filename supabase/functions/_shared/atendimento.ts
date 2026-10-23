@@ -473,6 +473,25 @@ export function soCumprimento(texto: string): boolean {
 }
 
 /**
+ * A familia diz que a consulta nao aconteceu (23/10/2026). O acompanhamento de
+ * 30 dias perguntou como o Kadu estava "depois da consulta do dia 23/09"; a mae
+ * respondeu "Eu nao passei em consulta". A palavra "consulta" fez a frase
+ * parecer pedido de marcar, e a familia recebeu horarios e preco em vez de um
+ * pedido de desculpas. Quem diz isso precisa da equipe: o cadastro esta errado.
+ * Pedido de marcar ("nao consegui marcar consulta") nao entra.
+ */
+export function negouConsulta(texto: string): boolean {
+  const t = normalizar(texto).replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (/\b(marcar|agendar|remarcar)\b/.test(t) && !/\b(nao|nunca) (passei|passamos|fui|fomos|tive|tivemos|compareci|comparecemos)\b/.test(t)) return false
+  return (
+    /\b(nao|nunca|nem) (cheguei a |chegamos a |chegou a )?(passei|passamos|passou|fui|fomos|foi|tive|tivemos|teve|fiz|fizemos|levei|levamos|compareci|comparecemos|consultei|consultamos|consultou)\b.{0,30}\b(consulta|medico|doutor|dr|marcello|marcelo|ai|la|clinica|consultorio)\b/.test(t) ||
+    /\b(nao|nunca) (consultei|consultamos|consultou|compareci|comparecemos)\b/.test(t) ||
+    /\b(nao|nunca) (houve|teve|existiu) (essa |esta |nenhuma )?consulta\b/.test(t) ||
+    /\b(faltei|faltamos|nao deu para ir|nao deu pra ir|nao conseguimos ir|nao consegui ir)\b/.test(t)
+  )
+}
+
+/**
  * "Nao sou o Julio", "numero errado", "foi engano" (06/10/2026).
  *
  * O telefone da ficha e de outra pessoa. Ela respondeu "Nao sou o Julio" a
@@ -5846,6 +5865,19 @@ async function tratarConversaPorDentro(opcoes: {
     // Pedido de marcar e nota fiscal seguem o caminho deles, mais abaixo. Frase
     // curta que nao e agradecimento ("sim", "otimo") tambem: cai na regra de
     // sempre.
+    // "Eu nao passei em consulta" (ver negouConsulta): desculpas e a equipe,
+    // nunca a agenda.
+    if (negouConsulta(texto)) {
+      registrar('negou_consulta')
+      const chamada = await chamarEquipe(admin, conversationId)
+      return {
+        ...chamada,
+        resposta:
+          'Desculpe pela mensagem! 🙏 Passei para a nossa equipe conferir o cadastro, ' +
+          'e ela corrige por aqui. Se quiser marcar uma consulta, é só me dizer.',
+      }
+    }
+
     if (opcoes.posAcompanhamento) {
       if (soAgradecimento(texto) || despedida(texto)) {
         registrar('acompanhamento_agradeceu')
