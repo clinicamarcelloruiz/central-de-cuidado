@@ -432,7 +432,24 @@ async function enviarParaAFamilia(
   return envio.ok ? { ok: true } : { ok: false, erro: envio.erro }
 }
 
-/** Nota na conversa (a equipe ve na Central) e evento nos Numeros do WhatsApp. */
+/**
+ * A nota da conversa quando alguem responde ao alerta pelo WhatsApp: so quando
+ * a mensagem NAO chegou a familia (23/10/2026). Antes saia sempre "O Dr.
+ * Marcello respondeu ao alerta: mandou uma mensagem", uma por mensagem dele, em
+ * cima da propria mensagem, que ja aparece na conversa. O Edu, vendo a da
+ * Maria Flor: "nao precisa das notas". O evento continua nos Numeros.
+ */
+export function notaDaResposta(
+  quem: string,
+  tipo: Veredito | 'texto' | 'visto',
+  envio: { ok: true } | { ok: false; erro: string } | null,
+): string {
+  if (!envio || envio.ok) return ''
+  const oQue = tipo === 'visto' ? 'viu o alerta' : `respondeu ao alerta: ${ROTULO[tipo]}`
+  return `🩺 ${quem} ${oQue} (pelo WhatsApp). ⚠️ A mensagem NÃO chegou à família: ${envio.erro}. Responda por aqui.`
+}
+
+/** Nota na conversa quando falhou (a equipe ve na Central) e evento nos Numeros do WhatsApp. */
 async function registrarResposta(
   amb: AmbienteDaResposta,
   alerta: Alerta,
@@ -441,13 +458,10 @@ async function registrarResposta(
   envio: { ok: true } | { ok: false; erro: string } | null,
 ) {
   const quem = papel === 'medico' ? quemAtende(amb.clinicId).O : 'A equipe'
-  const oQue = tipo === 'visto' ? 'viu o alerta' : `respondeu ao alerta: ${ROTULO[tipo]}`
-  const nota =
-    `🩺 ${quem} ${oQue} (pelo WhatsApp).` +
-    (envio && !envio.ok ? ` ⚠️ A mensagem NÃO chegou à família: ${envio.erro}. Responda por aqui.` : '')
+  const nota = notaDaResposta(quem, tipo, envio)
   try {
     if (alerta.conversa_whatsapp) {
-      await amb.admin.from('conversation_notes').insert({ clinic_id: amb.clinicId, conversation_id: alerta.conversa_whatsapp, texto: nota })
+      if (nota) await amb.admin.from('conversation_notes').insert({ clinic_id: amb.clinicId, conversation_id: alerta.conversa_whatsapp, texto: nota })
       await amb.admin.from('whatsapp_bot_events').insert({
         clinic_id: amb.clinicId,
         conversation_id: alerta.conversa_whatsapp,
@@ -455,7 +469,7 @@ async function registrarResposta(
         detalhe: `${tipo} (${papel})${envio && !envio.ok ? ' nao chegou' : ''}`.slice(0, 120),
       })
     }
-    if (alerta.conversa_instagram) {
+    if (alerta.conversa_instagram && nota) {
       await amb.admin
         .from('instagram_mensagens')
         .insert({ clinic_id: amb.clinicId, conversa_id: alerta.conversa_instagram, direcao: 'nota', texto: nota, automatica: true })

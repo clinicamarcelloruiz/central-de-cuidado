@@ -1,7 +1,7 @@
 // A resposta do medico ao alerta de urgencia, pelo WhatsApp dele (17/10/2026).
 // Regra em supabase/functions/_shared/resposta-ao-alerta.ts. Banco e Meta de
 // mentira: o que se testa e o que chega a familia, ao medico e ao registro.
-import { escolherAlerta, familiaPeloNome, lerRespostaDaEquipe, papelDoNumero, repassarRespostaDaFamilia, textoParaAFamilia, tratarRespostaDaEquipe } from './resposta-ao-alerta.build.mjs'
+import { escolherAlerta, familiaPeloNome, lerRespostaDaEquipe, notaDaResposta, papelDoNumero, repassarRespostaDaFamilia, textoParaAFamilia, tratarRespostaDaEquipe } from './resposta-ao-alerta.build.mjs'
 import { bancoFalso } from './fixtures/banco-falso.mjs'
 
 let ok = 0
@@ -89,7 +89,8 @@ confere('mensagem do medico leva o nome dele', textoParaAFamilia('texto', 'medic
   confere('urgente: familia orientada ao pronto-socorro', c.para(FAMILIA).some((t) => t.includes('O Dr. Marcello viu a sua mensagem e orienta: procure agora o pronto-socorro')), JSON.stringify(c.para(FAMILIA)))
   confere('urgente: medico recebe o OK', c.para(MEDICO).some((t) => t.includes('✅ Enviado para Helena')))
   confere('urgente: veredito gravado', c.banco.db.alertas_de_urgencia[0].veredito === 'urgente' && c.banco.db.alertas_de_urgencia[0].veredito_por === MEDICO)
-  confere('urgente: nota na Central', c.banco.db.conversation_notes.some((n) => n.texto.includes('O Dr. Marcello respondeu ao alerta: é urgente')))
+  // 23/10/2026, o Edu: "nao precisa das notas". Chegou a familia: so o evento.
+  confere('urgente: chegou, sem nota e com evento', !c.banco.db.conversation_notes.length && (c.banco.db.whatsapp_bot_events ?? []).some((e) => e.evento === 'veredito_urgencia'), JSON.stringify(c.banco.db.conversation_notes))
   confere('urgente: mensagem no historico', c.banco.db.whatsapp_messages.some((m) => m.direction === 'outbound' && m.status === 'accepted' && m.body.includes('orienta')))
   // Segundo toque nao manda nada de novo.
   const antes = c.para(FAMILIA).length
@@ -292,12 +293,20 @@ confere('escolherAlerta: aviso mais novo que a resposta pergunta', escolherAlert
   confere('janela fechada: parametros sem quebra de linha', msg?.conteudo.template?.components?.[0]?.parameters?.every((p) => !/\n/.test(p.text)) && msg.conteudo.template.components[0].parameters[0].text === 'Maria')
 }
 
+// A nota da resposta so quando nao chegou (23/10/2026, caso da Maria Flor).
+confere('nota: chegou, nenhuma', notaDaResposta('O Dr. Marcello', 'texto', { ok: true }) === '')
+confere('nota: so viu o alerta, nenhuma', notaDaResposta('O Dr. Marcello', 'visto', null) === '')
+{
+  const n = notaDaResposta('O Dr. Marcello', 'texto', { ok: false, erro: 'Re-engagement message' })
+  confere('nota: nao chegou, grita', n.startsWith('🩺 O Dr. Marcello respondeu ao alerta') && n.includes('NÃO chegou') && n.includes('Responda por aqui'), n)
+}
+
 // 8. Instagram: vai pelo direct; janela fechada avisa o medico.
 {
   const c = cenario({ alertas: [alerta({ canal: 'Instagram', conversa_whatsapp: null, conversa_instagram: 'ig-1' })] })
   await tratarRespostaDaEquipe(c.amb, MEDICO, toque(`URG:${A1}:aguardar`))
   confere('instagram: direct com o link do WhatsApp, sem asterisco', c.directs[0]?.texto.includes('wa.me/5513996811279') && !c.directs[0].texto.includes('*'), c.directs[0]?.texto)
-  confere('instagram: nota no direct', c.banco.db.instagram_mensagens.some((m) => m.direcao === 'nota' && m.texto.includes('pode aguardar')))
+  confere('instagram: chegou, sem nota no direct', !c.banco.db.instagram_mensagens.some((m) => m.direcao === 'nota'))
 }
 {
   const c = cenario({ alertas: [alerta({ canal: 'Instagram', conversa_whatsapp: null, conversa_instagram: 'ig-1' })], instagram: { ultima: haMinutos(26 * 60) } })
