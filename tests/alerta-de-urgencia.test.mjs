@@ -1,7 +1,7 @@
 // Alerta de urgencia no WhatsApp pessoal do medico (17/10/2026).
 // Regra em supabase/functions/_shared/alerta-de-urgencia.ts. Sem Meta e sem
 // banco: um fetch de mentira e um admin que guarda o que foi gravado.
-import { assuntoDoPedido, deveAlertar, deveEncaminhar, descreverEnvio, enviarAlertaDeUrgencia, MODELO_DO_ALERTA, numerosDoAlerta, parametrosDoAlerta, parametrosDoPedido, pedidoDoDirect, pedidoParaOMedico } from './alerta-de-urgencia.build.mjs'
+import { assuntoDoPedido, deveAlertar, deveEncaminhar, descreverEnvio, enviarAlertaDeUrgencia, MODELO_DO_ALERTA, numerosDoAlerta, parametrosDoAlerta, parametrosDoPedido, documentoEraNotaFiscal, motivoParaOsCelulares, pedidoDoDirect, pedidoParaOMedico } from './alerta-de-urgencia.build.mjs'
 import { textoDoModelo } from './modelos.build.mjs'
 import { bancoFalso } from './fixtures/banco-falso.mjs'
 
@@ -187,7 +187,28 @@ confere('central: "falar com a equipe" do menu fica na Central', vai('atendente'
 confere('central: valor e pagamento ficam na Central', vai('atendente', 'financeiro') === null)
 confere('central: pedir uma pessoa fica na Central', vai('atendente', 'pessoa') === null)
 confere('central: o que o robo nao soube fica na Central', vai('atendente', 'sem_informacao') === null)
-confere('central: 2a via e nota fiscal ficam na Central', vai('documento') === null)
+// 23/10/2026, o Edu: "A 2a via de receita tambem tem que ir aos 2 celulares,
+// depende do Dr. Marcello". A nota fiscal usa a mesma fila no robo e fica.
+confere('pedido: 2a via de receita ou de pedido de exame vai', vai('documento') === 'novo')
+{
+  const motivo = (p) => motivoParaOsCelulares({ motivo: 'documento', motivoDaIA: null, documentoAgora: false, notaFiscalAgora: false, eventos: null, ...p })
+  confere('nota fiscal pedida agora fica na Central', vai(motivo({ documentoAgora: true, notaFiscalAgora: true })) === null)
+  confere('2a via pedida agora vai', vai(motivo({ documentoAgora: true })) === 'novo')
+  const ha = (min) => new Date(Date.parse('2026-10-23T15:00:00Z') - min * 60_000).toISOString()
+  const daNota = [
+    { evento: 'chamou_equipe', detalhe: 'documento', criado_em: ha(10) },
+    { evento: 'nota_fiscal_pedida', detalhe: '', criado_em: ha(10) },
+  ]
+  // A mae manda o nome e a data da consulta depois do pedido de nota.
+  confere('mensagem seguinte a nota fiscal fica na Central', vai(motivo({ eventos: daNota }), null, { atencaoAntes: true, motivoAntes: 'documento' }) === null)
+  const notaAntesDaVia = [...daNota, { evento: 'chamou_equipe', detalhe: 'documento', criado_em: ha(2) }]
+  confere('nota fiscal antiga e 2a via depois: vale a 2a via', !documentoEraNotaFiscal(notaAntesDaVia) && motivo({ eventos: notaAntesDaVia }) === 'documento')
+  confere('mensagem seguinte a 2a via vai', motivo({ eventos: [{ evento: 'chamou_equipe', detalhe: 'documento', criado_em: ha(5) }] }) === 'documento')
+  confere('sem historico conta como 2a via', motivo({ eventos: null }) === 'documento' && motivo({ eventos: [] }) === 'documento')
+  confere('outros motivos passam iguais', motivoParaOsCelulares({ motivo: 'atendente', motivoDaIA: 'medico', documentoAgora: false, notaFiscalAgora: true }) === 'atendente')
+  confere('documento da IA nao passa pela nota', motivoParaOsCelulares({ motivo: 'documento', motivoDaIA: 'documento', documentoAgora: true, notaFiscalAgora: true }) === 'documento')
+}
+confere('central: nota fiscal fica na Central', vai('nota_fiscal') === null)
 confere('central: remarcar pelo lembrete fica na Central', vai('remarcacao') === null)
 confere('central: ligacao ou mensagem que o WhatsApp nao mostra fica na Central', vai('nao_suportada') === null)
 confere('pedido: mae escrevendo de novo na fila e seguimento', vai('atendente', 'medico', { atencaoAntes: true, motivoAntes: 'atendente' }) === 'seguimento')
@@ -283,7 +304,7 @@ confere('equipe: "falar com a equipe" do menu nao vai a ele', !pedidoParaOMedico
 confere('equipe: valor e pagamento nao vao a ele', !pedidoParaOMedico('atendente', 'financeiro'))
 confere('equipe: pedir uma pessoa nao vai a ele', !pedidoParaOMedico('atendente', 'pessoa'))
 confere('equipe: o que o robo nao soube nao vai a ele', !pedidoParaOMedico('atendente', 'sem_informacao'))
-confere('equipe: 2a via e nota fiscal nao vao a ele', !pedidoParaOMedico('documento', null))
+confere('medico: 2a via do robo vai a ele (23/10/2026)', pedidoParaOMedico('documento', null))
 confere('equipe: remarcar e ligacao nao vao a ele', !pedidoParaOMedico('remarcacao', null) && !pedidoParaOMedico('nao_suportada', null))
 {
   // 23/10/2026, o Edu: "sempre enviar para 2 celulares". O que vai, vai aos dois.

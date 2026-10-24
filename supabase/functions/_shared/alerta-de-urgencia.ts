@@ -104,15 +104,18 @@ export function assuntoDoPedido(motivo: string | null, motivoDaIA: string | null
  * a lista decide SE vai, e quando vai e sempre aos dois numeros. Vai: conduta
  * sobre a crianca, receita ou exame novo (a assinatura e dele), excecao as
  * regras (encaixe, desconto, retorno fora do prazo), a farmacia pedindo
- * correcao de receita, o "Preciso de ajuda" depois da consulta e foto ou exame
- * mandado pela familia. Fica so na Central: falar com alguem, valor,
- * pagamento, 2a via, nota fiscal, remarcar, o que o robo nao soube. Urgencia
- * nao passa por aqui: o alerta sempre vai aos dois.
+ * correcao de receita, o "Preciso de ajuda" depois da consulta, foto ou exame
+ * mandado pela familia e a 2a via de receita ou de pedido de exame. Fica so na
+ * Central: falar com alguem, valor, pagamento, nota fiscal, remarcar, o que o
+ * robo nao soube. Urgencia nao passa por aqui: o alerta sempre vai aos dois.
  */
 const DA_IA_PARA_O_MEDICO = ['medico', 'documento', 'excecao']
 // 'anexo' (23/10/2026): o que a familia manda em arquivo costuma ser exame ou
 // foto da crianca - quem precisa ver e o medico.
-const DO_ROBO_PARA_O_MEDICO = ['farmacia', 'ajuda', 'anexo']
+// 'documento' (23/10/2026, o Edu: "A 2a via de receita tambem tem que ir aos 2
+// celulares, depende do Dr. Marcello"). A nota fiscal usa a mesma fila no robo
+// e fica de fora por motivoParaOsCelulares.
+const DO_ROBO_PARA_O_MEDICO = ['farmacia', 'ajuda', 'anexo', 'documento']
 
 export function pedidoParaOMedico(motivo: string | null, motivoDaIA: string | null): boolean {
   if (motivoDaIA) return DA_IA_PARA_O_MEDICO.includes(motivoDaIA)
@@ -128,6 +131,50 @@ export function pedidoParaOMedico(motivo: string | null, motivoDaIA: string | nu
 export function pedidoDoDirect(motivo: string | null | undefined): { motivo: string | null; motivoDaIA: string | null } {
   if (motivo === 'medico') return { motivo: 'atendente', motivoDaIA: 'medico' }
   return { motivo: motivo ?? null, motivoDaIA: null }
+}
+
+export type EventoDaConversa = { evento: string; detalhe?: string | null; criado_em: string }
+
+/**
+ * A fila "documento" do robo junta o que e do Dr. Marcello (2a via de receita,
+ * pedido de exame) com o que e da equipe (nota fiscal, recibo) - ver
+ * registrarPedidoDeNota em atendimento.ts. Um motivo novo no banco exigiria
+ * migration (attention_reason tem check), e a funcao sobe antes dela.
+ *
+ * Nas mensagens seguintes da familia a conversa continua "documento", sem
+ * dizer de que. Vale o ultimo pedido de documento: o turno da nota fiscal grava
+ * 'nota_fiscal_pedida' no mesmo lote do 'chamou_equipe: documento'. Sem pedido
+ * achado, conta como 2a via: melhor o medico ver um pedido a mais do que uma
+ * receita ficar parada.
+ */
+export function documentoEraNotaFiscal(eventos: EventoDaConversa[]): boolean {
+  const pedidos = eventos
+    .filter((e) => e.evento === 'chamou_equipe' && e.detalhe === 'documento')
+    .sort((a, b) => Date.parse(b.criado_em) - Date.parse(a.criado_em))
+  if (!pedidos.length) return false
+  const quando = Date.parse(pedidos[0].criado_em)
+  return eventos.some((e) => e.evento === 'nota_fiscal_pedida' && Math.abs(Date.parse(e.criado_em) - quando) <= 2 * 60_000)
+}
+
+/**
+ * O motivo que vai a deveEncaminhar (23/10/2026). Nota fiscal e recibo viram
+ * 'nota_fiscal', que nao encaminha; a 2a via segue como 'documento' e vai aos
+ * dois celulares. Na mensagem que fez o pedido, decide o que o robo registrou
+ * agora; nas seguintes, o historico (documentoEraNotaFiscal).
+ */
+export function motivoParaOsCelulares(p: {
+  motivo: string | null
+  motivoDaIA: string | null
+  /** O resultado desta mensagem pediu documento a equipe. */
+  documentoAgora: boolean
+  /** O robo registrou nota_fiscal_pedida nesta mensagem. */
+  notaFiscalAgora: boolean
+  /** Eventos recentes da conversa; so lidos quando a mensagem nao fez o pedido. */
+  eventos?: EventoDaConversa[] | null
+}): string | null {
+  if (p.motivo !== 'documento' || p.motivoDaIA) return p.motivo
+  const notaFiscal = p.documentoAgora ? p.notaFiscalAgora : documentoEraNotaFiscal(p.eventos ?? [])
+  return notaFiscal ? 'nota_fiscal' : p.motivo
 }
 
 

@@ -35,7 +35,7 @@ import {
 import { chaveDoWhatsApp } from '../_shared/whatsapp-teste.ts'
 import { montarAviso, motivoFinal, quemEscreveu } from '../_shared/aviso-da-equipe.ts'
 import { anexoQueVai, type AnexoParaEquipe } from '../_shared/anexo-para-equipe.ts'
-import { assuntoDoPedido, deveAlertar, deveEncaminhar, enviarAlertaDeUrgencia, lerNumeros as lerNumerosDoAlerta } from '../_shared/alerta-de-urgencia.ts'
+import { assuntoDoPedido, deveAlertar, deveEncaminhar, enviarAlertaDeUrgencia, lerNumeros as lerNumerosDoAlerta, motivoParaOsCelulares, type EventoDaConversa } from '../_shared/alerta-de-urgencia.ts'
 import { repassarRespostaDaFamilia, tratarRespostaDaEquipe, whatsAppPelaApi } from '../_shared/resposta-ao-alerta.ts'
 import { enviarDirect } from '../_shared/instagram-api.ts'
 import { avisarEquipe } from '../_shared/push-da-equipe.ts'
@@ -1509,6 +1509,9 @@ Deno.serve(async (req) => {
              * funcao sobe antes das migrations - isto falha, escreve um aviso
              * e a conversa segue inteira.
              */
+            // Antes de colher: depois disso o robo esquece. Separa a nota
+            // fiscal da 2a via no encaminhamento (ver motivoParaOsCelulares).
+            const notaFiscalAgora = roboRegistrou(conversation.id, 'nota_fiscal_pedida')
             try {
               const eventos = colherEventos(conversation.id)
               eventos.push(...eventosDaIA)
@@ -1606,7 +1609,35 @@ Deno.serve(async (req) => {
               // dipirona"), que diz mais do que a ultima mensagem ("e ai?").
               const motivoDaIA = /^equipe:(\w+)/.exec(eventosDaIA.find((e) => e.evento === 'ia_respondeu')?.detalhe ?? '')?.[1] ?? null
               const resumoDaIA = /Resumo da IA para a equipe: (?!\(sem resumo\))(.+)/s.exec(notaDaIA ?? '')?.[1]
-              await encaminharAosCelulares(motivoAgora, resumoDaIA || body, motivoDaIA)
+              // 2a via vai aos celulares, nota fiscal fica na Central (23/10/2026).
+              // Na mensagem seguinte a um pedido de documento, o historico da
+              // conversa diz qual foi; sem ler, conta como 2a via.
+              const documentoAgora = resultado?.atencao === 'documento'
+              let eventosDaConversa: EventoDaConversa[] | null = null
+              if (motivoAgora === 'documento' && !motivoDaIA && !documentoAgora) {
+                try {
+                  const { data, error } = await admin
+                    .from('whatsapp_bot_events')
+                    .select('evento,detalhe,criado_em')
+                    .eq('conversation_id', conversation.id)
+                    .in('evento', ['chamou_equipe', 'nota_fiscal_pedida'])
+                    .gte('criado_em', new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString())
+                    .order('criado_em', { ascending: false })
+                    .limit(30)
+                  if (error) throw error
+                  eventosDaConversa = (data ?? []) as EventoDaConversa[]
+                } catch (erro) {
+                  console.warn('Nao li os eventos da conversa; o documento conta como 2a via', erro)
+                }
+              }
+              const motivoDoPedido = motivoParaOsCelulares({
+                motivo: motivoAgora,
+                motivoDaIA,
+                documentoAgora,
+                notaFiscalAgora,
+                eventos: eventosDaConversa,
+              })
+              await encaminharAosCelulares(motivoDoPedido, resumoDaIA || body, motivoDaIA)
             } catch (erro) {
               console.warn('Notificacao no celular: nao consegui montar o aviso', erro)
             }
