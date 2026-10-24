@@ -444,6 +444,9 @@ export function soAgradecimento(texto: string): boolean {
     'grato', 'grata', 'certo', 'combinado', 'perfeito', 'entendi', 'ta', 'bom', 'otimo', 'muito',
     'pela', 'atencao', 'sim', 'tudo', 'bem', 'ate', 'mais', 'amanha', 'boa', 'noite', 'tarde', 'dia',
     'deus', 'abencoe', 'e', 'o', 'a', 'de', 'nada', 'show', 'maravilha', 'agradeco', 'mt', 'mto', 'td',
+    // 24/10/2026 (Lu Arnone): "Mas obrigada" depois de saber que nao ha
+    // convenio nao era fechamento, e a IA repetiu a explicacao do reembolso.
+    'mas', 'ah', 'entao',
   ])
   const palavras = t.split(/\s+/)
   // Precisa de UM agradecimento ou "ok" de verdade (25/09/2026): so com a

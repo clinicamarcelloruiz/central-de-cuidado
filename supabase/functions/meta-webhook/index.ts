@@ -42,10 +42,14 @@ import { avisarEquipe } from '../_shared/push-da-equipe.ts'
 import { origemDoAnuncio } from '../_shared/origem-do-anuncio.ts'
 import {
   ESPERA_MAXIMA_MS,
+  ESPERA_PELA_ANTERIOR_MS,
+  JANELA_DA_FILA_MS,
+  anteriorEmCurso,
   complementoDaRajada,
   precisaEsperar,
   qualquerMensagem,
   rajadaJaRespondida,
+  type EventoDeMensagem,
 } from '../_shared/rajada.ts'
 
 // O runtime das Edge Functions deixa terminar trabalho depois da resposta.
@@ -546,6 +550,33 @@ Deno.serve(async (req) => {
           // Em try/catch e com limite: a espera e cortesia. Se a consulta
           // falhar ou o tempo acabar, segue como antes - com aviso no log.
           let complementoDeRajada = false
+          // Antes de tudo, a fila (24/10/2026, ver anteriorEmCurso em
+          // _shared/rajada.ts): se a mensagem anterior desta pessoa ainda esta
+          // sendo atendida - mesmo antes de ser gravada -, esta espera ela
+          // terminar. A espera abaixo so enxerga mensagem ja gravada.
+          try {
+            const inicioDaFila = Date.now()
+            let esperou = false
+            while (Date.now() - inicioDaFila < ESPERA_PELA_ANTERIOR_MS) {
+              const { data: eventos, error: erroDaFila } = await admin
+                .from('whatsapp_webhook_events')
+                .select('id,event_key,concluded_at')
+                .eq('event_kind', 'message')
+                .eq('payload->change->value->messages->0->>from', String(message.from ?? ''))
+                .gte('processed_at', new Date(Date.now() - JANELA_DA_FILA_MS).toISOString())
+              if (erroDaFila) throw erroDaFila
+              const fila: EventoDeMensagem[] = ((eventos ?? []) as { id: number; event_key: string; concluded_at: string | null }[])
+                .map((e) => ({ id: Number(e.id), chave: String(e.event_key), concluidoEm: e.concluded_at }))
+              if (!anteriorEmCurso(fila, `message:${externalId}`)) break
+              esperou = true
+              await new Promise((ok) => setTimeout(ok, 500))
+            }
+            if (esperou && Date.now() - inicioDaFila >= ESPERA_PELA_ANTERIOR_MS) {
+              console.warn('Fila: a mensagem anterior desta pessoa nao terminou a tempo; seguindo assim mesmo', waId)
+            }
+          } catch (erro) {
+            console.warn('Fila: nao consegui conferir a mensagem anterior desta pessoa; seguindo sem esperar', erro)
+          }
           try {
             const { data: conversaDaRajada } = await admin
               .from('whatsapp_conversations')

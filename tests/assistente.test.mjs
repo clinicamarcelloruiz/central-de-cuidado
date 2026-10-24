@@ -2298,7 +2298,8 @@ confere('narracao: "voce recebe nesta conversa" fica', semNarracao('Quando o rel
 // chamar"; o 🥰 e o "Perfeito" ganharam, cada um, uma frase nova da IA.
 {
   const fechou = 'Que bom ter você por aqui, Vania! 💙 Quando decidir a unidade, é só me dizer que eu já vejo os horários para você.'
-  for (const t of ['🥰', 'Perfeito', 'ok obrigada', 'kkkk', '👍🏻']) {
+  // 'Mas obrigada': Lu Arnone, 24/10/2026 (recebeu a explicacao do reembolso de novo).
+  for (const t of ['🥰', 'Perfeito', 'ok obrigada', 'kkkk', '👍🏻', 'Mas obrigada', 'Ah, obrigada!']) {
     const c = claudeFalso([texto('Vania! Quando quiser, é só chamar. 💙')])
     const rd = roboDireto()
     const d = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: t, ultimaDoConsultorio: fechou }), ferramentas: ferramentasFalsas(), chamar: c.chamar, roboDireto: rd.fn })
@@ -2313,6 +2314,7 @@ confere('narracao: "voce recebe nesta conversa" fica', semNarracao('Quando o rel
   const d2 = await atenderComAssistente({ modo: 'ligado', situacao: situacao({ texto: 'Aceita pix?', ultimaDoConsultorio: fechou }), ferramentas: ferramentasFalsas(), chamar: c2.chamar, roboDireto: roboDireto().fn })
   confere('pergunta depois do fechamento: a IA responde', d2.resultado !== null && c2.chamadas.length === 1)
   confere('soFechamento nao pega frase com pedido', !soFechamento('Perfeito, quero marcar sexta') && !soFechamento('Ele ainda está com dor'))
+  confere('"mas" sozinho ou com pedido nao e fechamento', !soFechamento('Mas') && !soFechamento('Mas obrigada, e o valor?') && !soFechamento('Ah tá, mas quanto custa'))
 }
 
 // Real 23/10 (Kadu): "Eu nao passei em consulta" fica com o robo, que pede
